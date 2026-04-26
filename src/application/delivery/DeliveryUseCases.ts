@@ -1,13 +1,23 @@
 // Delivery flows — order assignment, status updates, online/offline toggle.
 
 import { db } from "@/lib/db";
-import { autoAssignDelivery } from "@/lib/delivery-assignment";
+import { autoAssignDelivery, assignPendingDeliveries } from "@/lib/delivery-assignment";
 
 export class DeliveryUseCases {
+  async assignPending(restaurantId: string) {
+    return assignPendingDeliveries(restaurantId);
+  }
   async setDriverOnline(staffId: string, online: boolean) {
     return db.staff.update({
       where: { id: staffId },
       data: { deliveryOnline: online },
+    });
+  }
+
+  async getDriverStatus(staffId: string) {
+    return db.staff.findUnique({
+      where: { id: staffId },
+      select: { id: true, deliveryOnline: true, role: true, active: true, restaurantId: true },
     });
   }
 

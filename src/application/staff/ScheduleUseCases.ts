@@ -1,5 +1,5 @@
 import { db } from "@/lib/db";
-import { syncTodaySchedule } from "@/lib/schedule-sync";
+import { syncTodaySchedule, invalidateScheduleSync } from "@/lib/schedule-sync";
 
 export class ScheduleUseCases {
   async list(restaurantId: string, from: Date, to: Date) {
@@ -24,6 +24,18 @@ export class ScheduleUseCases {
 
   async sync(restaurantId: string) {
     return syncTodaySchedule(restaurantId);
+  }
+
+  async forceSync(restaurantId: string) {
+    invalidateScheduleSync(restaurantId);
+    return syncTodaySchedule(restaurantId);
+  }
+
+  async resolveRestaurantId(id: string): Promise<string | null> {
+    if (!id) return null;
+    if (id.startsWith("c") && id.length > 10) return id;
+    const r = await db.restaurant.findUnique({ where: { slug: id }, select: { id: true } });
+    return r?.id || null;
   }
 
   /** Cashout — sum of cash payments by waiter for a shift window. */
