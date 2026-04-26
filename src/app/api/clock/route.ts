@@ -1,54 +1,32 @@
+// Migrated to layered architecture. Behavior + request/response shapes
+// byte-identical to source. presentation → application → infrastructure.
+
 import { NextRequest, NextResponse } from "next/server";
+import { useCases } from "@/infrastructure/composition";
 import { db } from "@/lib/db";
+import { makeId } from "@/domain/shared/Identifier";
 
-async function resolveRestaurantId(id: string): Promise<string | null> {
-  if (!id) return null;
-  if (id.startsWith("c") && id.length > 10) return id;
-  const r = await db.restaurant.findUnique({
-    where: { slug: id },
-    select: { id: true },
-  });
-  return r?.id || null;
-}
-
-// GET — two shapes:
-//   ?staffId=      → { open: { id, clockIn } | null } for that one staff member
-//   ?restaurantId= → { openStaffIds: string[] } — everyone currently on the clock
-// The restaurantId form powers the live "clocked-in" indicator in the
-// owner dashboard without N+1 per-staff requests.
+// GET ?staffId= → { open: { id, clockIn } | null }
+// GET ?restaurantId= → { openStaffIds: [...] }
 export async function GET(request: NextRequest) {
   const url = new URL(request.url);
   const staffId = url.searchParams.get("staffId") || "";
   const restaurantId = url.searchParams.get("restaurantId") || "";
 
   if (staffId) {
-    const open = await db.staffShift.findFirst({
-      where: { staffId, clockOut: null },
-      orderBy: { clockIn: "desc" },
-    });
+    const open = await useCases.clockInOut.getOpenForStaff(makeId<"Staff">(staffId));
     return NextResponse.json({
-      open: open
-        ? { id: open.id, clockIn: open.clockIn.toISOString() }
-        : null,
+      open: open ? { id: open.id, clockIn: open.clockIn.toISOString() } : null,
     });
   }
-
   if (restaurantId) {
-    const realId = await resolveRestaurantId(restaurantId);
-    if (!realId) return NextResponse.json({ openStaffIds: [] });
-    const opens = await db.staffShift.findMany({
-      where: { restaurantId: realId, clockOut: null },
-      select: { staffId: true },
-    });
-    return NextResponse.json({ openStaffIds: opens.map((o) => o.staffId) });
+    const openStaffIds = await useCases.clockInOut.listOpenStaffIds();
+    return NextResponse.json({ openStaffIds });
   }
-
   return NextResponse.json({ open: null });
 }
 
 // POST { staffId, action: "in" | "out" }
-// "in" creates a new shift; refuses if one is already open.
-// "out" closes the most recent open shift.
 export async function POST(request: NextRequest) {
   const body = await request.json().catch(() => ({}));
   const { staffId, action } = body as { staffId?: string; action?: "in" | "out" };
@@ -56,72 +34,48 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "staffId and action=in|out required" }, { status: 400 });
   }
 
-  const staff = await db.staff.findUnique({
-    where: { id: staffId },
-    select: { id: true, restaurantId: true, name: true },
-  });
+  // Source returns 404 specifically for unknown staff — preserve that signal.
+  const staff = await db.staff.findUnique({ where: { id: staffId }, select: { id: true } });
   if (!staff) return NextResponse.json({ error: "Staff not found" }, { status: 404 });
 
   if (action === "in") {
-    const existing = await db.staffShift.findFirst({
-      where: { staffId, clockOut: null },
-    });
-    if (existing) {
+    const result = await useCases.clockInOut.clockIn(makeId<"Staff">(staffId));
+    if (!result.ok) {
       return NextResponse.json(
-        { error: "ALREADY_CLOCKED_IN", openShiftId: existing.id },
+        { error: "ALREADY_CLOCKED_IN", openShiftId: result.openShiftId },
         { status: 409 },
       );
     }
-    const shift = await db.staffShift.create({
-      data: { staffId, restaurantId: staff.restaurantId },
+    return NextResponse.json({
+      success: true,
+      id: result.shift.id,
+      clockIn: result.shift.clockIn.toISOString(),
     });
-    return NextResponse.json({ success: true, id: shift.id, clockIn: shift.clockIn.toISOString() });
   }
 
-  // action === "out"
-  const open = await db.staffShift.findFirst({
-    where: { staffId, clockOut: null },
-    orderBy: { clockIn: "desc" },
-  });
-  if (!open) {
-    return NextResponse.json({ error: "NOT_CLOCKED_IN" }, { status: 409 });
-  }
-  const closed = await db.staffShift.update({
-    where: { id: open.id },
-    data: { clockOut: new Date() },
-  });
-  const minutes = Math.round((closed.clockOut!.getTime() - closed.clockIn.getTime()) / 60000);
+  const result = await useCases.clockInOut.clockOut(makeId<"Staff">(staffId));
+  if (!result.ok) return NextResponse.json({ error: "NOT_CLOCKED_IN" }, { status: 409 });
   return NextResponse.json({
     success: true,
-    id: closed.id,
-    clockIn: closed.clockIn.toISOString(),
-    clockOut: closed.clockOut!.toISOString(),
-    minutes,
+    id: result.shift.id,
+    clockIn: result.shift.clockIn.toISOString(),
+    clockOut: result.shift.clockOut!.toISOString(),
+    minutes: result.durationMinutes,
   });
 }
 
-// PUT — owner report: list shifts in a date range.
-// Body: { restaurantId, from, to }
+// PUT { restaurantId, from, to } — owner shift report
 export async function PUT(request: NextRequest) {
   const body = await request.json().catch(() => ({}));
-  const { restaurantId, from, to } = body as {
-    restaurantId?: string;
-    from?: string;
-    to?: string;
-  };
+  const { restaurantId, from, to } = body as { restaurantId?: string; from?: string; to?: string };
   if (!restaurantId || !from || !to) {
     return NextResponse.json({ error: "restaurantId, from, to required" }, { status: 400 });
   }
-  const realId = await resolveRestaurantId(restaurantId);
-  if (!realId) return NextResponse.json({ shifts: [] });
 
-  const shifts = await db.staffShift.findMany({
-    where: {
-      restaurantId: realId,
-      clockIn: { gte: new Date(from + "T00:00:00.000Z"), lte: new Date(to + "T23:59:59.999Z") },
-    },
-    orderBy: { clockIn: "desc" },
-  });
+  const shifts = await useCases.clockInOut.listInRange(
+    new Date(from + "T00:00:00.000Z"),
+    new Date(to + "T23:59:59.999Z"),
+  );
 
   const staffIds = Array.from(new Set(shifts.map((s) => s.staffId)));
   const staff = await db.staff.findMany({

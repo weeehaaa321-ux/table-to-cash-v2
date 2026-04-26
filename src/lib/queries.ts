@@ -234,7 +234,7 @@ export async function createOrder(data: {
   // SERIALIZABLE isolation would also work but forces clients to
   // retry on conflict; the advisory lock just queues briefly.
   const created = await db.$transaction(async (tx) => {
-    await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtextextended(${data.restaurantId}, 0))`;
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${data.restaurantId}, 0))`;
 
     const lastOrder = await tx.order.findFirst({
       where: { restaurantId: data.restaurantId },

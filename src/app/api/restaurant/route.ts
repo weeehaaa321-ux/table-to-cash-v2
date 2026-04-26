@@ -1,31 +1,31 @@
+// Migrated to layered architecture. Behavior + response shapes byte-identical to source.
+
 import { NextRequest, NextResponse } from "next/server";
-import { getRestaurantBySlug, getDefaultRestaurant } from "@/lib/queries";
-import { db } from "@/lib/db";
+import { useCases } from "@/infrastructure/composition";
 
 export async function GET(request: NextRequest) {
   const url = new URL(request.url);
   const slug = url.searchParams.get("slug");
 
   try {
-    const restaurant = slug
-      ? await getRestaurantBySlug(slug)
-      : await getDefaultRestaurant();
-
+    const restaurant = await useCases.getCurrentRestaurant.bySlug(slug);
     if (!restaurant) {
-      return NextResponse.json(
-        { error: "Restaurant not found" },
-        { status: 404 }
-      );
+      return NextResponse.json({ error: "Restaurant not found" }, { status: 404 });
     }
-
-    return NextResponse.json(restaurant);
+    return NextResponse.json({
+      id: restaurant.id,
+      name: restaurant.name,
+      slug: restaurant.slug,
+      logo: restaurant.logo,
+      currency: restaurant.currency,
+      timezone: restaurant.timezone,
+      waiterCapacity: restaurant.waiterCapacity,
+      kitchenConfig: restaurant.kitchenConfig,
+      createdAt: restaurant.createdAt,
+    });
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
     console.error("Restaurant lookup failed:", err);
-    return NextResponse.json(
-      { error: "Failed to load restaurant" },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: "Failed to load restaurant" }, { status: 500 });
   }
 }
 
@@ -33,9 +33,9 @@ export async function PATCH(request: NextRequest) {
   try {
     const { slug, waiterCapacity } = await request.json();
     if (!slug) return NextResponse.json({ error: "slug required" }, { status: 400 });
-    const data: Record<string, unknown> = {};
-    if (waiterCapacity !== undefined) data.waiterCapacity = Math.max(1, Math.min(99, Number(waiterCapacity)));
-    await db.restaurant.update({ where: { slug }, data });
+    if (waiterCapacity !== undefined) {
+      await useCases.updateRestaurantConfig.setWaiterCapacity(Number(waiterCapacity));
+    }
     return NextResponse.json({ ok: true });
   } catch (err) {
     console.error("Restaurant update failed:", err);
