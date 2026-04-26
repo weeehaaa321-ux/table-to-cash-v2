@@ -19,6 +19,7 @@ import { ClockInOutUseCase } from "@/application/staff/ClockInOutUseCase";
 import {
   GetCurrentRestaurantUseCase,
   UpdateRestaurantConfigUseCase,
+  TableManagementUseCase,
 } from "@/application/restaurant";
 import { SendMessageUseCase, PollMessagesUseCase } from "@/application/messaging";
 import { SubmitRatingUseCase } from "@/application/rating";
@@ -38,6 +39,7 @@ export const useCases = {
   clockInOut: new ClockInOutUseCase(shiftRepo, clock),
   getCurrentRestaurant: new GetCurrentRestaurantUseCase(restaurantRepo),
   updateRestaurantConfig: new UpdateRestaurantConfigUseCase(restaurantRepo),
+  tableManagement: new TableManagementUseCase(restaurantRepo),
   sendMessage: new SendMessageUseCase(messageRepo),
   pollMessages: new PollMessagesUseCase(messageRepo),
   submitRating: new SubmitRatingUseCase(ratingRepo),

@@ -161,14 +161,14 @@ Priority order favors low-risk slices first to validate the architecture, then p
 | # | Slice | Risk | Status | Characterization tests | Verified |
 |---|---|---|---|---|---|
 | 1a | `/api/health` + `/api/version` | 🟢 | 🟦 strangler-copy | ⬜ | ⬜ |
-| 1b | `/api/clock` (clock-in/out, 4 HTTP methods) | 🟡 | 🟦 strangler-copy | ⬜ | ⬜ |
+| 1b | `/api/clock` (clock-in/out, 4 HTTP methods) | 🟡 | ✅ migrated | ⬜ | ⬜ |
 | 2 | `/marketing` (static pages) | 🟢 | 🟦 strangler-copy | ⬜ | ⬜ |
 | 3 | `/api/menu` (read-only public) + `/menu` page | 🟡 | 🟦 strangler-copy | ⬜ | ⬜ |
 | 4 | `/scan` + `/track` (guest read-only) | 🟢 | 🟦 strangler-copy | ⬜ | ⬜ |
-| 5 | `/api/ratings` + rating UI | 🟢 | 🟦 strangler-copy | ⬜ | ⬜ |
-| 6 | `/api/messages` | 🟡 | 🟦 strangler-copy | ⬜ | ⬜ |
-| 7 | `/api/restaurant` (config read) | 🟡 | 🟦 strangler-copy | ⬜ | ⬜ |
-| 8 | `/api/tables` (CRUD) + table mgmt UI | 🟡 | 🟦 strangler-copy | ⬜ | ⬜ |
+| 5 | `/api/ratings` + rating UI | 🟢 | ✅ migrated | ⬜ | ⬜ |
+| 6 | `/api/messages` | 🟡 | ✅ migrated (push still legacy) | ⬜ | ⬜ |
+| 7 | `/api/restaurant` (config read) | 🟡 | ✅ migrated | ⬜ | ⬜ |
+| 8 | `/api/tables` (CRUD) + table mgmt UI | 🟡 | ✅ migrated | ⬜ | ⬜ |
 | 9 | `/api/menu-admin` + admin menu UI | 🟡 | 🟦 strangler-copy | ⬜ | ⬜ |
 | 10 | `/api/staff` + `/api/shifts` + `/api/schedule` | 🔴 | 🟦 strangler-copy | ⬜ | ⬜ |
 | 11 | `/waiter` + auth flow | 🟡 | 🟦 strangler-copy | ⬜ | ⬜ |
