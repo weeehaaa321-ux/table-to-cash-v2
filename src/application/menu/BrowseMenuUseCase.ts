@@ -41,7 +41,7 @@ export class BrowseMenuUseCase {
           .map((item) => ({
             item,
             addOns: addOnsByItem.get(item.id) ?? [],
-            isVisibleNow: item.isVisibleAt(hour, asWindow(category)),
+            isVisibleNow: item.isVisibleAt(hour, category.getAvailability()),
           }));
         return { category, items };
       });
@@ -59,34 +59,4 @@ export class BrowseMenuUseCase {
 
     return { categories: filtered };
   }
-}
-
-// Helper: extract a Category's TimeOfDayWindow without exposing the
-// internals on the entity. The Category exposes `isAvailableAt(hour)`
-// directly, but MenuItem.isVisibleAt needs the window object — so
-// reconstruct it from the category's own check by probing.
-//
-// We could expose a `.window` getter on Category. For now, a
-// minimal-impact helper keeps the Category surface tight and
-// keeps MenuItem.isVisibleAt's type signature unchanged.
-function asWindow(category: Category) {
-  // 24-hour probe builds a window-like object whose includes() returns
-  // category.isAvailableAt(h). Used only in this file.
-  return {
-    includes(h: number): boolean {
-      return category.isAvailableAt(h);
-    },
-    includesUnderBoth(other: { includes(h: number): boolean }, h: number): boolean {
-      return this.includes(h) && other.includes(h);
-    },
-    isAlways(): boolean {
-      return this.includes(0) && this.includes(12);
-    },
-    getFromHour(): number | null {
-      return null;
-    },
-    getToHour(): number | null {
-      return null;
-    },
-  };
 }

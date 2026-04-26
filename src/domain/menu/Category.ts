@@ -69,4 +69,9 @@ export class Category {
   isAvailableAt(hourOfDay: number): boolean {
     return this.availability.includes(hourOfDay);
   }
+
+  /** Direct access to this category's time-of-day window (used by item visibility checks). */
+  getAvailability(): TimeOfDayWindow {
+    return this.availability;
+  }
 }

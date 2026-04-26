@@ -69,9 +69,7 @@ export class Order {
     public readonly updatedAt: Date,
   ) {}
 
-  static rehydrate(props: ConstructorParameters<typeof Order>[0] extends never
-    ? never
-    : OrderProps): Order {
+  static rehydrate(props: OrderProps): Order {
     return new Order(
       props.id,
       props.orderNumber,

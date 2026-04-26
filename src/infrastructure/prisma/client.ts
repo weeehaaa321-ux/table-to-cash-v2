@@ -9,19 +9,8 @@
 // "@prisma/client" directly.
 // ─────────────────────────────────────────────────────────────────
 
-import { PrismaClient } from "@/generated/prisma";
-
-declare global {
-  // eslint-disable-next-line no-var
-  var __prismaClient: PrismaClient | undefined;
-}
-
-function build(): PrismaClient {
-  return new PrismaClient({
-    log: process.env.NODE_ENV === "development" ? ["error", "warn"] : ["error"],
-  });
-}
-
-export const db: PrismaClient =
-  globalThis.__prismaClient ??
-  (process.env.NODE_ENV === "production" ? build() : (globalThis.__prismaClient = build()));
+// Re-export from the legacy `src/lib/db.ts` so v2 infrastructure code
+// shares one Prisma instance with the strangler-pattern legacy code.
+// When `src/lib/db.ts` is fully retired (Phase 7 cutover), this file
+// inlines its body and the legacy file deletes.
+export { db } from "@/lib/db";

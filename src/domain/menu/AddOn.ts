@@ -1,8 +1,8 @@
 import type { Identifier } from "../shared/Identifier";
 import { Money } from "../shared/Money";
+import type { MenuItemId } from "./MenuItem";
 
 export type AddOnId = Identifier<"AddOn">;
-export type MenuItemId = Identifier<"MenuItem">;
 
 /**
  * AddOn — an optional extra attached to a MenuItem (e.g. extra shot,
