@@ -1,12 +1,11 @@
 import type { OrderRepository } from "../ports/OrderRepository";
 import type { MenuRepository } from "../ports/MenuRepository";
 import type { Clock } from "../ports/Clock";
-import { Money, sumMoney } from "@/domain/shared/Money";
+import { Money } from "@/domain/shared/Money";
 import { Order } from "@/domain/order/Order";
 import { OrderItem } from "@/domain/order/OrderItem";
-import type { OrderId, OrderProps } from "@/domain/order/Order";
-import type { OrderItemId } from "@/domain/order/OrderItem";
-import type { OrderType, PaymentMethod } from "@/domain/order/enums";
+import type { OrderProps } from "@/domain/order/Order";
+import type { OrderType } from "@/domain/order/enums";
 import type { TableId } from "@/domain/restaurant/Table";
 import { makeId } from "@/domain/shared/Identifier";
 

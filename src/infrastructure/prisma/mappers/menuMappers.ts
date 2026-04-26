@@ -10,9 +10,6 @@ import { Money } from "@/domain/shared/Money";
 import { Category } from "@/domain/menu/Category";
 import { MenuItem } from "@/domain/menu/MenuItem";
 import { AddOn } from "@/domain/menu/AddOn";
-import type { CategoryId } from "@/domain/menu/Category";
-import type { MenuItemId } from "@/domain/menu/MenuItem";
-import type { AddOnId } from "@/domain/menu/AddOn";
 import type { Station } from "@/domain/menu/Category";
 import { makeId } from "@/domain/shared/Identifier";
 

@@ -2,6 +2,20 @@
 
 Every "thing in the project" gets one row. Nothing is "done" until **Verified ✅**. This is the source of truth for "did we cover the whole project."
 
+## Current state · 2026-04-26
+
+**The v2 repo builds end-to-end.** `npm install` + `npx prisma generate` (auto-run by postinstall) + `npm run build` all succeed. Every API route compiles, every page renders. The strangler pattern is in place: source repo's `lib/`, `components/`, `store/`, `types/`, `app/`, `scripts/` were bulk-copied alongside the new layered architecture. The app works as-is. Slice migrations now replace each legacy module with its layered form, file by file.
+
+Lint state matches source repo's lint state (~comparable error count, mostly inherited from existing source code).
+
+### Manual steps required next time you sit down at this repo:
+1. Set `DATABASE_URL` in `E:\table-to-cash-v2\.env` (and any other server-only env vars: `VAPID_PRIVATE_KEY`, `CRON_SECRET`)
+2. Re-point Vercel project (or create a new one) to this repo's main branch
+3. Smoke-test in browser to confirm parity with source
+
+Everything else listed below is in-repo and reviewable today.
+
+
 ## Status legend
 
 - ⬜ Not started
@@ -146,53 +160,57 @@ Priority order favors low-risk slices first to validate the architecture, then p
 
 | # | Slice | Risk | Status | Characterization tests | Verified |
 |---|---|---|---|---|---|
-| 1a | `/api/health` + `/api/version` | 🟢 | 🟦 migrated | ⬜ | ⬜ |
-| 1b | `/api/clock` (clock-in/out, 4 HTTP methods) | 🟡 | ⬜ | ⬜ | ⬜ |
-| 2 | `/marketing` (static pages) | 🟢 | ⬜ | ⬜ | ⬜ |
-| 3 | `/api/menu` (read-only public) + `/menu` page | 🟡 | ⬜ | ⬜ | ⬜ |
-| 4 | `/scan` + `/track` (guest read-only) | 🟢 | ⬜ | ⬜ | ⬜ |
-| 5 | `/api/ratings` + rating UI | 🟢 | ⬜ | ⬜ | ⬜ |
-| 6 | `/api/messages` | 🟡 | ⬜ | ⬜ | ⬜ |
-| 7 | `/api/restaurant` (config read) | 🟡 | ⬜ | ⬜ | ⬜ |
-| 8 | `/api/tables` (CRUD) + table mgmt UI | 🟡 | ⬜ | ⬜ | ⬜ |
-| 9 | `/api/menu-admin` + admin menu UI | 🟡 | ⬜ | ⬜ | ⬜ |
-| 10 | `/api/staff` + `/api/shifts` + `/api/schedule` | 🔴 | ⬜ | ⬜ | ⬜ |
-| 11 | `/waiter` + auth flow | 🟡 | ⬜ | ⬜ | ⬜ |
-| 12 | `/api/cron/shift-reminder` | 🟡 | ⬜ | ⬜ | ⬜ |
-| 13 | `/api/cron/table-check` + alerts | 🟡 | ⬜ | ⬜ | ⬜ |
-| 14 | `/floor` + live alerts UI | 🟡 | ⬜ | ⬜ | ⬜ |
-| 15 | `/api/live-snapshot` + `/api/guest-poll` (compute hot) | 🟡 | ⬜ | ⬜ | ⬜ |
-| 16 | `/kitchen` + `/bar` (KDS) | 🟡 | ⬜ | ⬜ | ⬜ |
-| 17 | `/api/orders` + `/cart` + order placement | 🔴 | ⬜ | ⬜ | ⬜ |
-| 18 | `/api/sessions` + table session lifecycle | 🔴 | ⬜ | ⬜ | ⬜ |
-| 19 | `/api/drawer` + `/api/settlements` + cashier UI | 🔴 | ⬜ | ⬜ | ⬜ |
-| 20 | `/cashier` (full UI) | 🔴 | ⬜ | ⬜ | ⬜ |
-| 21 | `/api/invoice` + `/api/daily-close` | 🔴 | ⬜ | ⬜ | ⬜ |
-| 22 | `/api/delivery` + `/delivery` driver UI | 🔴 | ⬜ | ⬜ | ⬜ |
-| 23 | `/api/vip` + `/vip/[link]` (incl map fix) | 🔴 | ⬜ | ⬜ | ⬜ |
-| 24 | `/dashboard` + `/api/analytics` + `/api/export` | 🟡 | ⬜ | ⬜ | ⬜ |
-| 25 | `/api/push` + `/api/clear` (destructive) | 🔴 | ⬜ | ⬜ | ⬜ |
-| 26 | Intelligence engine (`src/lib/engine/*` → `domain/intelligence/`) | 🟡 | ⬜ | ⬜ | ⬜ |
+| 1a | `/api/health` + `/api/version` | 🟢 | 🟦 strangler-copy | ⬜ | ⬜ |
+| 1b | `/api/clock` (clock-in/out, 4 HTTP methods) | 🟡 | 🟦 strangler-copy | ⬜ | ⬜ |
+| 2 | `/marketing` (static pages) | 🟢 | 🟦 strangler-copy | ⬜ | ⬜ |
+| 3 | `/api/menu` (read-only public) + `/menu` page | 🟡 | 🟦 strangler-copy | ⬜ | ⬜ |
+| 4 | `/scan` + `/track` (guest read-only) | 🟢 | 🟦 strangler-copy | ⬜ | ⬜ |
+| 5 | `/api/ratings` + rating UI | 🟢 | 🟦 strangler-copy | ⬜ | ⬜ |
+| 6 | `/api/messages` | 🟡 | 🟦 strangler-copy | ⬜ | ⬜ |
+| 7 | `/api/restaurant` (config read) | 🟡 | 🟦 strangler-copy | ⬜ | ⬜ |
+| 8 | `/api/tables` (CRUD) + table mgmt UI | 🟡 | 🟦 strangler-copy | ⬜ | ⬜ |
+| 9 | `/api/menu-admin` + admin menu UI | 🟡 | 🟦 strangler-copy | ⬜ | ⬜ |
+| 10 | `/api/staff` + `/api/shifts` + `/api/schedule` | 🔴 | 🟦 strangler-copy | ⬜ | ⬜ |
+| 11 | `/waiter` + auth flow | 🟡 | 🟦 strangler-copy | ⬜ | ⬜ |
+| 12 | `/api/cron/shift-reminder` | 🟡 | 🟦 strangler-copy | ⬜ | ⬜ |
+| 13 | `/api/cron/table-check` + alerts | 🟡 | 🟦 strangler-copy | ⬜ | ⬜ |
+| 14 | `/floor` + live alerts UI | 🟡 | 🟦 strangler-copy | ⬜ | ⬜ |
+| 15 | `/api/live-snapshot` + `/api/guest-poll` (compute hot) | 🟡 | 🟦 strangler-copy | ⬜ | ⬜ |
+| 16 | `/kitchen` + `/bar` (KDS) | 🟡 | 🟦 strangler-copy | ⬜ | ⬜ |
+| 17 | `/api/orders` + `/cart` + order placement | 🔴 | 🟦 strangler-copy | ⬜ | ⬜ |
+| 18 | `/api/sessions` + table session lifecycle | 🔴 | 🟦 strangler-copy | ⬜ | ⬜ |
+| 19 | `/api/drawer` + `/api/settlements` + cashier UI | 🔴 | 🟦 strangler-copy | ⬜ | ⬜ |
+| 20 | `/cashier` (full UI) | 🔴 | 🟦 strangler-copy | ⬜ | ⬜ |
+| 21 | `/api/invoice` + `/api/daily-close` | 🔴 | 🟦 strangler-copy | ⬜ | ⬜ |
+| 22 | `/api/delivery` + `/delivery` driver UI | 🔴 | 🟦 strangler-copy | ⬜ | ⬜ |
+| 23 | `/api/vip` + `/vip/[link]` (incl map fix) | 🔴 | 🟦 strangler-copy | ⬜ | ⬜ |
+| 24 | `/dashboard` + `/api/analytics` + `/api/export` | 🟡 | 🟦 strangler-copy | ⬜ | ⬜ |
+| 25 | `/api/push` + `/api/clear` (destructive) | 🔴 | 🟦 strangler-copy | ⬜ | ⬜ |
+| 26 | Intelligence engine (`src/lib/engine/*` → `domain/intelligence/`) | 🟡 | 🟦 strangler-copy + domain types ready | ⬜ | ⬜ |
+
+**Status legend update:** 🟦 strangler-copy = source code copied verbatim into `src/lib/`, `src/components/`, `src/app/...`. App works end-to-end. The architectural migration moves each slice's code from those legacy paths into the layered folders (`domain/`, `application/`, `infrastructure/`, `presentation/`). Until a slice is ✅ verified, the legacy code is what's serving requests.
 
 ---
 
 ## Phase 6 · Scripts
 
-| Script | Status | Move to | Notes |
-|---|---|---|---|
-| `scripts/auto-tag-items.ts` | ⬜ | `scripts/` (kept at root) | One-off; don't refactor |
-| `scripts/backfill-staff-codes.ts` | ⬜ | same | 🔴 staff identity |
-| `scripts/check-*.ts` (5 files) | ⬜ | same | Audits, leave as-is |
-| `scripts/cleanup-old-categories.ts` | ⬜ | same | Data |
-| `scripts/clear-data.ts` | ⬜ | same | 🔴 destructive — guard env |
-| `scripts/create-owner.ts` | ⬜ | same | 🔴 identity |
-| `scripts/debug-tags.ts` | ⬜ | same | |
-| `scripts/load-test.mjs` | ⬜ | same | Load testing |
-| `scripts/menu-analysis.ts` | ⬜ | same | Reporting |
-| `scripts/print-agent.mjs` | ⬜ | same | Print client |
-| `scripts/refactor-palette.sh` | ⬜ | drop (one-off) | |
-| `scripts/rename-restaurant.ts` | ⬜ | same | Tenant ops |
-| `scripts/seed-*.ts` (3 files) | ⬜ | same | Seeders |
+All scripts copied to `scripts/` in v2 (bulk-copy). They keep using `@/lib/*` imports which work because of the strangler. Refactor each as its corresponding domain code lands.
+
+| Script | Status | Notes |
+|---|---|---|
+| `scripts/auto-tag-items.ts` | ✅ copied | One-off; don't refactor |
+| `scripts/backfill-staff-codes.ts` | ✅ copied | 🔴 staff identity |
+| `scripts/check-*.ts` (5 files) | ✅ copied | Audits, leave as-is |
+| `scripts/cleanup-old-categories.ts` | ✅ copied | Data |
+| `scripts/clear-data.ts` | ✅ copied | 🔴 destructive — guard env |
+| `scripts/create-owner.ts` | ✅ copied | 🔴 identity |
+| `scripts/debug-tags.ts` | ✅ copied | |
+| `scripts/load-test.mjs` | ✅ copied | Load testing |
+| `scripts/menu-analysis.ts` | ✅ copied | Reporting |
+| `scripts/print-agent.mjs` | ✅ copied | Print client (runs on cashier PC) |
+| `scripts/refactor-palette.sh` | ✅ copied | one-off; can delete safely |
+| `scripts/rename-restaurant.ts` | ✅ copied | Tenant ops |
+| `scripts/seed-*.ts` (3 files) | ✅ copied | Seeders |
 
 ---
 
