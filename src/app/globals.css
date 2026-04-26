@@ -1,0 +1,457 @@
+@import "tailwindcss";
+
+/* ═══════════════════════════════════════════
+   TABLE-TO-CASH DESIGN SYSTEM
+   Beach Club Luxury Aesthetic
+   ═══════════════════════════════════════════ */
+
+@theme inline {
+  /* Sand & Ocean palette */
+  --color-sand-50: #fefdfb;
+  --color-sand-100: #fdf8f0;
+  --color-sand-200: #f5ead6;
+  --color-sand-300: #e8d5b3;
+  --color-sand-400: #d4b896;
+  --color-sand-500: #c19b6e;
+  --color-sand-600: #a07d54;
+  --color-sand-700: #7d6142;
+  --color-sand-800: #5c4730;
+  --color-sand-900: #3d2f20;
+
+  --color-ocean-50: #f0f9ff;
+  --color-ocean-100: #dff1ff;
+  --color-ocean-200: #b8e2ff;
+  --color-ocean-300: #7ccbff;
+  --color-ocean-400: #36b0ff;
+  --color-ocean-500: #0c93f0;
+  --color-ocean-600: #0074cc;
+  --color-ocean-700: #005ca5;
+  --color-ocean-800: #034d88;
+  --color-ocean-900: #083f70;
+
+  --color-coral-50: #fff5f2;
+  --color-coral-100: #ffe8e0;
+  --color-coral-200: #ffc9b8;
+  --color-coral-300: #ffa085;
+  --color-coral-400: #ff7b5c;
+  --color-coral-500: #f05a3c;
+  --color-coral-600: #d6411e;
+  --color-coral-700: #b23316;
+  --color-coral-800: #932c16;
+  --color-coral-900: #7a2918;
+
+  --color-sunset-400: #ffb347;
+  --color-sunset-500: #ff9500;
+
+  /* ── STATUS TOKENS ─────────────────────────────────
+     Full 10-stop ramps so the whole app can speak one
+     visual language. Hues sampled from Tailwind's
+     emerald/amber/rose/violet/sky so swapping from raw
+     Tailwind to `status-*` is a pure rename with zero
+     visual change. See the refactor commit for rules. */
+
+  /* good — emerald family (confirmed, success, eating/served) */
+  --color-status-good-50:  #ecfdf5;
+  --color-status-good-100: #d1fae5;
+  --color-status-good-200: #a7f3d0;
+  --color-status-good-300: #6ee7b7;
+  --color-status-good-400: #34d399;
+  --color-status-good-500: #10b981;
+  --color-status-good-600: #059669;
+  --color-status-good-700: #047857;
+  --color-status-good-800: #065f46;
+  --color-status-good-900: #064e3b;
+
+  /* warn — amber family (pending, ordered, caution) */
+  --color-status-warn-50:  #fffbeb;
+  --color-status-warn-100: #fef3c7;
+  --color-status-warn-200: #fde68a;
+  --color-status-warn-300: #fcd34d;
+  --color-status-warn-400: #fbbf24;
+  --color-status-warn-500: #f59e0b;
+  --color-status-warn-600: #d97706;
+  --color-status-warn-700: #b45309;
+  --color-status-warn-800: #92400e;
+  --color-status-warn-900: #78350f;
+
+  /* bad — rose family (critical, destructive, paying/stuck) */
+  --color-status-bad-50:   #fff1f2;
+  --color-status-bad-100:  #ffe4e6;
+  --color-status-bad-200:  #fecdd3;
+  --color-status-bad-300:  #fda4af;
+  --color-status-bad-400:  #fb7185;
+  --color-status-bad-500:  #f43f5e;
+  --color-status-bad-600:  #e11d48;
+  --color-status-bad-700:  #be123c;
+  --color-status-bad-800:  #9f1239;
+  --color-status-bad-900:  #881337;
+
+  /* wait — violet family (waiting-bill, in-progress, VIP) */
+  --color-status-wait-50:  #f5f3ff;
+  --color-status-wait-100: #ede9fe;
+  --color-status-wait-200: #ddd6fe;
+  --color-status-wait-300: #c4b5fd;
+  --color-status-wait-400: #a78bfa;
+  --color-status-wait-500: #8b5cf6;
+  --color-status-wait-600: #7c3aed;
+  --color-status-wait-700: #6d28d9;
+  --color-status-wait-800: #5b21b6;
+  --color-status-wait-900: #4c1d95;
+
+  /* info — sky family (seated, browsing, neutral-positive) */
+  --color-status-info-50:  #f0f9ff;
+  --color-status-info-100: #e0f2fe;
+  --color-status-info-200: #bae6fd;
+  --color-status-info-300: #7dd3fc;
+  --color-status-info-400: #38bdf8;
+  --color-status-info-500: #0ea5e9;
+  --color-status-info-600: #0284c7;
+  --color-status-info-700: #0369a1;
+  --color-status-info-800: #075985;
+  --color-status-info-900: #0c4a6e;
+
+  /* Semantic */
+  --color-surface: #fefdfb;
+  --color-surface-glass: rgba(255, 253, 251, 0.72);
+  --color-text-primary: #2d1f11;
+  --color-text-secondary: #7d6142;
+  --color-text-muted: #a89880;
+  --color-accent: #0c93f0;
+  --color-success: #22c55e;
+  --color-warning: #ff9500;
+
+  /* Typography */
+  --font-display: "Inter", "SF Pro Display", system-ui, sans-serif;
+  --font-body: "Inter", "SF Pro Text", system-ui, sans-serif;
+  --font-sans: var(--font-body);
+
+  /* Shadows */
+  --shadow-glass: 0 8px 32px rgba(45, 31, 17, 0.08);
+  --shadow-card: 0 2px 12px rgba(45, 31, 17, 0.06);
+  --shadow-elevated: 0 12px 40px rgba(45, 31, 17, 0.12);
+  --shadow-glow: 0 0 20px rgba(12, 147, 240, 0.15);
+
+  /* Radius */
+  --radius-card: 1.25rem;
+  --radius-button: 0.875rem;
+  --radius-pill: 9999px;
+}
+
+/* ── Base ───────────────────────────────── */
+
+:root {
+  --background: #fefdfb;
+  --foreground: #2d1f11;
+  -webkit-tap-highlight-color: transparent;
+}
+
+* {
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+html {
+  scroll-behavior: smooth;
+  overflow-x: hidden;
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-body);
+  min-height: 100dvh;
+  overscroll-behavior-y: contain;
+}
+
+/* ── Glassmorphism ─────────────────────── */
+
+.glass {
+  background: var(--color-surface-glass);
+  backdrop-filter: blur(20px) saturate(1.8);
+  -webkit-backdrop-filter: blur(20px) saturate(1.8);
+  border: 1px solid rgba(255, 255, 255, 0.4);
+  box-shadow: var(--shadow-glass);
+}
+
+.glass-strong {
+  background: rgba(255, 253, 251, 0.88);
+  backdrop-filter: blur(40px) saturate(2);
+  -webkit-backdrop-filter: blur(40px) saturate(2);
+  border: 1px solid rgba(255, 255, 255, 0.6);
+  box-shadow: var(--shadow-elevated);
+}
+
+/* ── Gradient Backgrounds ──────────────── */
+
+.bg-beach {
+  background: linear-gradient(
+    180deg,
+    #fdf8f0 0%,
+    #fefdfb 30%,
+    #f0f9ff 100%
+  );
+}
+
+.bg-sunset {
+  background: linear-gradient(
+    135deg,
+    #fff5f2 0%,
+    #fdf8f0 40%,
+    #dff1ff 100%
+  );
+}
+
+/* ── Premium Button ────────────────────── */
+
+.btn-primary {
+  background: linear-gradient(135deg, #0c93f0 0%, #0074cc 100%);
+  color: white;
+  border-radius: var(--radius-button);
+  font-weight: 600;
+  padding: 0.875rem 1.5rem;
+  transition: all 0.2s ease;
+  box-shadow: 0 4px 14px rgba(12, 147, 240, 0.3);
+}
+
+.btn-primary:active {
+  transform: scale(0.97);
+  box-shadow: 0 2px 8px rgba(12, 147, 240, 0.2);
+}
+
+.btn-coral {
+  background: linear-gradient(135deg, #ff7b5c 0%, #f05a3c 100%);
+  color: white;
+  border-radius: var(--radius-button);
+  font-weight: 600;
+  padding: 0.875rem 1.5rem;
+  transition: all 0.2s ease;
+  box-shadow: 0 4px 14px rgba(240, 90, 60, 0.3);
+}
+
+.btn-coral:active {
+  transform: scale(0.97);
+}
+
+/* ── Card Styles ───────────────────────── */
+
+.card-luxury {
+  background: white;
+  border-radius: var(--radius-card);
+  box-shadow: var(--shadow-card);
+  overflow: hidden;
+  transition: box-shadow 0.3s ease;
+}
+
+.card-luxury:active {
+  box-shadow: var(--shadow-elevated);
+}
+
+/* ── Scrollbar ─────────────────────────── */
+
+::-webkit-scrollbar {
+  display: none;
+}
+
+* {
+  scrollbar-width: none;
+}
+
+/* ── Badge ─────────────────────────────── */
+
+.badge-bestseller {
+  background: linear-gradient(135deg, #ff9500 0%, #ffb347 100%);
+  color: white;
+  font-size: 0.7rem;
+  font-weight: 700;
+  padding: 0.2rem 0.6rem;
+  border-radius: var(--radius-pill);
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+
+.badge-promo {
+  background: linear-gradient(135deg, #ff7b5c 0%, #f05a3c 100%);
+  color: white;
+  font-size: 0.7rem;
+  font-weight: 700;
+  padding: 0.2rem 0.6rem;
+  border-radius: var(--radius-pill);
+  letter-spacing: 0.03em;
+}
+
+/* ── Animations ────────────────────────── */
+
+@keyframes slide-up {
+  from {
+    transform: translateY(100%);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+@keyframes fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes pulse-gentle {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.7; }
+}
+
+.animate-slide-up {
+  animation: slide-up 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.animate-fade-in {
+  animation: fade-in 0.3s ease;
+}
+
+/* ═══════════════════════════════════════
+   OWNER CONTROL SYSTEM — Dark Cinematic
+   Bloomberg Terminal + Luxury Beach Club
+   ═══════════════════════════════════════ */
+
+.bg-control {
+  background: linear-gradient(135deg, #0a0e17 0%, #0f1521 40%, #111927 100%);
+}
+
+.surface-dark {
+  background: rgba(15, 21, 33, 0.85);
+  backdrop-filter: blur(24px) saturate(1.6);
+  -webkit-backdrop-filter: blur(24px) saturate(1.6);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.surface-card {
+  background: rgba(17, 25, 39, 0.9);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 1rem;
+}
+
+.surface-card-hover {
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+.surface-card-hover:hover {
+  border-color: rgba(255, 255, 255, 0.12);
+  box-shadow: 0 0 24px rgba(12, 147, 240, 0.08);
+}
+
+/* Glowing accents */
+.glow-blue { box-shadow: 0 0 20px rgba(12, 147, 240, 0.2), inset 0 1px 0 rgba(255,255,255,0.05); }
+.glow-green { box-shadow: 0 0 20px rgba(34, 197, 94, 0.2), inset 0 1px 0 rgba(255,255,255,0.05); }
+.glow-coral { box-shadow: 0 0 20px rgba(240, 90, 60, 0.2), inset 0 1px 0 rgba(255,255,255,0.05); }
+.glow-amber { box-shadow: 0 0 20px rgba(255, 149, 0, 0.2), inset 0 1px 0 rgba(255,255,255,0.05); }
+
+.text-glow-blue { text-shadow: 0 0 20px rgba(12, 147, 240, 0.4); }
+.text-glow-green { text-shadow: 0 0 20px rgba(34, 197, 94, 0.4); }
+
+/* Animated gradient border */
+@keyframes border-glow {
+  0%, 100% { border-color: rgba(12, 147, 240, 0.3); }
+  50% { border-color: rgba(12, 147, 240, 0.6); }
+}
+.animate-border-glow {
+  animation: border-glow 2s ease-in-out infinite;
+}
+
+/* Pulse ring for live indicators */
+@keyframes pulse-ring {
+  0% { box-shadow: 0 0 0 0 rgba(34, 197, 94, 0.5); }
+  70% { box-shadow: 0 0 0 6px rgba(34, 197, 94, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(34, 197, 94, 0); }
+}
+.animate-pulse-ring {
+  animation: pulse-ring 2s ease-in-out infinite;
+}
+
+@keyframes pulse-ring-coral {
+  0% { box-shadow: 0 0 0 0 rgba(240, 90, 60, 0.5); }
+  70% { box-shadow: 0 0 0 6px rgba(240, 90, 60, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(240, 90, 60, 0); }
+}
+.animate-pulse-ring-coral {
+  animation: pulse-ring-coral 1.5s ease-in-out infinite;
+}
+
+/* Revenue counter shimmer */
+@keyframes shimmer {
+  0% { background-position: -200% center; }
+  100% { background-position: 200% center; }
+}
+.text-shimmer {
+  background: linear-gradient(90deg, #e0e7ff 0%, #60a5fa 50%, #e0e7ff 100%);
+  background-size: 200% auto;
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: shimmer 3s linear infinite;
+}
+
+/* Grid pattern overlay */
+.grid-pattern {
+  background-image:
+    linear-gradient(rgba(255,255,255,0.02) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255,255,255,0.02) 1px, transparent 1px);
+  background-size: 40px 40px;
+}
+
+/* Scan line effect */
+@keyframes scan-line {
+  0% { top: -5%; }
+  100% { top: 105%; }
+}
+.scan-line::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, rgba(12, 147, 240, 0.15), transparent);
+  animation: scan-line 8s linear infinite;
+  pointer-events: none;
+}
+
+/* ── Desktop scaling ──────────────────────
+   The app is mobile-first; on laptop/desktop at 100% browser zoom it
+   renders tiny. Zoom up the visual layout without changing breakpoints
+   that would flip pages into mobile mode. Breakpoints kick in at
+   physical widths where `lg:` (1024 logical) still activates after zoom.
+   ═════════════════════════════════════════ */
+
+@media (min-width: 1280px) {
+  html { zoom: 1.12; }
+}
+
+@media (min-width: 1600px) {
+  html { zoom: 1.2; }
+}
+
+@media (min-width: 1920px) {
+  html { zoom: 1.3; }
+}
+
+/* ── Utility ───────────────────────────── */
+
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
+.text-balance {
+  text-wrap: balance;
+}
+
+.safe-top {
+  padding-top: env(safe-area-inset-top, 0px);
+}
+
+.safe-bottom {
+  padding-bottom: env(safe-area-inset-bottom, 0.5rem);
+}

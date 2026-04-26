@@ -1,0 +1,12 @@
+{
+  "crons": [
+    {
+      "path": "/api/cron/shift-reminder",
+      "schedule": "*/30 * * * *"
+    },
+    {
+      "path": "/api/cron/table-check",
+      "schedule": "* * * * *"
+    }
+  ]
+}

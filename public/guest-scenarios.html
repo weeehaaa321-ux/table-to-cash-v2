@@ -1,0 +1,306 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Guest Scenarios — table-to-cash</title>
+<style>
+  :root {
+    --bg: #0f1115;
+    --panel: #171a21;
+    --border: #262a33;
+    --text: #e8ecf1;
+    --muted: #8b93a5;
+    --ok: #22c55e;
+    --warn: #f59e0b;
+    --block: #ef4444;
+    --accent: #60a5fa;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; background: var(--bg); color: var(--text); font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, system-ui, sans-serif; }
+  header { padding: 24px 32px; border-bottom: 1px solid var(--border); display: flex; align-items: baseline; gap: 16px; flex-wrap: wrap; }
+  header h1 { margin: 0; font-size: 20px; font-weight: 700; letter-spacing: -0.01em; }
+  header p { margin: 0; color: var(--muted); font-size: 13px; }
+  .legend { display: flex; gap: 14px; margin-left: auto; font-size: 12px; }
+  .legend span { display: inline-flex; align-items: center; gap: 6px; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+  .dot.ok { background: var(--ok); } .dot.warn { background: var(--warn); } .dot.block { background: var(--block); }
+  .toolbar { padding: 12px 32px; border-bottom: 1px solid var(--border); display: flex; gap: 8px; }
+  .toolbar button { background: var(--panel); color: var(--text); border: 1px solid var(--border); padding: 6px 12px; border-radius: 6px; font: inherit; cursor: pointer; }
+  .toolbar button:hover { border-color: var(--accent); color: var(--accent); }
+  main { padding: 24px 32px 80px; max-width: 1200px; margin: 0 auto; }
+  .node { margin: 4px 0; }
+  .node-head { display: flex; align-items: flex-start; gap: 8px; padding: 8px 10px; border: 1px solid var(--border); background: var(--panel); border-radius: 6px; cursor: pointer; user-select: none; }
+  .node-head:hover { border-color: var(--accent); }
+  .node-head.leaf { cursor: default; }
+  .twist { color: var(--muted); font-size: 11px; width: 14px; flex-shrink: 0; text-align: center; line-height: 1.5; }
+  .node-label { flex: 1; }
+  .node-label .title { font-weight: 600; }
+  .node-label .note { color: var(--muted); font-size: 12px; margin-top: 4px; }
+  .node-label .note code { background: #0a0c10; padding: 1px 5px; border-radius: 3px; font-size: 11px; color: #c3cbda; }
+  .badge { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; padding: 3px 7px; border-radius: 3px; flex-shrink: 0; }
+  .badge.ok { background: rgba(34,197,94,0.15); color: var(--ok); border: 1px solid rgba(34,197,94,0.3); }
+  .badge.warn { background: rgba(245,158,11,0.15); color: var(--warn); border: 1px solid rgba(245,158,11,0.3); }
+  .badge.block { background: rgba(239,68,68,0.15); color: var(--block); border: 1px solid rgba(239,68,68,0.3); }
+  .children { margin-left: 22px; border-left: 1px dashed var(--border); padding-left: 12px; margin-top: 2px; }
+  .children.collapsed { display: none; }
+  .root > .node-head { background: #1e2430; border-color: var(--accent); }
+  footer { color: var(--muted); font-size: 12px; padding: 0 32px 40px; max-width: 1200px; margin: 0 auto; }
+</style>
+</head>
+<body>
+<header>
+  <div>
+    <h1>Guest Scenarios — table-to-cash</h1>
+    <p>Every branch a guest can take from "walks into the cafe" to "leaves." Status reflects what the codebase actually supports today.</p>
+  </div>
+  <div class="legend">
+    <span><i class="dot ok"></i> Supported</span>
+    <span><i class="dot warn"></i> Partial / manual</span>
+    <span><i class="dot block"></i> Not supported</span>
+  </div>
+</header>
+<div class="toolbar">
+  <button onclick="expandAll()">Expand all</button>
+  <button onclick="collapseAll()">Collapse all</button>
+  <button onclick="expandStatus('block')">Show blockers</button>
+  <button onclick="expandStatus('warn')">Show partials</button>
+</div>
+<main id="tree"></main>
+<footer>
+  Flows verified against <code>prisma/schema.prisma</code>, <code>src/app/api/**</code>, and the <code>/menu</code>, <code>/cart</code>, <code>/waiter</code>, <code>/cashier</code>, <code>/vip</code> pages on 2026-04-15.
+  Leaves labelled "Partial" generally mean the data model exists but a piece of UX or integration is manual. "Blocked" means no code path.
+</footer>
+<script>
+const TREE = {
+  title: "Guest walks into the cafe",
+  children: [
+    {
+      title: "Dine-in — wants a table",
+      children: [
+        {
+          title: "Has a reservation",
+          status: "block",
+          note: "No reservation model exists. Schema has <code>Table</code>, <code>TableSession</code>, but no <code>Reservation</code>. Host would have to manage this on paper."
+        },
+        {
+          title: "Walks up, wants any open table",
+          children: [
+            {
+              title: "Host / waiter seats them at Table N",
+              note: "Physical action. App has no seating state — <code>TableSession</code> starts only when an order is placed or a QR is scanned.",
+              children: [
+                {
+                  title: "Guest scans QR on the table",
+                  note: "Handled by <code>/scan</code> → sets session cookie → <code>/menu?table=N</code>.",
+                  children: [
+                    {
+                      title: "Browses menu, adds items, places order",
+                      status: "ok",
+                      note: "<code>POST /api/orders</code> creates <code>Order</code> with orderType=TABLE. Kitchen + waiter apps pick it up via polling."
+                    },
+                    {
+                      title: "Wants to split order into multiple rounds",
+                      status: "ok",
+                      note: "Each submit creates a new Order in the same <code>TableSession</code>. Cashier sees all rounds together at payment."
+                    },
+                    {
+                      title: "Leaves mid-browse without ordering",
+                      status: "warn",
+                      note: "Session lingers as OPEN with no orders. No auto-cleanup cron. Dashboard shows it as an empty occupied table until a waiter manually closes it."
+                    },
+                    {
+                      title: "Cart lost because phone refreshed / died",
+                      status: "block",
+                      note: "<code>src/store/cart.ts</code> persists only the <code>sessionId</code>, not the cart items. Guest must rebuild the cart. Known issue from earlier audit."
+                    }
+                  ]
+                },
+                {
+                  title: "Guest ignores QR, calls a waiter",
+                  note: "Waiter opens <code>/waiter</code>, creates order on guest's behalf.",
+                  children: [
+                    { title: "Waiter takes order via app", status: "ok", note: "Same POST /api/orders path, just initiated from <code>/waiter</code>." },
+                    { title: "Guest wants to modify order after submit", status: "warn", note: "Comp/cancel exists (<code>/api/orders/[orderId]/items/[itemId]</code>), but no 'add to existing order' — waiter creates a new order in same session." }
+                  ]
+                },
+                {
+                  title: "Guest calls waiter via app button",
+                  status: "ok",
+                  note: "<code>POST /api/messages</code> with <code>command:\"call_waiter\"</code> → push to assigned waiter (or fallback to all WAITER role)."
+                }
+              ]
+            },
+            {
+              title: "Ordering flow — kitchen side",
+              children: [
+                { title: "Kitchen sees ticket, prepares, marks READY", status: "ok", note: "<code>/kitchen</code> polls orders. Status transitions PENDING → PREPARING → READY → SERVED." },
+                { title: "Item is out of stock", status: "block", note: "No stock tracking on <code>MenuItem</code>. Kitchen must tell waiter verbally; owner then hides item via Menu tab. Flagged as Critical in earlier audit." },
+                { title: "Thermal printer offline", status: "warn", note: "Local ESC/POS agent (<code>scripts/print-agent.mjs</code>). If offline, order still saves to DB, kitchen screen still shows it. No alert surfaced." }
+              ]
+            },
+            {
+              title: "Payment — guest asks for bill",
+              children: [
+                {
+                  title: "Pays with CASH",
+                  status: "ok",
+                  note: "Cashier opens drawer with float (<code>/api/drawer</code>), confirms payment (<code>PATCH /api/sessions/pay</code>), closes at end of shift with counted count. Variance tracked."
+                },
+                {
+                  title: "Pays with CARD",
+                  status: "warn",
+                  note: "PaymentMethod CARD exists in enum but no gateway integration. Cashier manually confirms after external card machine approves."
+                },
+                {
+                  title: "Pays with INSTAPAY / Apple / Google Pay",
+                  status: "warn",
+                  note: "Same as card — enum values exist, confirmation is manual."
+                },
+                {
+                  title: "Wants to split bill between guests",
+                  status: "block",
+                  note: "No per-guest split on a session. Cashier can only record one PaymentMethod per round. Bill-splitting happens off-app."
+                },
+                {
+                  title: "Wants separate receipts per item",
+                  status: "block",
+                  note: "Invoice endpoint (<code>/api/invoice</code>) prints per-session totals. No per-item or per-guest receipt split."
+                },
+                {
+                  title: "Adds a tip",
+                  status: "ok",
+                  note: "Captured per payment round. But: no server-side cap — typo risk (flagged in earlier audit)."
+                },
+                {
+                  title: "Asks for a comp / free item (complaint)",
+                  status: "ok",
+                  note: "Comp flow exists with reason + audit fields (commit 3619668). Separate from cancel so reporting distinguishes waste from waste-with-intent."
+                },
+                {
+                  title: "Paid, then wants a refund / reversal",
+                  status: "warn",
+                  note: "<code>/api/sessions/pay/reverse</code> reverses the last round. Partial refund (one item only) is not modeled."
+                },
+                {
+                  title: "Walks out without paying",
+                  status: "block",
+                  note: "No walk-out / unpaid-leave state. Session stays OPEN indefinitely; appears in daily-close as unpaid. Manager has no 'write off' action."
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      title: "Takeaway — order to-go at the counter",
+      status: "block",
+      note: "No TAKEAWAY value in <code>OrderType</code> enum (only TABLE, VIP_DINE_IN, DELIVERY). Cashier could reuse the TABLE flow on a dummy table, but there's no printed pickup ticket, no guest name, no ready-for-pickup state."
+    },
+    {
+      title: "Delivery — walks in to arrange a delivery",
+      children: [
+        {
+          title: "Existing VIP guest places an order",
+          status: "ok",
+          note: "VIP token page (<code>/vip/[token]/track</code>) creates orderType=DELIVERY tied to the VipGuest."
+        },
+        {
+          title: "One-off guest, not a VIP",
+          status: "warn",
+          note: "Creating a delivery order requires a guest identity. Owner dashboard can create a VIP on the fly, then place the order. No 'anonymous walk-in delivery' flow."
+        },
+        {
+          title: "Driver marks delivered → auto-PAID",
+          status: "warn",
+          note: "Flagged in earlier audit: if paymentMethod is set but no actual payment was verified, order flips to PAID. Revenue leak risk."
+        }
+      ]
+    },
+    {
+      title: "VIP / room-service guest",
+      children: [
+        { title: "Has a VIP token link", status: "ok", note: "<code>/vip/[token]/track</code> resolves the guest, shows their menu and active orders." },
+        { title: "Token lost / expired", status: "warn", note: "Owner regenerates from VIP tab. Guest experience is 'ask the concierge' — no self-recovery." },
+        { title: "Wants to pay on property charge", status: "block", note: "No room-charge / house-account PaymentMethod. Must use one of cash/card/wallet." }
+      ]
+    },
+    {
+      title: "Special cases",
+      children: [
+        { title: "Guest wants the Wi-Fi password", status: "block", note: "Not in app. Could live in a future 'guest info' panel on /menu." },
+        { title: "Guest leaves a rating", status: "ok", note: "<code>Rating</code> model + endpoint. Surfaced in analytics." },
+        { title: "Guest asks about allergens / ingredients", status: "warn", note: "Menu items have description + tags but no structured allergen field. Waiter-dependent." },
+        { title: "Guest wants to book the cafe for an event", status: "block", note: "No reservation / event model." },
+        { title: "Large group needs one bill, one tip", status: "ok", note: "Single session, all orders rolled up at checkout — this is the default path." },
+        { title: "Guest argues about a charge (dispute)", status: "warn", note: "Comp + reverse-payment cover it, but there's no dispute record — just the audit trail of the reversal." }
+      ]
+    }
+  ]
+};
+
+const tree = document.getElementById("tree");
+
+function renderNode(node, depth = 0) {
+  const wrap = document.createElement("div");
+  wrap.className = "node" + (depth === 0 ? " root" : "");
+  const head = document.createElement("div");
+  head.className = "node-head" + (node.children ? "" : " leaf");
+  const twist = document.createElement("span");
+  twist.className = "twist";
+  twist.textContent = node.children ? "▼" : "•";
+  head.appendChild(twist);
+  const label = document.createElement("div");
+  label.className = "node-label";
+  const title = document.createElement("div");
+  title.className = "title";
+  title.textContent = node.title;
+  label.appendChild(title);
+  if (node.note) {
+    const note = document.createElement("div");
+    note.className = "note";
+    note.innerHTML = node.note;
+    label.appendChild(note);
+  }
+  head.appendChild(label);
+  if (node.status) {
+    const badge = document.createElement("span");
+    badge.className = "badge " + node.status;
+    badge.textContent = node.status === "ok" ? "Supported" : node.status === "warn" ? "Partial" : "Blocked";
+    head.appendChild(badge);
+  }
+  wrap.appendChild(head);
+
+  if (node.children) {
+    const kids = document.createElement("div");
+    kids.className = "children";
+    node.children.forEach((c) => kids.appendChild(renderNode(c, depth + 1)));
+    wrap.appendChild(kids);
+    head.addEventListener("click", () => kids.classList.toggle("collapsed"));
+  }
+  return wrap;
+}
+
+tree.appendChild(renderNode(TREE));
+
+function expandAll() {
+  document.querySelectorAll(".children").forEach((c) => c.classList.remove("collapsed"));
+}
+function collapseAll() {
+  document.querySelectorAll(".root > .children").forEach((c) => { /* keep root */ });
+  document.querySelectorAll(".children").forEach((c, i) => { if (i > 0) c.classList.add("collapsed"); });
+}
+function expandStatus(status) {
+  collapseAll();
+  document.querySelectorAll(".badge." + status).forEach((b) => {
+    let p = b.parentElement;
+    while (p && p.id !== "tree") {
+      if (p.classList.contains("children")) p.classList.remove("collapsed");
+      p = p.parentElement;
+    }
+  });
+}
+</script>
+</body>
+</html>

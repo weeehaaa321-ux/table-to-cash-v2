@@ -1,0 +1,504 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model Restaurant {
+  id        String   @id @default(cuid())
+  name      String
+  slug      String   @unique
+  logo      String?
+  currency  String   @default("EGP")
+  timezone  String   @default("Africa/Cairo")
+  tables    Table[]
+  categories Category[]
+  orders    Order[]
+  promos    Promo[]
+  staff     Staff[]
+  sessions  TableSession[]
+  messages  Message[]
+  pushSubs  PushSubscription[]
+  settlements CashSettlement[]
+  drawers    CashDrawer[]
+  ratings   Rating[]
+  vipGuests VipGuest[]
+  schedules ShiftSchedule[]
+  kitchenConfig    Json?
+  waiterCapacity   Int      @default(15)
+  createdAt        DateTime @default(now())
+}
+
+model Table {
+  id           String     @id @default(cuid())
+  number       Int
+  label        String?
+  qrCode       String?
+  restaurant   Restaurant @relation(fields: [restaurantId], references: [id])
+  restaurantId String
+  orders       Order[]
+  sessions     TableSession[]
+
+  @@unique([restaurantId, number])
+}
+
+model Category {
+  id           String     @id @default(cuid())
+  name         String
+  nameAr       String?
+  nameRu       String?
+  slug         String
+  sortOrder    Int        @default(0)
+  icon         String?
+  station      Station    @default(KITCHEN)
+  // Category-wide time-of-day availability (Cairo local hours, 0-23).
+  // When null, items in this category are always available unless they
+  // set their own hours. When set, items inherit these hours unless
+  // overridden at the item level. Scales the breakfast-hours use case
+  // across many menu items without touching each row.
+  availableFromHour Int?
+  availableToHour   Int?
+  restaurant   Restaurant @relation(fields: [restaurantId], references: [id])
+  restaurantId String
+  items        MenuItem[]
+
+  @@unique([restaurantId, slug])
+}
+
+model MenuItem {
+  id          String   @id @default(cuid())
+  name        String
+  nameAr      String?
+  nameRu      String?
+  description String?
+  descAr      String?
+  descRu      String?
+  price       Decimal  @db.Decimal(10, 2)
+  image       String?
+  available   Boolean  @default(true)
+  bestSeller  Boolean  @default(false)
+  highMargin  Boolean  @default(false)
+  calories    Int?
+  prepTime    Int?
+  sortOrder   Int      @default(0)
+  // Time-of-day availability (Cairo local hours, 0-23). When both are
+  // null the item is always available. When set, the item is hidden
+  // from the guest menu outside [from, to). Used for breakfast etc.
+  availableFromHour Int?
+  availableToHour   Int?
+  category    Category @relation(fields: [categoryId], references: [id])
+  categoryId  String
+  addOns      AddOn[]
+  pairsWith   String[] // IDs of items that pair well (upsell)
+  tags        String[] // e.g. ["spicy", "vegan", "gluten-free"]
+  orderItems  OrderItem[]
+  views       Int      @default(0)
+  createdAt   DateTime @default(now())
+
+  @@index([categoryId])
+}
+
+model AddOn {
+  id         String   @id @default(cuid())
+  name       String
+  price      Decimal  @db.Decimal(10, 2)
+  menuItem   MenuItem @relation(fields: [menuItemId], references: [id], onDelete: Cascade)
+  menuItemId String
+
+  @@index([menuItemId])
+}
+
+model Order {
+  id           String      @id @default(cuid())
+  orderNumber  Int
+  status       OrderStatus @default(PENDING)
+  table        Table?      @relation(fields: [tableId], references: [id])
+  tableId      String?
+  restaurant   Restaurant  @relation(fields: [restaurantId], references: [id])
+  restaurantId String
+  session      TableSession? @relation(fields: [sessionId], references: [id])
+  sessionId    String?
+  items        OrderItem[]
+  subtotal     Decimal     @db.Decimal(10, 2)
+  tax          Decimal     @default(0) @db.Decimal(10, 2)
+  total        Decimal     @db.Decimal(10, 2)
+  tip          Decimal     @default(0) @db.Decimal(10, 2)
+  // Flat delivery fee bundled into `total`. Stored separately so the
+  // receipt / driver UI / cashier ledger can show the breakdown
+  // without each surface re-deriving it from the orderType + a magic
+  // constant. 0 for non-delivery orders.
+  deliveryFee  Decimal     @default(0) @db.Decimal(10, 2)
+  paymentMethod PaymentMethod?
+  paidAt       DateTime?
+  readyAt      DateTime?
+  servedAt     DateTime?
+  notes        String?
+  guestNumber  Int?
+  language     String      @default("en")
+  station      Station     @default(KITCHEN)
+  groupId      String?
+  clientRequestId String?  @unique
+  orderType    OrderType   @default(TABLE)
+  vipGuest     VipGuest?   @relation(fields: [vipGuestId], references: [id])
+  vipGuestId   String?
+  deliveryAddress String?
+  deliveryLat    Float?
+  deliveryLng    Float?
+  deliveryNotes  String?
+  deliveryStatus DeliveryStatus?
+  deliveryDriver Staff?    @relation("DeliveryDriver", fields: [deliveryDriverId], references: [id])
+  deliveryDriverId String?
+  pickedUpAt   DateTime?
+  deliveredAt  DateTime?
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
+
+  @@index([groupId])
+  @@index([restaurantId, status])
+  @@index([restaurantId, createdAt])
+  @@index([tableId])
+  @@index([sessionId])
+  @@index([vipGuestId])
+  @@index([deliveryDriverId, deliveryStatus])
+}
+
+model OrderItem {
+  id           String   @id @default(cuid())
+  quantity     Int      @default(1)
+  price        Decimal  @db.Decimal(10, 2)
+  addOns       String[]
+  notes        String?
+  menuItem     MenuItem? @relation(fields: [menuItemId], references: [id], onDelete: SetNull)
+  menuItemId   String?
+  order        Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  orderId      String
+  wasUpsell    Boolean  @default(false)
+  cancelled    Boolean  @default(false)
+  cancelReason String?
+  cancelledAt  DateTime?
+  comped       Boolean  @default(false)
+  compReason   String?
+  compedBy     String?   // Staff.id of whoever authorised the comp
+  compedAt     DateTime?
+
+  @@index([orderId])
+  @@index([menuItemId])
+}
+
+model Promo {
+  id           String     @id @default(cuid())
+  title        String
+  description  String?
+  type         PromoType
+  // PERCENTAGE: 0–100 (interpreted as percent). FIXED: EGP off.
+  // BUNDLE / HAPPY_HOUR: type-specific. Decimal lets all four share
+  // the column without losing precision on percentages.
+  value        Decimal    @db.Decimal(10, 2)
+  startHour    Int?
+  endHour      Int?
+  active       Boolean    @default(true)
+  restaurant   Restaurant @relation(fields: [restaurantId], references: [id])
+  restaurantId String
+  itemIds      String[]
+  createdAt    DateTime   @default(now())
+}
+
+model Staff {
+  id              String     @id @default(cuid())
+  name            String
+  code            String?    // Short unique per-restaurant code (e.g. WAI-482) to disambiguate duplicate names. Null for OWNER rows.
+  pin             String
+  role            StaffRole  @default(WAITER)
+  active          Boolean    @default(true)
+  shift           Int        @default(0) // 0=unassigned, 1=00:00-08:00, 2=08:00-16:00, 3=16:00-00:00 Cairo time
+  deliveryOnline  Boolean    @default(false) // Delivery drivers: true = accepting orders
+  restaurant      Restaurant @relation(fields: [restaurantId], references: [id])
+  restaurantId    String
+  sessions        TableSession[]
+  pushSubs        PushSubscription[]
+  settlementsAsWaiter  CashSettlement[] @relation("SettlementWaiter")
+  settlementsAsCashier CashSettlement[] @relation("SettlementCashier")
+  drawers              CashDrawer[]
+  deliveries      Order[]    @relation("DeliveryDriver")
+  schedules       ShiftSchedule[]
+  createdAt       DateTime   @default(now())
+
+  @@unique([restaurantId, code])
+  @@index([restaurantId])
+}
+
+model ShiftSchedule {
+  id           String     @id @default(cuid())
+  staff        Staff      @relation(fields: [staffId], references: [id], onDelete: Cascade)
+  staffId      String
+  date         DateTime   @db.Date
+  shift        Int
+  restaurant   Restaurant @relation(fields: [restaurantId], references: [id])
+  restaurantId String
+  createdAt    DateTime   @default(now())
+
+  @@unique([staffId, date])
+  @@index([restaurantId, date])
+}
+
+model TableSession {
+  id           String        @id @default(cuid())
+  table        Table?        @relation(fields: [tableId], references: [id])
+  tableId      String?
+  restaurant   Restaurant    @relation(fields: [restaurantId], references: [id])
+  restaurantId String
+  status       SessionStatus @default(OPEN)
+  guestType    String        @default("walkin")
+  roomNumber   String?
+  guestCount   Int           @default(1)
+  waiter       Staff?        @relation(fields: [waiterId], references: [id], onDelete: SetNull)
+  waiterId     String?
+  orders       Order[]
+  rating       Rating?
+  joinRequests JoinRequest[]
+  orderType    OrderType     @default(TABLE)
+  vipGuest     VipGuest?     @relation(fields: [vipGuestId], references: [id])
+  vipGuestId   String?
+  openedAt     DateTime      @default(now())
+  menuOpenedAt DateTime?
+  closedAt     DateTime?
+
+  @@index([restaurantId, status])
+  @@index([tableId, status])
+  @@index([waiterId])
+  @@index([vipGuestId])
+}
+
+model Rating {
+  id           String       @id @default(cuid())
+  session      TableSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  sessionId    String       @unique
+  restaurant   Restaurant   @relation(fields: [restaurantId], references: [id])
+  restaurantId String
+  food         Int          @default(0)
+  service      Int          @default(0)
+  hygiene      Int          @default(0)
+  comment      String?
+  createdAt    DateTime     @default(now())
+}
+
+enum SessionStatus {
+  OPEN
+  CLOSED
+}
+
+enum OrderStatus {
+  PENDING
+  CONFIRMED
+  PREPARING
+  READY
+  SERVED
+  PAID
+  CANCELLED
+}
+
+enum PaymentMethod {
+  CASH
+  CARD
+  INSTAPAY
+  APPLE_PAY
+  GOOGLE_PAY
+}
+
+enum PromoType {
+  PERCENTAGE
+  FIXED
+  BUNDLE
+  HAPPY_HOUR
+}
+
+model Message {
+  id           String     @id @default(cuid())
+  type         String     // "alert" | "voice" | "command"
+  from         String     // "owner" or staff id
+  to           String     // "all" | "kitchen" | staff id
+  text         String?
+  audio        String?    // base64 encoded audio data URL
+  tableId      Int?
+  orderId      String?
+  command      String?    // "send_waiter" | "prioritize" | "push_menu"
+  restaurant   Restaurant @relation(fields: [restaurantId], references: [id])
+  restaurantId String
+  createdAt    DateTime   @default(now())
+
+  @@index([restaurantId, type])
+}
+
+model PushSubscription {
+  id           String     @id @default(cuid())
+  endpoint     String     @unique
+  p256dh       String
+  auth         String
+  staffId      String?
+  role         String?
+  restaurant   Restaurant @relation(fields: [restaurantId], references: [id])
+  restaurantId String
+  staff        Staff?     @relation(fields: [staffId], references: [id], onDelete: SetNull)
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+
+  @@index([staffId])
+  @@index([restaurantId])
+}
+
+enum StaffRole {
+  OWNER
+  FLOOR_MANAGER
+  WAITER
+  KITCHEN
+  BAR
+  CASHIER
+  DELIVERY
+}
+
+enum OrderType {
+  TABLE
+  VIP_DINE_IN
+  DELIVERY
+}
+
+enum DeliveryStatus {
+  ASSIGNED
+  PICKED_UP
+  ON_THE_WAY
+  DELIVERED
+}
+
+model VipGuest {
+  id           String     @id @default(cuid())
+  name         String
+  phone        String
+  address      String?
+  addressNotes String?
+  locationLat  Float?
+  locationLng  Float?
+  linkToken    String     @unique @default(cuid())
+  active       Boolean    @default(true)
+  restaurant   Restaurant @relation(fields: [restaurantId], references: [id])
+  restaurantId String
+  sessions     TableSession[]
+  orders       Order[]
+  createdAt    DateTime   @default(now())
+
+  @@unique([restaurantId, phone])
+}
+
+enum Station {
+  KITCHEN
+  BAR
+}
+
+model CashSettlement {
+  id           String     @id @default(cuid())
+  amount       Decimal    @db.Decimal(10, 2)
+  status       SettlementStatus @default(REQUESTED)
+  waiter       Staff      @relation("SettlementWaiter", fields: [waiterId], references: [id])
+  waiterId     String
+  cashier      Staff      @relation("SettlementCashier", fields: [cashierId], references: [id])
+  cashierName  String?
+  cashierId    String
+  restaurant   Restaurant @relation(fields: [restaurantId], references: [id])
+  restaurantId String
+  requestedAt  DateTime   @default(now())
+  acceptedAt   DateTime?
+  confirmedAt  DateTime?
+
+  @@index([restaurantId, status])
+  @@index([waiterId, status])
+  @@index([cashierId, status])
+}
+
+enum SettlementStatus {
+  REQUESTED
+  ACCEPTED
+  CONFIRMED
+  REJECTED
+}
+
+model JoinRequest {
+  id           String       @id @default(cuid())
+  session      TableSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  sessionId    String
+  guestId      String
+  status       JoinStatus   @default(PENDING)
+  createdAt    DateTime     @default(now())
+
+  @@index([sessionId, status])
+  @@index([sessionId, guestId])
+}
+
+enum JoinStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+// End-of-day snapshot. One row per restaurant per business day.
+// Written by the owner (or a designated closer) via the "Close day"
+// button on the dashboard. Stores the computed totals as a frozen
+// JSON blob so later DB edits can't silently rewrite history.
+model DailyClose {
+  id            String   @id @default(cuid())
+  restaurantId  String
+  // Business date this close represents (Cairo local day), stored as
+  // midnight-local-converted-to-UTC so @db.Date stays unambiguous.
+  date          DateTime @db.Date
+  closedAt      DateTime @default(now())
+  closedById    String?  // Staff.id
+  closedByName  String?
+  // Snapshot of computed totals at close time. Shape:
+  //   { revenue, orders, cash, card, instapay, comped, cancelled,
+  //     guests, sessions, byWaiter: [...] }
+  totals        Json
+  notes         String?
+
+  @@unique([restaurantId, date])
+  @@index([restaurantId, closedAt])
+}
+
+// Per-staff clock in / clock out. One row = one work interval.
+// clockOut is null while the staff member is currently on shift.
+// Separate from ShiftSchedule — that's the *planned* roster,
+// this is what actually happened.
+model StaffShift {
+  id           String    @id @default(cuid())
+  staffId      String
+  restaurantId String
+  clockIn      DateTime  @default(now())
+  clockOut     DateTime?
+  notes        String?
+
+  @@index([staffId, clockIn])
+  @@index([restaurantId, clockIn])
+}
+
+// Cashier cash drawer. One row per "drawer session" — opened when the
+// cashier starts their shift with a physical opening float, closed when
+// they count out at the end. Expected cash at close = openingFloat +
+// sum(cash orders paid between openedAt and closedAt). Variance is
+// closingCount - expectedCash; negative = short, positive = over.
+model CashDrawer {
+  id            String     @id @default(cuid())
+  restaurant    Restaurant @relation(fields: [restaurantId], references: [id])
+  restaurantId  String
+  cashier       Staff      @relation(fields: [cashierId], references: [id])
+  cashierId     String
+  openedAt      DateTime   @default(now())
+  closedAt      DateTime?
+  openingFloat  Decimal    @db.Decimal(10, 2)
+  closingCount  Decimal?   @db.Decimal(10, 2)
+  expectedCash  Decimal?   @db.Decimal(10, 2)
+  variance      Decimal?   @db.Decimal(10, 2)
+  notes         String?
+
+  @@index([restaurantId, openedAt])
+  @@index([cashierId, openedAt])
+}
