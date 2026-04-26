@@ -26,6 +26,18 @@ const eslintConfig = defineConfig([
     "build/**",
     "next-env.d.ts",
     "src/generated/**",
+    // ─── Legacy paths (strangler pattern) ─────────────────────────
+    // These directories hold code copied verbatim from the source
+    // repo to keep the app working end-to-end while slice-by-slice
+    // architectural migration proceeds. Each migrated slice REMOVES
+    // its files from these paths and adds them to the layered
+    // structure (domain/application/infrastructure/presentation).
+    // Layer-boundary lint rules don't apply to legacy paths until
+    // they're moved out.
+    "src/lib/**",
+    "src/components/**",
+    "src/store/**",
+    "src/types/**",
   ]),
   // Domain: may import nothing outside itself.
   {

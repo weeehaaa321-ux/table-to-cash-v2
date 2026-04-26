@@ -1,0 +1,1460 @@
+"use client";
+
+import { useEffect, useState, useCallback, useRef } from "react";
+import { motion, AnimatePresence } from "framer-motion";
+import { useLanguage } from "@/lib/use-language";
+import { LanguageToggle } from "@/components/ui/LanguageToggle";
+import { getShiftTimer, getShiftLabel, getCurrentShift } from "@/lib/shifts";
+import SchedulePopup from "@/components/ui/SchedulePopup";
+import { ClockButton } from "@/components/ui/ClockButton";
+import { requestNotificationPermission } from "@/lib/notifications";
+import { startPoll } from "@/lib/polling";
+import { useCashierReliability } from "@/lib/use-cashier-reliability";
+import { getOrderLabel } from "@/lib/order-label";
+import { staffFetch } from "@/lib/staff-fetch";
+import { DrawerPanel } from "@/components/cashier/DrawerPanel";
+
+// ═══════════════════════════════════════════════
+// TYPES
+// ═══════════════════════════════════════════════
+
+type LoggedInStaff = { id: string; name: string; role: string; shift: number };
+
+type PaidRoundInfo = {
+  index: number;
+  paidAt: string;
+  paymentMethod: string | null;
+  subtotal: number;
+  orderCount: number;
+};
+
+type SessionInfo = {
+  id: string;
+  tableNumber: number | null;
+  orderType?: string;
+  vipGuestName?: string | null;
+  guestCount: number;
+  waiterId?: string;
+  waiterName?: string;
+  status: string;
+  orderTotal?: number;
+  // What the cashier still needs to collect on this session. Excludes
+  // any order already settled in a prior round, so follow-up orders
+  // after a first-round payment are charged as a delta, not re-added
+  // on top of the gross total.
+  unpaidTotal?: number;
+  cashTotal?: number;
+  paymentReceived?: boolean;
+  // Settlement history — one entry per prior paidAt. Drives the
+  // "Paid so far: 200 CASH · 150 CARD" strip and round labels on
+  // the confirm modal and buttons. Empty on first-time payers.
+  paidRounds?: PaidRoundInfo[];
+};
+
+
+// ═══════════════════════════════════════════════
+// HELPERS
+// ═══════════════════════════════════════════════
+
+function formatEGP(n: number): string {
+  return Math.round(n).toLocaleString("en-EG");
+}
+
+// Flatten a session's past settlements into "200 CASH · 150 CARD".
+// Used under open-bill rows and inside the confirm modal so the cashier
+// knows at a glance what this table has already paid before deciding
+// how much to collect this round.
+function summarizePriorRounds(rounds: { paymentMethod: string | null; subtotal: number }[]): string | null {
+  if (!rounds.length) return null;
+  const byMethod = new Map<string, number>();
+  for (const r of rounds) {
+    const key = (r.paymentMethod || "OTHER").toUpperCase();
+    byMethod.set(key, (byMethod.get(key) ?? 0) + r.subtotal);
+  }
+  return Array.from(byMethod.entries())
+    .map(([m, amt]) => `${formatEGP(amt)} ${m}`)
+    .join(" · ");
+}
+
+function minsAgo(ts: string | number): number {
+  const t = typeof ts === "string" ? new Date(ts).getTime() : ts;
+  return Math.max(0, Math.round((Date.now() - t) / 60000));
+}
+
+type InvoiceItem = { name: string; nameAr: string | null; quantity: number; price: number; addOns: string[]; notes: string | null };
+type InvoiceRound = {
+  index: number;
+  paidAt: string;
+  paymentMethod: string | null;
+  items: InvoiceItem[];
+  subtotal: number;
+};
+type InvoiceData = {
+  restaurantName: string;
+  currency: string;
+  tableNumber: number | null;
+  orderType?: string;
+  vipGuestName?: string | null;
+  guestCount: number;
+  waiterName: string | null;
+  openedAt: string;
+  closedAt: string | null;
+  paymentMethod: string | null;
+  items: InvoiceItem[];
+  subtotal: number;
+  total: number;
+  orderCount: number;
+  sessionId: string;
+  rounds: InvoiceRound[];
+};
+
+async function fetchInvoice(sessionId: string, staffId?: string): Promise<InvoiceData | null> {
+  try {
+    const headers: Record<string, string> = {};
+    if (staffId) headers["x-staff-id"] = staffId;
+    const res = await fetch(`/api/invoice?sessionId=${sessionId}`, { headers });
+    if (!res.ok) return null;
+    return await res.json();
+  } catch { return null; }
+}
+
+// Try the local print agent (scripts/print-agent.mjs) for silent
+// thermal printing; fall back to the browser print dialog if the
+// agent isn't running. The cashier sets the agent URL via
+// localStorage.cashier_print_agent (default http://localhost:9911).
+async function tryAgentPrint(sessionId: string): Promise<boolean> {
+  try {
+    const agentUrl =
+      (typeof localStorage !== "undefined" && localStorage.getItem("cashier_print_agent")) ||
+      "http://localhost:9911";
+    const res = await fetch(`${agentUrl}/print`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ sessionId }),
+    });
+    if (!res.ok) return false;
+    const json = await res.json().catch(() => ({}));
+    return !!json.ok;
+  } catch {
+    return false;
+  }
+}
+
+function printInvoice(inv: InvoiceData) {
+  const rounds = inv.rounds || [];
+  // The receipt prints at the moment of settlement — so the "current"
+  // round is always the most recent one. Older rounds fold into a
+  // "Previously paid" footer so the paper shows both what the cashier
+  // just collected AND what the table has paid lifetime.
+  const current = rounds[rounds.length - 1];
+  const prior = rounds.slice(0, -1);
+
+  const date = new Date(current?.paidAt || inv.closedAt || inv.openedAt);
+  const dateStr = date.toLocaleDateString("en-GB", { day: "2-digit", month: "2-digit", year: "numeric" });
+  const timeStr = date.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" });
+
+  const escapeHtml = (s: string) =>
+    s.replace(/[&<>"']/g, (ch) => ({
+      "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
+    }[ch] as string));
+
+  const renderItemRows = (items: InvoiceItem[]) =>
+    items.map((item) => {
+      const line = `${item.quantity}x ${escapeHtml(item.name)}`;
+      const arabicLine = item.nameAr
+        ? `<br><span style="font-size:11px;color:#000;" dir="rtl">${escapeHtml(item.nameAr)}</span>`
+        : "";
+      const price = `${Math.round(item.price * item.quantity)}`;
+      const addOns = item.addOns.length > 0 ? item.addOns.map((a) => { try { const p = JSON.parse(a); return p.name || a; } catch { return a; } }).join(", ") : "";
+      return `
+      <tr>
+        <td style="text-align:left;padding:2px 0;font-size:12px;">${line}${arabicLine}${addOns ? `<br><span style="font-size:10px;color:#666;">  + ${escapeHtml(addOns)}</span>` : ""}${item.notes ? `<br><span style="font-size:10px;color:#666;">  "${escapeHtml(item.notes)}"</span>` : ""}</td>
+        <td style="text-align:right;padding:2px 0;font-size:12px;white-space:nowrap;">${price}</td>
+      </tr>`;
+    }).join("");
+
+  const currentItems = current?.items ?? inv.items;
+  const currentSubtotal = current?.subtotal ?? inv.total;
+  const currentMethod = current?.paymentMethod ?? inv.paymentMethod;
+
+  const isMultiRound = rounds.length > 1;
+  const roundLabel = isMultiRound
+    ? `ROUND ${current?.index ?? rounds.length} OF ${rounds.length}`
+    : "";
+
+  const priorBlock = prior.length > 0 ? `
+  <div class="divider"></div>
+  <div style="font-size:10px;color:#444;margin:4px 0 2px;"><b>Previously paid on this table:</b></div>
+  <table>
+    ${prior.map((r) => `
+      <tr>
+        <td style="font-size:11px;text-align:left;padding:1px 0;">Round ${r.index}${r.paymentMethod ? ` · ${r.paymentMethod}` : ""}</td>
+        <td style="font-size:11px;text-align:right;padding:1px 0;">${r.subtotal} ${inv.currency}</td>
+      </tr>`).join("")}
+    <tr>
+      <td style="font-size:11px;text-align:left;padding-top:3px;border-top:1px dashed #999;"><b>Lifetime total</b></td>
+      <td style="font-size:11px;text-align:right;padding-top:3px;border-top:1px dashed #999;"><b>${inv.total} ${inv.currency}</b></td>
+    </tr>
+  </table>
+  ` : "";
+
+  const html = `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Invoice - ${inv.tableNumber != null ? `Table ${inv.tableNumber}` : (inv.vipGuestName || "VIP")}${isMultiRound ? ` · R${current?.index}` : ""}</title>
+  <style>
+    @media print {
+      @page { margin: 5mm; size: 80mm auto; }
+      body { margin: 0; }
+    }
+    body { font-family: 'Courier New', monospace; width: 72mm; margin: 0 auto; padding: 5mm; color: #000; }
+    .center { text-align: center; }
+    .bold { font-weight: bold; }
+    .divider { border-top: 1px dashed #000; margin: 6px 0; }
+    .round-banner { background: #000; color: #fff; text-align: center; font-weight: bold; padding: 4px 0; margin: 6px 0; font-size: 12px; letter-spacing: 1px; }
+    table { width: 100%; border-collapse: collapse; }
+    .total-row td { font-weight: bold; font-size: 14px; padding-top: 4px; }
+  </style>
+</head>
+<body>
+  <div class="center bold" style="font-size:16px;margin-bottom:2px;">${inv.restaurantName}</div>
+  <div class="divider"></div>
+
+  <div style="font-size:11px;margin:4px 0;">
+    <div><b>${inv.tableNumber != null ? `Table:</b> ${inv.tableNumber}` : `Guest:</b> ${inv.vipGuestName || "VIP"}`}${inv.guestCount > 0 ? ` &nbsp; <b>Guests:</b> ${inv.guestCount}` : ""}</div>
+    ${inv.waiterName ? `<div><b>Server:</b> ${inv.waiterName}</div>` : ""}
+    <div><b>Date:</b> ${dateStr} ${timeStr}</div>
+    <div><b>Invoice:</b> ${inv.sessionId.slice(-8).toUpperCase()}${isMultiRound ? `-R${current?.index}` : ""}</div>
+  </div>
+
+  ${roundLabel ? `<div class="round-banner">${roundLabel}</div>` : `<div class="divider"></div>`}
+
+  <table>
+    <thead>
+      <tr style="font-size:11px;font-weight:bold;border-bottom:1px solid #000;">
+        <td style="text-align:left;padding-bottom:3px;">Item</td>
+        <td style="text-align:right;padding-bottom:3px;">${inv.currency}</td>
+      </tr>
+    </thead>
+    <tbody>
+      ${renderItemRows(currentItems)}
+    </tbody>
+  </table>
+
+  <div class="divider"></div>
+
+  <table>
+    <tr class="total-row">
+      <td style="text-align:left;">${isMultiRound ? "THIS ROUND" : "TOTAL"}</td>
+      <td style="text-align:right;">${currentSubtotal} ${inv.currency}</td>
+    </tr>
+    ${currentMethod ? `<tr><td style="font-size:11px;text-align:left;padding-top:4px;">Paid by</td><td style="font-size:11px;text-align:right;padding-top:4px;">${currentMethod}</td></tr>` : ""}
+  </table>
+
+  ${priorBlock}
+
+  <div class="divider"></div>
+
+  <div class="center" style="font-size:11px;margin-top:6px;">
+    Thank you for dining with us!<br>
+    <span style="font-size:10px;color:#666;">شكراً لزيارتكم</span>
+  </div>
+
+  <script>window.onload = function() { window.print(); }</script>
+</body>
+</html>`;
+
+  const win = window.open("", "_blank", "width=350,height=600");
+  if (win) {
+    win.document.write(html);
+    win.document.close();
+  }
+}
+
+// ═══════════════════════════════════════════════
+// CASHIER LOGIN (reuses staff PIN system)
+// ═══════════════════════════════════════════════
+
+function CashierLogin({ onLogin }: { onLogin: (staff: LoggedInStaff) => void }) {
+  const { t } = useLanguage();
+  const [pin, setPin] = useState("");
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
+  const restaurantSlug = process.env.NEXT_PUBLIC_RESTAURANT_SLUG || "neom-dahab";
+
+  const handleSubmit = async () => {
+    if (pin.length < 4) { setError(t("login.pinTooShort")); return; }
+    setError(""); setLoading(true);
+    try {
+      const res = await fetch("/api/staff/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ pin, restaurantId: restaurantSlug }),
+      });
+      if (!res.ok) { const data = await res.json(); setError(data.error || t("login.invalidPin")); setLoading(false); return; }
+      const staff = await res.json();
+      if (staff.role !== "CASHIER") { setError(t("cashier.notCashierPin")); setLoading(false); return; }
+      onLogin(staff);
+    } catch { setError(t("login.networkError")); }
+    setLoading(false);
+  };
+
+  return (
+    <div className="min-h-dvh bg-sand-100 flex items-center justify-center px-4">
+      <motion.div
+        className="w-full max-w-sm bg-white rounded-3xl shadow-xl p-8"
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+      >
+        <div className="text-center mb-8">
+          <div className="w-16 h-16 rounded-2xl bg-status-wait-600 flex items-center justify-center mx-auto mb-4">
+            <span className="text-2xl text-white font-semibold">$</span>
+          </div>
+          <h1 className="text-xl font-semibold text-text-primary">{t("cashier.cashierLogin")}</h1>
+          <p className="text-sm text-text-secondary mt-1">{t("cashier.loginDesc")}</p>
+        </div>
+
+        <div className="flex justify-center gap-3 mb-6">
+          {[0, 1, 2, 3].map((i) => (
+            <div key={i} className={`w-12 h-14 rounded-xl border-2 flex items-center justify-center text-xl font-semibold transition-all ${
+              pin.length > i ? "border-status-wait-600 bg-status-wait-50 text-status-wait-900" : "border-sand-200 bg-white text-transparent"
+            }`}>
+              {pin.length > i ? "●" : "○"}
+            </div>
+          ))}
+        </div>
+
+        {error && (
+          <motion.p className="text-center text-status-bad-600 text-sm font-semibold mb-4" initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
+            {error}
+          </motion.p>
+        )}
+
+        <div className="grid grid-cols-3 gap-2 mb-6">
+          {["1","2","3","4","5","6","7","8","9","","0","⌫"].map((key) => (
+            <button
+              key={key || "empty"}
+              onClick={() => {
+                if (key === "⌫") setPin((p) => p.slice(0, -1));
+                else if (key && pin.length < 6) { setPin((p) => p + key); setError(""); }
+              }}
+              disabled={!key}
+              className={`h-14 rounded-xl text-xl font-bold transition-all active:scale-95 ${
+                key === "⌫" ? "bg-sand-100 text-text-secondary" : key ? "bg-sand-50 text-text-primary hover:bg-sand-100" : "invisible"
+              }`}
+            >{key}</button>
+          ))}
+        </div>
+
+        <button onClick={handleSubmit} disabled={pin.length < 4 || loading}
+          className={`w-full py-4 rounded-2xl text-lg font-bold transition-all ${
+            pin.length >= 4 && !loading ? "bg-status-wait-600 text-white hover:bg-status-wait-700" : "bg-sand-200 text-text-muted cursor-not-allowed"
+          }`}
+        >{loading ? t("login.verifying") : t("cashier.openRegister")}</button>
+
+        <a href="/waiter" className="block text-center text-sm text-text-muted mt-4 hover:text-text-secondary">
+          {t("login.staffLogin")}
+        </a>
+      </motion.div>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════
+// CASHIER ACCEPT PAYMENT (for walk-up guests)
+// ═══════════════════════════════════════════════
+
+function AcceptPaymentPanel({ sessions, onAcceptPayment, onReversePayment, recentlyPaidSessions, busyRef, staffId }: {
+  sessions: SessionInfo[];
+  onAcceptPayment: (sessionId: string, method: "CASH" | "CARD", tip: number) => Promise<{ confirmedTotal: number } | null>;
+  onReversePayment: (sessionId: string, reason: string) => Promise<boolean>;
+  recentlyPaidSessions: { id: string; tableNumber: number | null; orderType?: string; vipGuestName?: string | null; total: number }[];
+  busyRef: React.MutableRefObject<boolean>;
+  staffId?: string;
+}) {
+  const { t } = useLanguage();
+  // Tables still needing the cashier to take payment. Gated on
+  // unpaidTotal so a session that had round 1 settled and is now
+  // showing a brand new round 2 order reappears with only the new
+  // delta — not the gross session total.
+  const openSessions = sessions.filter(
+    (s) => s.status === "OPEN" && (s.unpaidTotal || 0) > 0
+  );
+  // Tables where payment is fully covered but kitchen is still preparing —
+  // keep them visible so the cashier knows what's still in flight.
+  const awaitingKitchen = sessions.filter(
+    (s) => s.status === "OPEN" && (s.unpaidTotal || 0) === 0 && (s.orderTotal || 0) > 0 && s.paymentReceived
+  );
+  const [confirming, setConfirming] = useState<string | null>(null);
+  const [printing, setPrinting] = useState<string | null>(null);
+  const [justPaid, setJustPaid] = useState<{ tableNumber: number | null; orderType?: string; vipGuestName?: string | null; method: "CASH" | "CARD"; total: number } | null>(null);
+  // Final "did you actually receive the payment?" guard before we settle.
+  // Prevents accidental taps and makes the walk-up case (guest didn't tap
+  // pay on their phone) an explicit, intentional action.
+  const [pendingConfirm, setPendingConfirm] = useState<{
+    sessionId: string;
+    tableNumber: number | null;
+    orderType?: string;
+    vipGuestName?: string | null;
+    method: "CASH" | "CARD";
+    total: number;
+    roundLabel: string;
+    priorSummary: string | null;
+  } | null>(null);
+  // Lock while a settle is in flight so a double-tap on 'Yes, received'
+  // can't fire the PATCH twice. The second call would be idempotent on
+  // the DB side but would clobber the success flash with a 0 EGP total.
+  const [settling, setSettling] = useState(false);
+  // Optional tip amount the cashier enters inline with the confirm.
+  // Reset every time the modal opens so a tip from the previous
+  // transaction never bleeds into the next one.
+  const [tipInput, setTipInput] = useState<string>("");
+  // Reverse-payment confirmation state. Cashier has to type a reason,
+  // so accidental taps can't roll back a correctly settled bill.
+  const [reversing, setReversing] = useState<{
+    sessionId: string;
+    tableNumber: number | null;
+    orderType?: string;
+    vipGuestName?: string | null;
+    total: number;
+  } | null>(null);
+  const [reverseReason, setReverseReason] = useState("");
+  const [reverseBusy, setReverseBusy] = useState(false);
+
+  // Tell the reliability hook we're mid-transaction — no reloads allowed
+  // while a confirm modal is open or a settle is in flight. A reload
+  // here would wipe the optimistic state and force the cashier to
+  // recollect a payment they already took.
+  useEffect(() => {
+    busyRef.current = !!pendingConfirm || settling;
+  }, [pendingConfirm, settling, busyRef]);
+
+  const handlePrint = async (sessionId: string) => {
+    setPrinting(sessionId);
+    // Prefer the thermal print agent on the cashier PC — silent, no
+    // print dialog. Falls back to the browser print window if the
+    // agent isn't reachable (remote work, agent crashed, etc.).
+    const agentPrinted = await tryAgentPrint(sessionId);
+    if (!agentPrinted) {
+      const inv = await fetchInvoice(sessionId, staffId);
+      if (inv) printInvoice(inv);
+    }
+    setPrinting(null);
+  };
+
+  // Step 1: method picked — stage the confirm modal instead of settling
+  // straight away. Nothing hits the server until the cashier answers Yes.
+  const handleMethodChosen = (sessionId: string, method: "CASH" | "CARD") => {
+    const session = sessions.find((s) => s.id === sessionId);
+    if (!session) return;
+    setConfirming(null);
+    const priorRounds = session.paidRounds || [];
+    const nextRoundIndex = priorRounds.length + 1;
+    const roundLabel = priorRounds.length > 0
+      ? `Payment ${nextRoundIndex} of ${nextRoundIndex}`
+      : t("cashier.fullPayment");
+    setTipInput("");
+    setPendingConfirm({
+      sessionId,
+      tableNumber: session.tableNumber,
+      orderType: session.orderType,
+      vipGuestName: session.vipGuestName,
+      method,
+      total: session.unpaidTotal || 0,
+      roundLabel,
+      priorSummary: summarizePriorRounds(priorRounds),
+    });
+  };
+
+  // Step 2: cashier confirms in the modal — now settle + print.
+  const handleConfirmReceived = async () => {
+    if (!pendingConfirm || settling) return;
+    const { sessionId, tableNumber, method } = pendingConfirm;
+    // Parse once at confirm time. Anything that isn't a finite positive
+    // number becomes 0 — the server will also defensively discard it.
+    const parsedTip = Math.max(0, Math.round(Number(tipInput) || 0));
+    setSettling(true);
+    setPendingConfirm(null);
+    const result = await onAcceptPayment(sessionId, method, parsedTip);
+    setSettling(false);
+    if (result) {
+      // Show the authoritative total returned from the server rather than
+      // the optimistic snapshot — if a guest added an order after the pay
+      // request went out, this is the number the cashier should reconcile
+      // against what they physically collected.
+      setJustPaid({ tableNumber, orderType: pendingConfirm.orderType, vipGuestName: pendingConfirm.vipGuestName, method, total: result.confirmedTotal });
+      setTimeout(() => setJustPaid(null), 4000);
+    }
+    setTimeout(async () => {
+      const agentPrinted = await tryAgentPrint(sessionId);
+      if (!agentPrinted) {
+        const inv = await fetchInvoice(sessionId, staffId);
+        if (inv) printInvoice(inv);
+      }
+    }, 1500);
+  };
+
+  return (
+    <div className="space-y-3">
+      {/* Final confirmation modal — guards against accidental settles AND
+          makes the walk-up case (guest never tapped pay) an explicit action. */}
+      {pendingConfirm && (
+        <div className="fixed inset-0 z-50 bg-sand-900/60 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl max-w-sm w-full p-6 shadow-2xl">
+            <div className="flex items-center gap-3 mb-4">
+              <div className={`w-12 h-12 rounded-xl flex items-center justify-center text-2xl ${
+                pendingConfirm.method === "CASH" ? "bg-status-good-50" : "bg-status-info-50"
+              }`}>
+                {pendingConfirm.method === "CASH" ? "💵" : "💳"}
+              </div>
+              <div>
+                <h3 className="text-base font-semibold text-text-primary">
+                  {t("cashier.received")} {pendingConfirm.roundLabel.toLowerCase()}?
+                </h3>
+                <p className="text-xs text-text-secondary font-semibold">
+                  {getOrderLabel(pendingConfirm)} · {formatEGP(pendingConfirm.total)} {t("common.egp")} ·{" "}
+                  {pendingConfirm.method === "CASH" ? t("cashier.cash") : t("cashier.card")}
+                </p>
+              </div>
+            </div>
+            {pendingConfirm.priorSummary && (
+              <div className="mb-4 rounded-xl bg-sand-50 border border-sand-200 px-3 py-2">
+                <p className="text-[10px] font-bold text-text-muted uppercase tracking-wider">{t("cashier.alreadyPaid")}</p>
+                <p className="text-xs font-bold text-text-secondary tabular-nums">{pendingConfirm.priorSummary}</p>
+              </div>
+            )}
+            {/* Optional tip input. Blank by default; cashier types an
+                amount only if the guest left a tip for this round. Saved
+                on the first settled order so sum(Order.tip) is the truth. */}
+            <div className="mb-4">
+              <label className="text-[10px] font-bold text-text-muted uppercase tracking-wider mb-1 block">
+                {t("cashier.tipOptional")}
+              </label>
+              <div className="flex items-center gap-2">
+                <input
+                  type="number"
+                  inputMode="numeric"
+                  min={0}
+                  step={1}
+                  value={tipInput}
+                  onChange={(e) => setTipInput(e.target.value)}
+                  placeholder="0"
+                  className="flex-1 rounded-xl border border-sand-200 bg-white px-3 py-2 text-sm font-bold text-text-primary tabular-nums focus:outline-none focus:ring-2 focus:ring-status-good-500"
+                />
+                <span className="text-xs font-bold text-text-secondary">{t("common.egp")}</span>
+              </div>
+            </div>
+            <p className="text-sm text-text-secondary mb-5">
+              {t("cashier.confirmOnlyAfter")}{" "}
+              <b>{pendingConfirm.roundLabel}</b> {t("cashier.andPrintsReceipt")}
+            </p>
+            <div className="flex gap-2">
+              <button
+                onClick={() => setPendingConfirm(null)}
+                disabled={settling}
+                className="flex-1 py-3 rounded-xl bg-sand-100 text-text-secondary text-sm font-bold active:scale-95 disabled:opacity-50"
+              >
+                {t("cashier.noCancel")}
+              </button>
+              <button
+                onClick={handleConfirmReceived}
+                disabled={settling}
+                className={`flex-1 py-3 rounded-xl text-white text-sm font-bold active:scale-95 disabled:opacity-60 ${
+                  pendingConfirm.method === "CASH" ? "bg-status-good-600" : "bg-status-info-600"
+                }`}
+              >
+                {settling ? t("cashier.confirming") : t("cashier.yesReceived")}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Instant confirmation flash */}
+      {justPaid && (
+        <div className="animate-in fade-in slide-in-from-top-2 duration-200 bg-status-good-600 text-white rounded-2xl px-4 py-3 flex items-center gap-3 shadow-lg shadow-status-good-600/30">
+          <div className="w-8 h-8 rounded-full bg-white/20 flex items-center justify-center text-lg">
+            ✓
+          </div>
+          <div className="flex-1">
+            <p className="text-sm font-semibold">
+              {t("cashier.confirmed")} · {formatEGP(justPaid.total)} {t("common.egp")} — {getOrderLabel(justPaid)}
+            </p>
+            <p className="text-[11px] text-status-good-100 font-semibold">
+              {justPaid.method === "CASH" ? t("cashier.cashReceivedMsg") : t("cashier.cardCharged")} · {t("cashier.printingReceipt")}
+            </p>
+          </div>
+        </div>
+      )}
+
+      {/* Recently paid — print receipts */}
+      {recentlyPaidSessions.length > 0 && (
+        <div className="bg-status-good-50 rounded-2xl border-2 border-status-good-200 overflow-hidden">
+          <div className="px-4 py-3 border-b border-status-good-200">
+            <h3 className="text-sm font-semibold text-status-good-800 uppercase tracking-wide">{t("cashier.printReceipts")}</h3>
+            <p className="text-[10px] text-status-good-600">{recentlyPaidSessions.length} {t("cashier.recentlyClosed")}</p>
+          </div>
+          <div className="divide-y divide-status-good-100">
+            {recentlyPaidSessions.map((s) => (
+              <div key={s.id} className="px-4 py-3 flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <div className="w-9 h-9 rounded-xl bg-status-good-100 border border-status-good-300 flex items-center justify-center text-sm font-semibold text-status-good-700">
+                    {s.tableNumber ?? "V"}
+                  </div>
+                  <div>
+                    <span className="text-sm font-bold text-status-good-900">{getOrderLabel(s)}</span>
+                    <span className="text-xs text-status-good-600 ml-2">{formatEGP(s.total)} {t("common.egp")}</span>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2">
+                  <button onClick={() => handlePrint(s.id)} disabled={printing === s.id}
+                    className="px-4 py-2 rounded-xl bg-status-good-600 text-white text-sm font-bold active:scale-95 disabled:opacity-50">
+                    {printing === s.id ? "..." : `🖨 ${t("cashier.print")}`}
+                  </button>
+                  <button
+                    onClick={() => { setReversing({ sessionId: s.id, tableNumber: s.tableNumber, orderType: s.orderType, vipGuestName: s.vipGuestName, total: s.total }); setReverseReason(""); }}
+                    title={t("cashier.reversePaymentTitle")}
+                    className="px-2.5 py-2 rounded-xl bg-white text-status-bad-600 border border-status-bad-200 text-xs font-bold active:scale-95 hover:bg-status-bad-50"
+                  >
+                    {t("cashier.reverse")}
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Reverse payment confirmation modal */}
+      {reversing && (
+        <div className="fixed inset-0 z-50 bg-sand-900/60 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl max-w-sm w-full p-6 shadow-2xl">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="w-12 h-12 rounded-xl bg-status-bad-50 flex items-center justify-center text-2xl">↩</div>
+              <div>
+                <h3 className="text-base font-semibold text-text-primary">{t("cashier.reversePayment")}</h3>
+                <p className="text-xs text-text-secondary font-semibold">
+                  {getOrderLabel(reversing)} · {formatEGP(reversing.total)} {t("common.egp")}
+                </p>
+              </div>
+            </div>
+            <p className="text-sm text-text-secondary mb-3">
+              {t("cashier.reverseDesc")} <b>{t("cashier.acceptPayment")}</b> {t("cashier.reverseDescEnd")}
+            </p>
+            <label className="block text-[10px] font-semibold text-text-secondary uppercase tracking-wider mb-1">
+              {t("cashier.reasonRequired")}
+            </label>
+            <input
+              value={reverseReason}
+              onChange={(e) => setReverseReason(e.target.value)}
+              placeholder={t("cashier.reasonPlaceholder")}
+              className="w-full px-3 py-2.5 rounded-xl border-2 border-sand-200 text-sm mb-4 focus:border-status-bad-400 focus:outline-none"
+              autoFocus
+            />
+            <div className="flex gap-2">
+              <button
+                onClick={() => { setReversing(null); setReverseReason(""); }}
+                disabled={reverseBusy}
+                className="flex-1 py-3 rounded-xl bg-sand-100 text-text-secondary text-sm font-bold active:scale-95 disabled:opacity-50"
+              >
+                {t("common.cancel")}
+              </button>
+              <button
+                onClick={async () => {
+                  if (!reversing || reverseReason.trim().length < 3) return;
+                  setReverseBusy(true);
+                  const ok = await onReversePayment(reversing.sessionId, reverseReason.trim());
+                  setReverseBusy(false);
+                  if (ok) { setReversing(null); setReverseReason(""); }
+                }}
+                disabled={reverseBusy || reverseReason.trim().length < 3}
+                className="flex-1 py-3 rounded-xl bg-status-bad-600 text-white text-sm font-bold active:scale-95 disabled:opacity-60"
+              >
+                {reverseBusy ? t("cashier.reversing") : t("cashier.yesReverse")}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Paid, waiting on kitchen */}
+      {awaitingKitchen.length > 0 && (
+        <div className="bg-status-warn-50 rounded-2xl border-2 border-status-warn-200 overflow-hidden">
+          <div className="px-4 py-3 border-b border-status-warn-200">
+            <h3 className="text-sm font-semibold text-status-warn-800 uppercase tracking-wide">{t("cashier.paidKitchenInProgress")}</h3>
+            <p className="text-[10px] text-status-warn-600">{awaitingKitchen.length} {awaitingKitchen.length !== 1 ? t("cashier.tablesPlural") : t("cashier.tables")} — {t("cashier.sessionClosesAuto")}</p>
+          </div>
+          <div className="divide-y divide-status-warn-100">
+            {awaitingKitchen.map((s) => (
+              <div key={s.id} className="px-4 py-3 flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <div className="w-9 h-9 rounded-xl bg-status-warn-100 border border-status-warn-300 flex items-center justify-center text-sm font-semibold text-status-warn-700">
+                    {s.tableNumber ?? "V"}
+                  </div>
+                  <div>
+                    <span className="text-sm font-bold text-status-warn-900">{getOrderLabel(s)}</span>
+                    <span className="text-xs text-status-warn-600 ml-2">{formatEGP(s.orderTotal || 0)} {t("common.egp")} · {t("cashier.paid")}</span>
+                  </div>
+                </div>
+                <button onClick={() => handlePrint(s.id)} disabled={printing === s.id}
+                  className="px-3 py-2 rounded-xl bg-status-warn-600 text-white text-sm font-bold active:scale-95 disabled:opacity-50">
+                  {printing === s.id ? "..." : "🖨"}
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Open bills */}
+      <div className="bg-white rounded-2xl border-2 border-sand-200 overflow-hidden">
+        <div className="px-4 py-3 bg-sand-50 border-b-2 border-sand-200">
+          <h3 className="text-sm font-semibold text-text-primary uppercase tracking-wide">{t("cashier.acceptPayment")}</h3>
+          <p className="text-[10px] text-text-secondary">{openSessions.length} {t("cashier.openBills")}</p>
+        </div>
+        {openSessions.length === 0 ? (
+          <div className="p-6 text-center">
+            <p className="text-text-muted text-sm">{t("cashier.noPendingBillsShort")}</p>
+          </div>
+        ) : (
+          <div className="divide-y divide-sand-100 max-h-[400px] lg:max-h-[600px] overflow-y-auto">
+            {openSessions.map((s) => {
+              const priorRounds = s.paidRounds || [];
+              const priorSummary = summarizePriorRounds(priorRounds);
+              const nextRoundIndex = priorRounds.length + 1;
+              const hasPriorPayment = priorRounds.length > 0;
+              const methodLabel = hasPriorPayment
+                ? `${t("cashier.payment")} ${nextRoundIndex}`
+                : t("cashier.payment");
+              return (
+              <div key={s.id} className="px-4 py-3">
+                <div className="flex items-center justify-between mb-2">
+                  <div className="flex items-center gap-3">
+                    <div className={`w-10 h-10 rounded-xl border-2 flex items-center justify-center text-sm font-semibold ${
+                      s.orderType === "DELIVERY" ? "bg-status-warn-50 border-status-warn-200 text-status-warn-700" :
+                      s.orderType === "VIP_DINE_IN" ? "bg-status-wait-50 border-status-wait-200 text-status-wait-700" :
+                      "bg-status-wait-50 border-status-wait-200 text-status-wait-700"
+                    }`}>
+                      {s.orderType === "DELIVERY" ? "\u{1F6F5}" : s.orderType === "VIP_DINE_IN" ? "\u{1F451}" : s.tableNumber}
+                    </div>
+                    <div>
+                      <span className="text-sm font-bold text-text-primary">{getOrderLabel(s)}</span>
+                      <div className="flex items-center gap-2">
+                        {s.orderType !== "DELIVERY" && <span className="text-[10px] text-text-muted">{s.guestCount} {s.guestCount !== 1 ? t("common.guests") : t("common.guest")}</span>}
+                        {s.waiterName && <span className="text-[10px] text-text-muted">· {s.waiterName}</span>}
+                      </div>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button onClick={() => handlePrint(s.id)} disabled={printing === s.id}
+                      className="px-2.5 py-2 rounded-xl bg-sand-100 text-text-secondary text-sm font-bold active:scale-95 hover:bg-sand-200 disabled:opacity-50"
+                      title={t("cashier.printBillPreview")}>
+                      {printing === s.id ? "..." : "🖨"}
+                    </button>
+                    <span className="text-lg font-semibold text-text-primary">{formatEGP(s.unpaidTotal || 0)} <span className="text-xs text-text-muted">{t("common.egp")}</span></span>
+                  </div>
+                </div>
+                {hasPriorPayment && priorSummary && (
+                  <div className="mb-2 rounded-lg bg-status-good-50 border border-status-good-100 px-2.5 py-1.5 flex items-center justify-between">
+                    <span className="text-[10px] font-semibold text-status-good-700 uppercase tracking-wider">
+                      {t("cashier.alreadyPaid")} · {priorRounds.length} {priorRounds.length !== 1 ? t("cashier.roundsPlural") : t("cashier.rounds")}
+                    </span>
+                    <span className="text-[11px] font-bold text-status-good-800 tabular-nums">{priorSummary}</span>
+                  </div>
+                )}
+                {confirming === s.id ? (
+                  <div className="flex gap-2">
+                    <button onClick={() => handleMethodChosen(s.id, "CASH")}
+                      className="flex-1 py-2.5 rounded-xl bg-status-good-600 text-white text-sm font-bold active:scale-95">
+                      {hasPriorPayment ? `💵 ${t("cashier.processCash")} · ${methodLabel}` : `💵 ${t("cashier.processCash")}`}
+                    </button>
+                    <button onClick={() => handleMethodChosen(s.id, "CARD")}
+                      className="flex-1 py-2.5 rounded-xl bg-status-info-600 text-white text-sm font-bold active:scale-95">
+                      {hasPriorPayment ? `💳 ${t("cashier.processCard")} · ${methodLabel}` : `💳 ${t("cashier.processCard")}`}
+                    </button>
+                    <button onClick={() => setConfirming(null)}
+                      className="px-3 py-2.5 rounded-xl bg-sand-100 text-text-secondary text-sm font-bold">
+                      ✕
+                    </button>
+                  </div>
+                ) : (
+                  <button onClick={() => setConfirming(s.id)}
+                    className="w-full py-2.5 rounded-xl bg-status-wait-100 text-status-wait-700 text-sm font-bold hover:bg-status-wait-200 transition active:scale-95">
+                    {hasPriorPayment ? `${t("cashier.processPayment")} · ${methodLabel}` : t("cashier.processPayment")}
+                  </button>
+                )}
+              </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+
+// ═══════════════════════════════════════════════
+// CASHIER WALLET
+// ═══════════════════════════════════════════════
+
+function CashierWallet({ cashCollected, cardCollected, totalOrders }: {
+  cashCollected: number;
+  cardCollected: number;
+  totalOrders: number;
+}) {
+  const { t } = useLanguage();
+  return (
+    <div className="bg-gradient-to-br from-status-wait-600 to-status-wait-800 rounded-2xl p-5 text-white shadow-lg">
+      <div className="flex items-center justify-between mb-4">
+        <h3 className="text-sm font-bold opacity-80 uppercase tracking-wide">{t("cashier.myRegister")}</h3>
+        <span className="text-[10px] font-bold bg-white/20 px-2.5 py-1 rounded-full">{totalOrders} {t("cashier.orders")}</span>
+      </div>
+      <div className="grid grid-cols-3 gap-3">
+        <div>
+          <div className="text-2xl font-semibold">{formatEGP(cashCollected)}</div>
+          <div className="text-[10px] opacity-70">{t("cashier.cash")}</div>
+        </div>
+        <div>
+          <div className="text-2xl font-semibold">{formatEGP(cardCollected)}</div>
+          <div className="text-[10px] opacity-70">{t("cashier.cardDigital")}</div>
+        </div>
+        <div>
+          <div className="text-2xl font-semibold">{formatEGP(cashCollected + cardCollected)}</div>
+          <div className="text-[10px] opacity-70">{t("cashier.grandTotal")}</div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════
+// REVENUE SUMMARY
+// ═══════════════════════════════════════════════
+
+function RevenueSummary({ dayRevenue, shiftRevenue, dayOrders, shiftOrders }: {
+  dayRevenue: number; shiftRevenue: number; dayOrders: number; shiftOrders: number;
+}) {
+  const { t } = useLanguage();
+  return (
+    <div className="bg-white rounded-2xl border-2 border-sand-200 overflow-hidden">
+      <div className="px-4 py-3 bg-sand-50 border-b-2 border-sand-200">
+        <h3 className="text-sm font-semibold text-text-primary uppercase tracking-wide">{t("cashier.revenue")}</h3>
+      </div>
+      <div className="grid grid-cols-2 divide-x divide-sand-100">
+        <div className="p-4 text-center">
+          <p className="text-[10px] text-text-muted font-bold uppercase mb-1">{t("cashier.today")}</p>
+          <p className="text-2xl font-semibold text-text-primary">{formatEGP(dayRevenue)}</p>
+          <p className="text-[10px] text-text-muted">{dayOrders} {t("cashier.orders")}</p>
+        </div>
+        <div className="p-4 text-center">
+          <p className="text-[10px] text-text-muted font-bold uppercase mb-1">{t("cashier.thisShift")}</p>
+          <p className="text-2xl font-semibold text-status-wait-700">{formatEGP(shiftRevenue)}</p>
+          <p className="text-[10px] text-text-muted">{shiftOrders} {t("cashier.orders")}</p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+
+// ═══════════════════════════════════════════════
+// SHIFT COMPARISON — leakage detection
+// ═══════════════════════════════════════════════
+
+function ShiftComparison({
+  shiftRevenue, cashCollected, cardCollected, activeSessions,
+}: {
+  shiftRevenue: number;
+  cashCollected: number;
+  cardCollected: number;
+  activeSessions: SessionInfo[];
+}) {
+  const { t } = useLanguage();
+  const totalCollected = cashCollected + cardCollected;
+  const unpaidTotal = activeSessions
+    .filter((s) => s.status === "OPEN" && (s.unpaidTotal || 0) > 0)
+    .reduce((sum, s) => sum + (s.unpaidTotal || 0), 0);
+  const unpaidCount = activeSessions.filter(
+    (s) => s.status === "OPEN" && (s.unpaidTotal || 0) > 0
+  ).length;
+
+  const expectedCollected = shiftRevenue;
+  const accounted = totalCollected + unpaidTotal;
+  const gap = expectedCollected - accounted;
+  const hasLeakage = gap > 5; // tolerance of 5 EGP for rounding
+
+  return (
+    <div className="bg-white rounded-2xl border-2 border-sand-200 overflow-hidden">
+      <div className={`px-4 py-3 border-b-2 ${hasLeakage ? "bg-status-bad-50 border-status-bad-200" : "bg-status-good-50 border-status-good-200"}`}>
+        <h3 className={`text-sm font-semibold uppercase tracking-wide ${hasLeakage ? "text-status-bad-800" : "text-status-good-800"}`}>
+          {hasLeakage ? t("cashier.leakageDetected") : t("cashier.shiftBalanced")}
+        </h3>
+      </div>
+      <div className="p-4 space-y-3">
+        <div className="flex justify-between text-sm">
+          <span className="text-text-secondary font-medium">{t("cashier.totalSales")}</span>
+          <span className="font-semibold text-text-primary">{formatEGP(expectedCollected)} {t("common.egp")}</span>
+        </div>
+        <div className="border-t border-sand-100 pt-2 space-y-1.5">
+          <div className="flex justify-between text-xs">
+            <span className="text-text-muted">{t("cashier.cashCollected")}</span>
+            <span className="font-bold text-status-good-600">{formatEGP(cashCollected)} {t("common.egp")}</span>
+          </div>
+          <div className="flex justify-between text-xs">
+            <span className="text-text-muted">{t("cashier.cardCollected")}</span>
+            <span className="font-bold text-status-info-600">{formatEGP(cardCollected)} {t("common.egp")}</span>
+          </div>
+          {unpaidCount > 0 && (
+            <div className="flex justify-between text-xs">
+              <span className="text-status-warn-600 font-medium">{unpaidCount} {t("cashier.activeTablesUnpaid")}</span>
+              <span className="font-bold text-status-warn-600">{formatEGP(unpaidTotal)} {t("common.egp")}</span>
+            </div>
+          )}
+        </div>
+        <div className="border-t-2 border-sand-200 pt-2">
+          <div className="flex justify-between text-sm">
+            <span className="font-bold text-text-secondary">{t("cashier.accountedFor")}</span>
+            <span className="font-semibold text-text-primary">{formatEGP(accounted)} {t("common.egp")}</span>
+          </div>
+        </div>
+        {hasLeakage && (
+          <div className="bg-status-bad-50 border border-status-bad-200 rounded-xl p-3 mt-2">
+            <div className="flex justify-between items-center">
+              <span className="text-xs font-bold text-status-bad-700">{t("cashier.unaccountedGap")}</span>
+              <span className="text-sm font-semibold text-status-bad-700">{formatEGP(gap)} {t("common.egp")}</span>
+            </div>
+            <p className="text-[10px] text-status-bad-500 mt-1">
+              {t("cashier.unaccountedGapDesc")}
+            </p>
+          </div>
+        )}
+        {!hasLeakage && gap < -5 && (
+          <div className="bg-status-warn-50 border border-status-warn-200 rounded-xl p-3 mt-2">
+            <div className="flex justify-between items-center">
+              <span className="text-xs font-bold text-status-warn-700">{t("cashier.overCollection")}</span>
+              <span className="text-sm font-semibold text-status-warn-700">{formatEGP(Math.abs(gap))} {t("common.egp")}</span>
+            </div>
+            <p className="text-[10px] text-status-warn-500 mt-1">
+              {t("cashier.overCollectionDesc")}
+            </p>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+
+// ═══════════════════════════════════════════════
+// MAIN: CASHIER SYSTEM
+// ═══════════════════════════════════════════════
+
+export default function CashierPage() {
+  const [loggedInStaff, setLoggedInStaff] = useState<LoggedInStaff | null>(null);
+  const [hydrated, setHydrated] = useState(false);
+
+  // Restore session after hydration to avoid SSR mismatch
+  // Session persists for 16 hours to survive mid-shift phone sleep/lock
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem("cashier_staff");
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        const loginAt = parsed.loginAt || 0;
+        if (Date.now() - loginAt < 16 * 60 * 60 * 1000) {
+          setLoggedInStaff(parsed);
+        } else {
+          localStorage.removeItem("cashier_staff");
+        }
+      }
+    } catch { /* silent */ }
+    setHydrated(true);
+  }, []);
+
+  const handleLogin = useCallback((staff: LoggedInStaff) => {
+    const staffWithLogin = { ...staff, loginAt: Date.now() };
+    localStorage.setItem("cashier_staff", JSON.stringify(staffWithLogin));
+    setLoggedInStaff(staffWithLogin);
+  }, []);
+
+  const handleLogout = useCallback(() => {
+    localStorage.removeItem("cashier_staff");
+    setLoggedInStaff(null);
+  }, []);
+
+  // Show nothing until hydrated to prevent flash of login screen
+  if (!hydrated) {
+    return (
+      <div className="min-h-dvh bg-sand-100 flex items-center justify-center">
+        <div className="w-8 h-8 border-2 border-sand-300 border-t-status-wait-600 rounded-full animate-spin" />
+      </div>
+    );
+  }
+
+  if (!loggedInStaff) return <CashierLogin onLogin={handleLogin} />;
+  return <CashierSystem staff={loggedInStaff} onLogout={handleLogout} />;
+}
+
+function CashierSystem({ staff, onLogout }: { staff: LoggedInStaff; onLogout: () => void }) {
+  const { lang, toggleLang, t, dir } = useLanguage();
+
+  const restaurantSlug = process.env.NEXT_PUBLIC_RESTAURANT_SLUG || "neom-dahab";
+  const [sessions, setSessions] = useState<SessionInfo[]>([]);
+  const [recentlyPaid, setRecentlyPaid] = useState<{ id: string; tableNumber: number | null; orderType?: string; vipGuestName?: string | null; total: number }[]>([]);
+  const [dayRevenue, setDayRevenue] = useState(0);
+  const [shiftRevenue, setShiftRevenue] = useState(0);
+  const [dayOrders, setDayOrders] = useState(0);
+  const [shiftOrders, setShiftOrders] = useState(0);
+  const [cashCollected, setCashCollected] = useState(0);
+  const [cardCollected, setCardCollected] = useState(0);
+  const [shiftInfo, setShiftInfo] = useState(() => getShiftTimer(staff.shift, "CASHIER"));
+  const [showSchedule, setShowSchedule] = useState(false);
+
+  // Shared gate: true while the cashier is confirming or settling a
+  // payment. Every auto-reload (watchdog, 5am, version) respects it.
+  const busyRef = useRef(false);
+  const { newVersion, markApiOk, reloadNow } = useCashierReliability(busyRef);
+  const [connectionLost, setConnectionLost] = useState(false);
+  const failCountRef = useRef(0);
+
+  // Shift label ticker — runs at 30s instead of 1s because the label is
+  // minute-resolution ("2h 14m remaining") and every second tick was
+  // re-rendering the entire cashier tree (CashierWallet + RevenueSummary
+  // + ShiftComparison + AcceptPaymentPanel) for nothing. Combined with
+  // the stray useLiveData() subscription and an unused perception.orders
+  // selector, post-transaction renders were piling up until the tab
+  // stopped responding. We also bail out of setState when the label
+  // hasn't actually changed so identical ticks are no-ops.
+  useEffect(() => {
+    const tick = () => {
+      const next = getShiftTimer(staff.shift, "CASHIER");
+      setShiftInfo((prev) =>
+        prev.label === next.label && prev.isOnShift === next.isOnShift ? prev : next
+      );
+    };
+    tick();
+    const id = setInterval(tick, 60000);
+    // Re-check shift immediately when tab regains focus (covers idle/sleep gaps)
+    const onVisible = () => { if (document.visibilityState === "visible") tick(); };
+    document.addEventListener("visibilitychange", onVisible);
+    return () => { clearInterval(id); document.removeEventListener("visibilitychange", onVisible); };
+  }, [staff.shift]);
+
+  // Notifications
+  useEffect(() => { requestNotificationPermission(); }, []);
+
+  // Push subscription
+  useEffect(() => {
+    import("@/lib/push-client").then(({ subscribeToPush }) => {
+      subscribeToPush(staff.id, "CASHIER", restaurantSlug).catch(() => {});
+    });
+  }, [staff.id, restaurantSlug]);
+
+  // Poll sessions — visibility-aware, with an AbortController so a new
+  // tick can never race a still-pending previous request. This is the
+  // fix for the "cashier freezes then whitescreens after idle" bug:
+  // without visibility pause + abort, a backgrounded tablet would pile
+  // up hundreds of pending fetches, and when the cashier returned the
+  // stacked re-renders locked the main thread hard enough that the
+  // tab couldn't even open devtools.
+  useEffect(() => {
+    let currentAbort: AbortController | null = null;
+    const fetch_ = async () => {
+      currentAbort?.abort();
+      const ctrl = new AbortController();
+      currentAbort = ctrl;
+      try {
+        const res = await fetch(`/api/sessions/all?restaurantId=${restaurantSlug}`, { signal: ctrl.signal, headers: { "x-staff-id": staff.id } });
+        // Any response (even 500) means the network is alive — reset watchdog
+        markApiOk();
+        if (res.ok) {
+          failCountRef.current = 0;
+          setConnectionLost(false);
+          const data = await res.json();
+          const allSessions: SessionInfo[] = data.sessions || [];
+          setSessions(allSessions);
+          const closed = allSessions.filter((s) => s.status === "CLOSED" && (s.orderTotal || 0) > 0);
+          setRecentlyPaid(closed.slice(0, 5).map((s) => ({ id: s.id, tableNumber: s.tableNumber, orderType: s.orderType, vipGuestName: s.vipGuestName, total: s.orderTotal || 0 })));
+        } else {
+          failCountRef.current += 1;
+          if (failCountRef.current >= 3) setConnectionLost(true);
+        }
+      } catch (err) {
+        if ((err as Error)?.name === "AbortError") return;
+        failCountRef.current += 1;
+        if (failCountRef.current >= 3) setConnectionLost(true);
+      }
+    };
+    fetch_();
+    const stop = startPoll(fetch_, 20000);
+    return () => { stop(); currentAbort?.abort(); };
+  }, [restaurantSlug, markApiOk]);
+
+  // Poll cashout data for revenue — same treatment
+  useEffect(() => {
+    let currentAbort: AbortController | null = null;
+    const fetch_ = async () => {
+      currentAbort?.abort();
+      const ctrl = new AbortController();
+      currentAbort = ctrl;
+      try {
+        const res = await fetch(`/api/shifts/cashout?restaurantId=${restaurantSlug}`, { signal: ctrl.signal, headers: staff?.id ? { "x-staff-id": staff.id } : {} });
+        markApiOk();
+        if (res.ok) {
+          const data = await res.json();
+          let totalDayRevenue = 0, totalDayOrders = 0;
+          let totalShiftRevenue = 0, totalShiftOrders = 0;
+          let totalCash = 0, totalCard = 0;
+          const currentShift = getCurrentShift();
+
+          for (const day of data.days || []) {
+            totalDayRevenue += day.revenue || 0;
+            totalCash += day.cash || 0;
+            totalCard += day.card || 0;
+            for (const shift of day.shifts || []) {
+              for (const w of shift.waiters || []) {
+                totalDayOrders += w.totalOrders || 0;
+                if (shift.shift === currentShift) {
+                  totalShiftRevenue += w.totalRevenue || 0;
+                  totalShiftOrders += w.totalOrders || 0;
+                }
+              }
+            }
+          }
+
+          setDayRevenue(totalDayRevenue);
+          setDayOrders(totalDayOrders);
+          setShiftRevenue(totalShiftRevenue);
+          setShiftOrders(totalShiftOrders);
+          setCashCollected(totalCash);
+          setCardCollected(totalCard);
+        }
+      } catch (err) {
+        if ((err as Error)?.name === "AbortError") return;
+      }
+    };
+    fetch_();
+    const stop = startPoll(fetch_, 30000);
+    return () => { stop(); currentAbort?.abort(); };
+  }, [restaurantSlug, markApiOk]);
+
+  // Accept payment at cashier — optimistic so the row moves out of
+  // 'Accept Payment' into 'Paid · Kitchen in Progress' immediately,
+  // without waiting for the next 5s poll.
+  //
+  // We snapshot the prior unpaidTotal before zeroing it so we can roll
+  // back on a server error. unpaidTotal drives the openSessions filter
+  // (not paymentReceived anymore), so forgetting to clear it would leave
+  // the row stuck for up to 5s after a successful settle — the cashier
+  // would see the check come back and assume the confirm failed.
+  const handleAcceptPayment = useCallback(async (
+    sessionId: string,
+    method: "CASH" | "CARD",
+    tip: number,
+  ): Promise<{ confirmedTotal: number } | null> => {
+    let priorUnpaid = 0;
+    setSessions((prev) => prev.map((s) => {
+      if (s.id !== sessionId) return s;
+      priorUnpaid = s.unpaidTotal || 0;
+      return { ...s, paymentReceived: true, unpaidTotal: 0 };
+    }));
+    try {
+      const res = await staffFetch(staff.id, "/api/sessions/pay", {
+        method: "PATCH",
+        body: JSON.stringify({ sessionId, paymentMethod: method, tip }),
+      });
+      if (!res.ok) {
+        setSessions((prev) => prev.map((s) => (s.id === sessionId ? { ...s, paymentReceived: false, unpaidTotal: priorUnpaid } : s)));
+        console.error("Payment failed:", await res.text());
+        return null;
+      }
+      const data = await res.json();
+      return { confirmedTotal: typeof data.confirmedTotal === "number" ? data.confirmedTotal : 0 };
+    } catch (err) {
+      setSessions((prev) => prev.map((s) => (s.id === sessionId ? { ...s, paymentReceived: false, unpaidTotal: priorUnpaid } : s)));
+      console.error("Payment failed:", err);
+      return null;
+    }
+  }, []);
+
+  // Reverse a just-settled payment. Kept separate from handleAcceptPayment
+  // because the optimistic model is different — we don't zero the unpaid
+  // total, we re-expose it. Server is source of truth; poll will refresh
+  // state within 20s but we also nudge by flipping the recentlyPaid row
+  // off the list immediately.
+  const handleReversePayment = useCallback(async (
+    sessionId: string,
+    reason: string,
+  ): Promise<boolean> => {
+    try {
+      const res = await staffFetch(staff.id, "/api/sessions/pay/reverse", {
+        method: "POST",
+        body: JSON.stringify({ sessionId, staffId: staff.id, reason }),
+      });
+      if (!res.ok) {
+        console.error("Reverse failed:", await res.text());
+        return false;
+      }
+      // Remove from recently-paid optimistically — next poll will
+      // re-populate openSessions with the reopened bill.
+      setRecentlyPaid((prev) => prev.filter((s) => s.id !== sessionId));
+      return true;
+    } catch (err) {
+      console.error("Reverse failed:", err);
+      return false;
+    }
+  }, [staff.id]);
+
+
+  const isOnShift = staff.shift === 0 || shiftInfo.isOnShift;
+
+  return (
+    <div className="min-h-dvh bg-sand-100" dir={dir}>
+      {/* ═══ OFF-SHIFT OVERLAY ═══ */}
+      {!isOnShift && staff.shift !== 0 && (
+        <div className="fixed inset-0 z-50 bg-sand-900/80 flex items-center justify-center px-4">
+          <div className="bg-white rounded-3xl p-8 max-w-sm w-full text-center shadow-2xl">
+            <div className="w-16 h-16 rounded-2xl bg-status-bad-100 flex items-center justify-center mx-auto mb-4">
+              <span className="text-3xl">🕐</span>
+            </div>
+            <h2 className="text-xl font-semibold text-text-primary mb-2">{t("cashier.offShift")}</h2>
+            <p className="text-sm text-text-secondary mb-1">{getShiftLabel(staff.shift, staff.role)}</p>
+            <p className="text-lg font-bold text-status-bad-600 mb-4">{shiftInfo.label}</p>
+            <p className="text-xs text-text-muted mb-6">{t("cashier.offShiftViewOnly")}</p>
+            <button onClick={onLogout} className="w-full py-3 rounded-xl bg-sand-900 text-white font-bold text-sm">
+              {t("cashier.logOut")}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Connection lost banner */}
+      {connectionLost && (
+        <div className="sticky top-0 z-50 bg-status-bad-600 text-white px-4 py-2.5 flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <span className="w-2.5 h-2.5 rounded-full bg-status-bad-300 animate-pulse" />
+            <span className="text-sm font-bold">{t("cashier.connectionLost")}</span>
+          </div>
+          <button onClick={() => window.location.reload()} className="px-3 py-1 rounded-lg bg-white/20 text-xs font-bold active:scale-95">
+            {t("cashier.reload")}
+          </button>
+        </div>
+      )}
+      {/* Header — mobile-first: logo + name + clock + kebab. Logout,
+          Schedule, Language collapse into a dropdown on small viewports. */}
+      <header className={`bg-white sticky ${connectionLost ? "top-[42px]" : "top-0"} z-20 border-b-2 border-sand-200 px-3 sm:px-6 py-2.5`}>
+        <div className="max-w-5xl mx-auto">
+          <div className="flex items-center gap-2 mb-2">
+            {/* Logo — compact on mobile */}
+            <div className="w-8 h-8 rounded-lg bg-status-wait-600 flex items-center justify-center flex-shrink-0">
+              <span className="text-sm text-white font-semibold">$</span>
+            </div>
+            {/* Name + badge + status. Revenue line hides below sm to save room. */}
+            <div className="min-w-0 flex-1">
+              <h1 className="text-sm sm:text-lg font-semibold text-text-primary flex items-center gap-1.5 truncate">
+                <span className="truncate">{staff.name}</span>
+                <span className="text-[9px] sm:text-xs font-semibold px-1.5 sm:px-2 py-0.5 rounded-lg bg-status-wait-100 text-status-wait-600 flex-shrink-0">{t("cashier.cashierBadge")}</span>
+                <span className={`w-2 h-2 rounded-full ${isOnShift ? "bg-status-good-500" : "bg-status-bad-500"} animate-pulse flex-shrink-0`} />
+              </h1>
+              <p className="hidden sm:block text-xs text-text-secondary font-semibold truncate">
+                {t("cashier.registerToday")} · {formatEGP(dayRevenue)} {t("common.egp")} {t("cashier.todaySuffix")}
+              </p>
+            </div>
+
+            <ClockButton staffId={staff.id} name={staff.name} role={staff.role} />
+
+            {/* Desktop: inline buttons. Mobile: kebab dropdown. */}
+            <div className="hidden sm:flex items-center gap-1.5">
+              <button onClick={() => setShowSchedule(true)} className="p-2 hover:bg-sand-100 rounded-xl transition" title={t("cashier.mySchedule")}>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+              </button>
+              <LanguageToggle lang={lang} onToggle={toggleLang} />
+              <button
+                onClick={onLogout}
+                className="inline-flex items-center gap-1.5 px-3 h-8 rounded-xl bg-sand-100 text-text-secondary hover:bg-status-bad-100 hover:text-status-bad-600 text-[11px] font-bold uppercase tracking-wider transition"
+                title={t("cashier.logOut")}
+              >
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
+                  <polyline points="16 17 21 12 16 7" />
+                  <line x1="21" y1="12" x2="9" y2="12" />
+                </svg>
+                {t("cashier.logout")}
+              </button>
+            </div>
+
+            {/* Mobile kebab */}
+            <CashierHeaderMenu
+              onOpenSchedule={() => setShowSchedule(true)}
+              onLogout={onLogout}
+              lang={lang}
+              onToggleLang={toggleLang}
+            />
+          </div>
+
+          {/* Mobile-only: today's total as its own slim chip so it stays visible */}
+          <p className="sm:hidden text-[11px] text-text-secondary font-semibold mb-2 truncate">
+            {t("cashier.registerToday")}: <span className="text-text-primary font-semibold tabular-nums">{formatEGP(dayRevenue)} {t("common.egp")}</span>
+          </p>
+
+          {staff.shift !== 0 && (
+            <div className={`flex items-center justify-between px-3 py-2 rounded-xl ${
+              isOnShift ? "bg-status-good-50 border border-status-good-200" : "bg-status-bad-50 border border-status-bad-200"
+            }`}>
+              <div className="flex items-center gap-2 min-w-0">
+                <span className={`w-2 h-2 rounded-full ${isOnShift ? "bg-status-good-500" : "bg-status-bad-500"} animate-pulse flex-shrink-0`} />
+                <span className={`text-[11px] sm:text-xs font-bold truncate ${isOnShift ? "text-status-good-700" : "text-status-bad-700"}`}>
+                  {getShiftLabel(staff.shift, "CASHIER")}
+                </span>
+              </div>
+              <span className={`text-xs sm:text-sm font-semibold tabular-nums flex-shrink-0 ${isOnShift ? "text-status-good-800" : "text-status-bad-800"}`}>
+                {shiftInfo.label}
+              </span>
+            </div>
+          )}
+        </div>
+      </header>
+      {showSchedule && <SchedulePopup staffId={staff.id} role={staff.role} onClose={() => setShowSchedule(false)} />}
+
+      {/* New-version banner — server has rolled forward while this tab
+          has been open. Cashier can reload manually; otherwise the
+          reliability hook auto-reloads after 60s of idle. */}
+      {newVersion && (
+        <div className="max-w-5xl mx-auto px-6 pt-4">
+          <div className="flex items-center gap-3 px-4 py-3 rounded-2xl bg-status-warn-50 border-2 border-status-warn-300">
+            <div className="w-9 h-9 rounded-xl bg-status-warn-500 text-white flex items-center justify-center text-lg shrink-0">
+              ↻
+            </div>
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-semibold text-status-warn-900">{t("cashier.newVersionAvailable")}</p>
+              <p className="text-[11px] text-status-warn-700 font-semibold">
+                {t("cashier.reloadWhenIdle")}
+              </p>
+            </div>
+            <button
+              onClick={reloadNow}
+              className="px-4 py-2 rounded-xl bg-status-warn-600 text-white text-xs font-semibold active:scale-95"
+            >
+              {t("cashier.reloadNow")}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Main — on mobile, payment panel sits first (it's the primary job).
+          On desktop the 1/3 sidebar layout takes over with stats on left. */}
+      <main className="max-w-5xl mx-auto px-3 sm:px-6 pt-4 sm:pt-6 pb-10">
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 sm:gap-6">
+          {/* Payment panel — primary action */}
+          <div className="lg:col-span-2 lg:order-2">
+            <AcceptPaymentPanel
+              sessions={sessions}
+              onAcceptPayment={handleAcceptPayment}
+              onReversePayment={handleReversePayment}
+              recentlyPaidSessions={recentlyPaid}
+              busyRef={busyRef}
+              staffId={staff.id}
+            />
+          </div>
+          {/* Stats column — below the fold on mobile, left on desktop */}
+          <div className="lg:col-span-1 lg:order-1 space-y-4 sm:space-y-6">
+            <DrawerPanel restaurantId={restaurantSlug} cashierId={staff.id} />
+            <CashierWallet
+              cashCollected={cashCollected}
+              cardCollected={cardCollected}
+              totalOrders={shiftOrders}
+            />
+            <RevenueSummary
+              dayRevenue={dayRevenue}
+              shiftRevenue={shiftRevenue}
+              dayOrders={dayOrders}
+              shiftOrders={shiftOrders}
+            />
+            <ShiftComparison
+              shiftRevenue={shiftRevenue}
+              cashCollected={cashCollected}
+              cardCollected={cardCollected}
+              activeSessions={sessions}
+            />
+          </div>
+        </div>
+      </main>
+    </div>
+  );
+}
+
+// Kebab dropdown for mobile header — holds schedule, language toggle,
+// logout. Visible only below sm; desktop inlines the same actions.
+function CashierHeaderMenu({
+  onOpenSchedule,
+  onLogout,
+  lang,
+  onToggleLang,
+}: {
+  onOpenSchedule: () => void;
+  onLogout: () => void;
+  lang: string;
+  onToggleLang: () => void;
+}) {
+  const { t } = useLanguage();
+  const [open, setOpen] = useState(false);
+
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setOpen(false); };
+    const onClick = () => setOpen(false);
+    window.addEventListener("keydown", onKey);
+    const ti = setTimeout(() => window.addEventListener("click", onClick), 0);
+    return () => {
+      clearTimeout(ti);
+      window.removeEventListener("keydown", onKey);
+      window.removeEventListener("click", onClick);
+    };
+  }, [open]);
+
+  return (
+    <div className="sm:hidden relative" onClick={(e) => e.stopPropagation()}>
+      <button
+        onClick={() => setOpen((v) => !v)}
+        className="w-9 h-9 rounded-xl bg-sand-100 text-text-secondary flex items-center justify-center hover:bg-sand-200 transition"
+        title={t("common.more") || "More"}
+        aria-label="More actions"
+      >
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="19" cy="12" r="2"/></svg>
+      </button>
+      {open && (
+        <div className="absolute end-0 top-11 z-50 w-52 rounded-xl border border-sand-200 bg-white shadow-lg py-1">
+          <button
+            onClick={() => { setOpen(false); onOpenSchedule(); }}
+            className="w-full flex items-center gap-3 px-3 py-2.5 text-left hover:bg-sand-50 transition"
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-text-secondary"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+            <span className="text-[12px] font-bold text-text-secondary">{t("cashier.mySchedule")}</span>
+          </button>
+          <button
+            onClick={() => { onToggleLang(); setOpen(false); }}
+            className="w-full flex items-center gap-3 px-3 py-2.5 text-left hover:bg-sand-50 transition"
+          >
+            <span className="w-3.5 h-3.5 inline-flex items-center justify-center text-[9px] font-semibold text-text-secondary bg-sand-100 rounded">ع</span>
+            <span className="text-[12px] font-bold text-text-secondary">{lang === "ar" ? "English" : "العربية"}</span>
+          </button>
+          <div className="border-t border-sand-100 mt-1 pt-1">
+            <button
+              onClick={() => { setOpen(false); onLogout(); }}
+              className="w-full flex items-center gap-3 px-3 py-2.5 text-left hover:bg-status-bad-50 transition"
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" className="text-status-bad-500">
+                <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
+                <polyline points="16 17 21 12 16 7" />
+                <line x1="21" y1="12" x2="9" y2="12" />
+              </svg>
+              <span className="text-[12px] font-bold text-status-bad-600">{t("cashier.logout")}</span>
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
