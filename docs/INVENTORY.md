@@ -317,20 +317,95 @@ Implications:
 
 ---
 
-## 14. Open questions / unknowns
+## 14. Phase 1 deep-read findings
 
-These need resolving before migration starts. Listed by priority.
+All 10 open questions resolved on 2026-04-26. Several findings change the migration strategy materially — flagged 🔥 below.
 
-1. **Payments processor** — is there a Stripe/PayMob/MyFatoorah integration somewhere, or are payments cash-only currently? Search `src/app/api/` for webhook handlers, search `src/lib/` for SDK imports.
-2. **Engine subdir** — `src/lib/engine/` not yet read. What's in there?
-3. **Staff auth flow** — is it pure PIN, or PIN + JWT/session cookie? Check `src/lib/api-auth.ts`.
-4. **Multi-tenant model** — every model has `restaurantId`. Is tenant resolution by subdomain, slug-in-URL, header, or session? Important for the auth layer in target architecture.
-5. **i18n storage** — translations in `src/i18n/` only, or also in DB (e.g. `Category.nameAr`, `MenuItem.nameAr`)? Both, but rules between them?
-6. **Web push VAPID keys** — env-only, or also in DB? Tenant-specific or global?
-7. **Real-time data** — `live-snapshot` + `polling` suggests poll-based. Is there SSE or websocket anywhere, or pure polling?
-8. **Print agent** — `scripts/print-agent.mjs` runs where? On the cafe's local machine, or server-side?
-9. **Sentry** — what data is sent? Any PII concerns to preserve?
-10. **Build outputs** — `build-output.txt`, `prisma_err.txt` in root suggest manual build/migration debugging. Anything else doing CI/CD beyond Vercel?
+### Q1 · Payments processor
+**Cash-only / cashier-recorded.** No Stripe/PayMob/MyFatoorah/Tap SDK in deps or in `src/`. Order rounds carry a free-text `paymentMethod` field (cash / card / instapay / etc) — settlement is recorded by the cashier in `CashSettlement`, not by an external webhook.
+- **Implication:** no `PaymentProcessor` port needed in v2. If payments are added later, they're a new adapter — no migration concern.
+
+### Q2 · `src/lib/engine/`
+**The "smart alerts / insights" pipeline.** Four components form a perception → intelligence → action → orchestrator pipeline:
+- `perception.ts` — observes live state (tables, orders, dwell times)
+- `intelligence.ts` — analyzes (item performance, conversion, leakage, "hot/cold/leaking" trends)
+- `action.ts` — recommended actions (boost item, activate promo, push upsell, alert kitchen, discount)
+- `orchestrator/` (state, decisions, actions, index) — coordinates the pipeline
+- All marked `"use client"` — runs in the browser, drives the floor manager dashboard alerts.
+- **Implication:** must be migrated as a single coherent unit. Lives in `domain/intelligence/` (pure rules) + `presentation/hooks/useIntelligence.ts` (the React glue).
+
+### Q3 · Staff auth
+**Header-based `x-staff-id` lookup.** No JWT, no cookies. Two helpers in `src/lib/api-auth.ts`:
+- `requireOwnerAuth(req)` — accepts OWNER or FLOOR_MANAGER role
+- `requireStaffAuth(req, allowedRoles?)` — accepts any active staff, optionally restricted
+Both look up `db.staff.findUnique({ where: { id }, select: { id, role, restaurantId, active } })`.
+- PIN validation is at `/api/staff/login` (see also `staff-code.ts`); the client stores the returned staff id in localStorage and sends it in the header on every subsequent request.
+- **Implication:** auth port is simple — a `StaffAuthenticator.byId(staffId)` returning a Staff entity, plus a separate `PinValidator.validate(pin)` for the login flow. No session middleware to design.
+
+### Q4 · Multi-tenant — 🔥 critical finding
+**Per-deploy single-tenant.** From `src/lib/restaurant-config.ts` comments:
+> *"Central per-deploy restaurant configuration. Every client is a separate deploy, so these are env vars the operator sets at build/run time — not DB fields. Kept in one file so spinning up a second client means editing .env and a seed script, nothing else."*
+
+Even though the schema has `restaurantId` on every model (looking like multi-tenant), in practice each Vercel deploy serves exactly one restaurant — `RESTAURANT_SLUG`, `RESTAURANT_NAME`, `RESTAURANT_TZ`, `RESTAURANT_CURRENCY`, `DELIVERY_FEE` are all `NEXT_PUBLIC_*` env vars inlined at build time. New restaurant = new deploy.
+
+- **Implication for v2 architecture:** **do NOT build a multi-tenant resolver layer.** `RESTAURANT_SLUG` is effectively a build-time constant. Repository queries scope by it but don't accept it as a parameter — it's read from config. The schema's `restaurantId` is preserved (queries scope by it for safety + future multi-tenant migration) but the runtime is single-tenant. This simplifies a lot: no tenant middleware, no per-request tenant context, no session-stored tenant.
+
+### Q5 · i18n storage — hybrid
+Two parallel mechanisms, by content type:
+- **UI chrome** (buttons, labels, errors): JSON files at `src/i18n/{en,ar}.json` + `src/i18n/index.ts` (`t()` and `tReplace()` helpers)
+- **Domain content** (menu items, categories, descriptions): DB columns `nameAr`, `nameRu`, `descAr`, `descRu` on `Category` and `MenuItem`
+- **Notable:** Russian (RU) exists only in DB columns, not in UI JSON. Either RU UI was never finished, or RU is content-only (menu translations for tourists).
+- **Implication for v2:** `infrastructure/i18n/translations.ts` ports the JSON files. Domain entities own their own translation methods (`MenuItem.nameIn(lang)`). No mixing.
+
+### Q6 · VAPID keys
+**Env vars, build-time.** `NEXT_PUBLIC_VAPID_PUBLIC_KEY` (public, in client bundle), `VAPID_PRIVATE_KEY` (server-only), `VAPID_SUBJECT` (mailto). Per-deploy = per-tenant in practice.
+- **Implication:** lives in `infrastructure/config/env.ts` validation. No DB-stored VAPID complexity.
+
+### Q7 · Real-time mechanism
+**Pure polling.** No `EventSource`, no `WebSocket`, no `text/event-stream` anywhere in `src/`. All "live" data flows through `src/lib/polling.ts` + `src/lib/use-live-data.ts`.
+- The polling implementation is **visibility-aware** (skips ticks when `document.visibilityState === "hidden"`, fires immediate refresh on visibility return). This is recent and was the Neon-burn optimization in commit `f0a2870`.
+- **Implication for v2:** no SSE/WS abstraction layer needed. The polling utility migrates as `presentation/hooks/usePoll.ts`. Preserve visibility-awareness exactly.
+
+### Q8 · Print agent
+**Runs on the cashier's Windows PC**, not on the server. Acts as a localhost HTTP→TCP bridge:
+```
+Cashier web app  ──HTTP──▶  localhost:9911  ──TCP:9100──▶  Xprinter XB-80T (LAN)
+```
+- Cashier page POSTs `{ sessionId }` to `http://localhost:9911/print` → agent fetches `${APP_URL}/api/invoice?sessionId=...` → renders ESC/POS bytes → sends to printer at static LAN IP (e.g. `192.168.1.50:9100`).
+- Pure Node, no TypeScript step. Started via Task Scheduler / NSSM on the cashier PC.
+- Env: `PRINTER_IP`, `PRINTER_PORT` (default 9100), `APP_URL`, `AGENT_PORT` (default 9911).
+- **Implication for v2:** the print agent is **out of scope for the architectural migration**. It stays at `scripts/print-agent.mjs`. The server-side concern is only `/api/invoice` (which the agent fetches) — that becomes part of the cashier slice.
+
+### Q9 · Sentry
+**Privacy-first config.** From `sentry.{client,server,edge}.config.ts`:
+- DSN from `NEXT_PUBLIC_SENTRY_DSN`
+- `enabled: process.env.NODE_ENV === "production"` (off in dev)
+- `tracesSampleRate: 0.2` (20% of transactions)
+- Client only: `replaysSessionSampleRate: 0.1`, `replaysOnErrorSampleRate: 1.0`
+- `sendDefaultPii: false` (explicit)
+- Client `ignoreErrors`: `["ResizeObserver loop", "AbortError", "Load failed", "Failed to fetch", "NetworkError"]`
+- **Implication for v2:** preserve byte-identical in `infrastructure/observability/sentry.ts`. The `sendDefaultPii: false` setting and the `ignoreErrors` list are deliberate decisions — don't "improve" them.
+
+### Q10 · CI/CD
+**Vercel-only, no GitHub Actions.** `.github/` directory is empty (no workflows). No `.gitlab-ci.yml`, no other CI config.
+- Push to `main` → Vercel auto-deploys (per memory `Vercel URL` and `Vercel Git reconnect 2026-04-24`).
+- **Implication for v2:** no CI migration needed. When v2 is ready to take over, point the Vercel project at the v2 repo's `main`.
+
+---
+
+## 15. Architectural adjustments unlocked by Phase 1
+
+These change the target architecture from what `ARCHITECTURE.md` initially assumed. See `ARCHITECTURE.md` "Updates from Phase 1 deep-read" appendix for the patched layer diagram.
+
+| Original assumption | Reality | Architecture change |
+|---|---|---|
+| Multi-tenant runtime | Per-deploy single-tenant | Drop tenant resolver / middleware. Repos read `RESTAURANT_SLUG` from config. |
+| Payment processor needed | Cash-only / cashier-recorded | Drop `PaymentProcessor` port for now. |
+| Real-time abstraction (poll/SSE/WS) | Pure polling, visibility-aware | Skip the abstraction. Direct `usePoll` hook in presentation. |
+| Auth = JWT/session middleware | Header-based staff-id lookup | Single auth port: `StaffAuthenticator.byId(id)`. |
+| Engine is misc utilities | Coherent perception→intelligence→action pipeline | New `domain/intelligence/` module, migrated as one unit. |
+| Print is server-side | Print agent runs on cashier PC | Out of architectural scope. Server only owns `/api/invoice`. |
+| i18n is one mechanism | Hybrid: chrome JSON + DB content cols | Two adapters: `infrastructure/i18n/chrome.ts` and entity-level `localizedName(lang)`. |
 
 ---
 

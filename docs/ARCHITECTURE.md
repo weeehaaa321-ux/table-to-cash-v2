@@ -237,3 +237,118 @@ Be honest about limits:
 - It doesn't fix existing bugs. Characterization tests preserve them; bug fixes are explicit follow-up commits.
 - It doesn't reduce file count. Layered architecture adds files (mappers, ports, use cases). The trade is more files for clearer boundaries and easier change.
 - It doesn't replace good test coverage. Layer rules make tests easier to write, but you still have to write them.
+
+---
+
+## Updates from Phase 1 deep-read · 2026-04-26
+
+After reading the source repo end-to-end, several initial assumptions in this document don't match reality. Patches below override the corresponding sections above.
+
+### Patch 1 — Drop multi-tenant resolution
+
+**Reality:** the source repo is per-deploy single-tenant. `RESTAURANT_SLUG`, `RESTAURANT_CURRENCY`, `RESTAURANT_TZ` are `NEXT_PUBLIC_*` env vars baked in at build time. The schema's `restaurantId` columns exist, but at runtime there is exactly one restaurant per deploy.
+
+**Architecture change:**
+- No tenant middleware. No `TenantContext` request-scoped object.
+- Repositories read `RESTAURANT_SLUG` from `infrastructure/config/env.ts` and scope queries by it internally — callers never pass a tenant.
+- Schema-level `restaurantId` is preserved as a future-proofing column. If true multi-tenant is needed someday, that's a separate migration — not part of v2.
+
+### Patch 2 — Drop the `PaymentProcessor` port
+
+**Reality:** no Stripe / PayMob / MyFatoorah / Tap integration exists. Payments are recorded by the cashier as a free-text `paymentMethod` on each session round.
+
+**Architecture change:**
+- No `application/ports/PaymentProcessor.ts`.
+- If a payment processor is added later, it joins as a new adapter. Until then, no port.
+
+### Patch 3 — Replace real-time abstraction with simple polling
+
+**Reality:** no SSE, no WebSocket. All "live" data is poll-based via `src/lib/polling.ts` (visibility-aware, skips when tab hidden).
+
+**Architecture change:**
+- No streaming abstraction in `application/ports/`.
+- `presentation/hooks/usePoll.ts` ports the existing visibility-aware polling utility verbatim. Preserve the visibility behavior — it's a Neon-burn optimization.
+- Repositories expose plain async query methods. The presentation layer decides poll cadence per use case.
+
+### Patch 4 — Simpler auth port
+
+**Reality:** auth is a single header check (`x-staff-id`) against a DB lookup. No JWT, no cookies, no session middleware.
+
+**Architecture change:** the `application/ports/StaffAuthenticator.ts` interface has just two methods:
+```ts
+interface StaffAuthenticator {
+  byId(staffId: string): Promise<Staff | null>;          // for x-staff-id middleware
+  byPin(pin: string): Promise<Staff | null>;             // for /api/staff/login
+}
+```
+Both implementations live in `infrastructure/auth/PrismaStaffAuthenticator.ts`. No session abstraction.
+
+### Patch 5 — Add `domain/intelligence/` module
+
+**Reality:** `src/lib/engine/` is a coherent perception → intelligence → action → orchestrator pipeline driving the floor manager dashboard's smart alerts.
+
+**Architecture change:**
+- New domain module `domain/intelligence/`:
+  - `Perception.ts` (live state observation rules)
+  - `Insight.ts` (analysis output type)
+  - `Action.ts` (recommended action type)
+  - `analyzeItemPerformance.ts`, `detectLeaking.ts`, etc. — pure functions
+- Application use case `EvaluateIntelligenceUseCase` in `application/intelligence/`.
+- Presentation hook `useIntelligence.ts` in `presentation/hooks/`, glues to the polling layer.
+- **Migrate as a single slice** in Phase 5, never split — the pipeline integrity matters more than per-file granularity.
+
+### Patch 6 — Print agent stays out of scope
+
+**Reality:** `scripts/print-agent.mjs` runs on the cashier's Windows PC as a localhost HTTP→TCP bridge to an Xprinter XB-80T. Not server code.
+
+**Architecture change:**
+- No server-side printing layer.
+- The server's only print-related responsibility is `/api/invoice` (returns the JSON the agent renders to ESC/POS).
+- `scripts/print-agent.mjs` migrates as-is, kept under `scripts/` in v2. Document it in `infrastructure/printing/README.md` so future readers know where the print pipeline lives.
+
+### Patch 7 — i18n is hybrid; respect the split
+
+**Reality:**
+- UI chrome (button labels, error messages) → JSON files at `src/i18n/{en,ar}.json`
+- Domain content (menu items, categories, descriptions) → DB columns: `nameAr`, `nameRu`, `descAr`, `descRu`
+
+**Architecture change:**
+- `infrastructure/i18n/chrome.ts` — ports the `t()` / `tReplace()` helpers from `src/i18n/index.ts`. UI components import from here.
+- Domain entities own their content translation: `MenuItem.nameIn(lang)` returns the right column. No JSON involvement for content.
+- `nameRu` / `descRu` columns are present on the schema; the chrome JSON has only EN + AR. When/if RU UI is added, it's a new chrome JSON file — separate concern from content translations.
+
+### Patch 8 — Sentry config is byte-identical, not "to taste"
+
+**Reality:** Sentry settings (sample rates, `sendDefaultPii: false`, `ignoreErrors` list) are deliberate.
+
+**Architecture change:**
+- `infrastructure/observability/sentry.ts` ports the three config files (`sentry.client/server/edge.config.ts`) verbatim.
+- No "improvements" during migration. If the config is wrong, that's a separate decision documented in its own commit, after migration.
+
+### Summary of removed / added layers
+
+```diff
+  application/
+    ports/
+      RestaurantRepository.ts
+      MenuRepository.ts
+      OrderRepository.ts
+      SessionRepository.ts
+      StaffRepository.ts
+      DeliveryRepository.ts
+      PushNotifier.ts
+      Clock.ts
+-     PaymentProcessor.ts            ← removed (no payments today)
++     StaffAuthenticator.ts          ← added (replaces auth middleware)
+
+  domain/
+    restaurant/, menu/, order/, session/, staff/, delivery/, alerts/, shared/
++   intelligence/                    ← added (perception → action pipeline)
+
+  presentation/
+    hooks/
++     usePoll.ts                     ← replaces "real-time" abstraction
++     useIntelligence.ts             ← glue for intelligence module
+```
+
+This patched architecture is what slice migrations target. The original layer diagrams above remain for context; where they conflict with these patches, the patches win.
