@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback, useMemo, useRef } from "react";
+import { useEffect, useState, useCallback, useMemo, useRef, memo } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { usePerception, type LiveOrder } from "@/lib/engine/perception";
 import { useLiveData } from "@/lib/use-live-data";

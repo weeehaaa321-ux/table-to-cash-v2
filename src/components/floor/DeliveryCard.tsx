@@ -1,10 +1,10 @@
 "use client";
 
-import { useState } from "react";
+import { memo, useState } from "react";
 import { useLanguage } from "@/lib/use-language";
 import type { DeliveryOrder, StaffInfo } from "./types";
 
-export function DeliveryCard({
+function DeliveryCardImpl({
   delivery, drivers, onAssign, onUpdateStatus,
 }: {
   delivery: DeliveryOrder;
@@ -75,3 +75,5 @@ export function DeliveryCard({
     </div>
   );
 }
+
+export const DeliveryCard = memo(DeliveryCardImpl);

@@ -1,9 +1,10 @@
 "use client";
 
+import { memo } from "react";
 import { useLanguage } from "@/lib/use-language";
 import type { LiveOrder } from "./types";
 
-export function OrderTimeline({ order }: { order: LiveOrder }) {
+function OrderTimelineImpl({ order }: { order: LiveOrder }) {
   const { t } = useLanguage();
   const steps = [
     { label: t("floor.ordered"), ts: order.createdAt },
@@ -35,3 +36,8 @@ export function OrderTimeline({ order }: { order: LiveOrder }) {
     </div>
   );
 }
+
+// Memoized: parent FloorManagerView re-renders on every poll;
+// timeline only depends on `order` shape and changes when order
+// status/timestamps change.
+export const OrderTimeline = memo(OrderTimelineImpl);

@@ -1,5 +1,10 @@
 import type { NextConfig } from "next";
 import { withSentryConfig } from "@sentry/nextjs";
+import bundleAnalyzer from "@next/bundle-analyzer";
+
+const withBundleAnalyzer = bundleAnalyzer({
+  enabled: process.env.ANALYZE === "true",
+});
 
 const nextConfig: NextConfig = {
   serverExternalPackages: ["pg", "web-push"],
@@ -20,13 +25,8 @@ const nextConfig: NextConfig = {
   },
 };
 
-export default withSentryConfig(nextConfig, {
-  // Suppress noisy source map upload logs in CI
+export default withSentryConfig(withBundleAnalyzer(nextConfig), {
   silent: true,
-
-  // Upload source maps for better stack traces
   widenClientFileUpload: true,
-
-  // Tree-shake Sentry logger in production
   disableLogger: true,
 });
