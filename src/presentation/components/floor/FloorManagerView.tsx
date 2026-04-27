@@ -2,10 +2,10 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { ClockButton } from "@/components/ui/ClockButton";
-import LogoutButton from "@/components/ui/LogoutButton";
-import SchedulePopup from "@/components/ui/SchedulePopup";
-import { LanguageToggle } from "@/components/ui/LanguageToggle";
+import { ClockButton } from "@/presentation/components/ui/ClockButton";
+import LogoutButton from "@/presentation/components/ui/LogoutButton";
+import SchedulePopup from "@/presentation/components/ui/SchedulePopup";
+import { LanguageToggle } from "@/presentation/components/ui/LanguageToggle";
 import { getOrderTag } from "@/lib/order-label";
 import { useLanguage } from "@/lib/use-language";
 import { initials, minsAgo, STATUS_COLORS, TABLE_ACCENT, TABLE_COLORS, WAITER_PALETTE, ALERT_ICONS } from "./constants";

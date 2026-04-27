@@ -3,16 +3,16 @@
 import { useEffect, useState, useCallback, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useLanguage } from "@/lib/use-language";
-import { LanguageToggle } from "@/components/ui/LanguageToggle";
+import { LanguageToggle } from "@/presentation/components/ui/LanguageToggle";
 import { getShiftTimer, getShiftLabel, getCurrentShift } from "@/lib/shifts";
-import SchedulePopup from "@/components/ui/SchedulePopup";
-import { ClockButton } from "@/components/ui/ClockButton";
+import SchedulePopup from "@/presentation/components/ui/SchedulePopup";
+import { ClockButton } from "@/presentation/components/ui/ClockButton";
 import { requestNotificationPermission } from "@/lib/notifications";
 import { startPoll } from "@/lib/polling";
 import { useCashierReliability } from "@/lib/use-cashier-reliability";
 import { getOrderLabel } from "@/lib/order-label";
 import { staffFetch } from "@/lib/staff-fetch";
-import { DrawerPanel } from "@/components/cashier/DrawerPanel";
+import { DrawerPanel } from "@/presentation/components/cashier/DrawerPanel";
 
 // ═══════════════════════════════════════════════
 // TYPES

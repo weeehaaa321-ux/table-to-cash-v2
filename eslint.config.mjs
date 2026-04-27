@@ -35,7 +35,6 @@ const eslintConfig = defineConfig([
     // Layer-boundary lint rules don't apply to legacy paths until
     // they're moved out.
     "src/lib/**",
-    "src/components/**",
     "src/store/**",
     "src/types/**",
   ]),

@@ -1,6 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import "./globals.css";
-import { ScrollRestore } from "@/components/ui/ScrollRestore";
+import { ScrollRestore } from "@/presentation/components/ui/ScrollRestore";
 
 export const metadata: Metadata = {
   title: "Table to Cash",

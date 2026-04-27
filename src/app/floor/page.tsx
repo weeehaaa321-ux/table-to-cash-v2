@@ -1,10 +1,10 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { FloorLoginScreen } from "@/components/floor/FloorLoginScreen";
-import { FloorManagerView } from "@/components/floor/FloorManagerView";
-import { SESSION_DURATION } from "@/components/floor/constants";
-import type { LoggedInStaff } from "@/components/floor/types";
+import { FloorLoginScreen } from "@/presentation/components/floor/FloorLoginScreen";
+import { FloorManagerView } from "@/presentation/components/floor/FloorManagerView";
+import { SESSION_DURATION } from "@/presentation/components/floor/constants";
+import type { LoggedInStaff } from "@/presentation/components/floor/types";
 
 export default function FloorManagerPage() {
   const [staff, setStaff] = useState<LoggedInStaff | null>(null);

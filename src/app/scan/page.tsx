@@ -4,9 +4,9 @@ import { Suspense, useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useCart } from "@/store/cart";
-import { PhoneFrame } from "@/components/ui/PhoneFrame";
+import { PhoneFrame } from "@/presentation/components/ui/PhoneFrame";
 import { useLanguage } from "@/lib/use-language";
-import { LanguageToggle } from "@/components/ui/LanguageToggle";
+import { LanguageToggle } from "@/presentation/components/ui/LanguageToggle";
 
 export default function ScanPageWrapper() {
   return (

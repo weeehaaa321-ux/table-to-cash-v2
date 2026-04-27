@@ -20,12 +20,12 @@ import { useSystemState, type DecisionRecord } from "@/lib/engine/orchestrator";
 import { useMenu } from "@/store/menu";
 import { resolveImage } from "@/lib/placeholders";
 import { useLanguage } from "@/lib/use-language";
-import { LanguageToggle } from "@/components/ui/LanguageToggle";
-import LogoutButton from "@/components/ui/LogoutButton";
+import { LanguageToggle } from "@/presentation/components/ui/LanguageToggle";
+import LogoutButton from "@/presentation/components/ui/LogoutButton";
 import { getShiftCount, getShiftLabel, getShiftTimer } from "@/lib/shifts";
 import { DEFAULT_KITCHEN_CONFIG, normalizeKitchenConfig, type KitchenConfig } from "@/lib/kitchen-config";
-import { OwnerManual } from "@/components/dashboard/OwnerManual";
-import { QRCodePanel } from "@/components/dashboard/QRCodePanel";
+import { OwnerManual } from "@/presentation/components/dashboard/OwnerManual";
+import { QRCodePanel } from "@/presentation/components/dashboard/QRCodePanel";
 
 // ─── Types ──────────────────────────────────────
 

@@ -3,8 +3,8 @@
 import { useEffect, useState, useCallback, useRef, useMemo } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useLanguage } from "@/lib/use-language";
-import { LanguageToggle } from "@/components/ui/LanguageToggle";
-import { NotificationBadge } from "@/components/ui/NotificationBadge";
+import { LanguageToggle } from "@/presentation/components/ui/LanguageToggle";
+import { NotificationBadge } from "@/presentation/components/ui/NotificationBadge";
 import {
   usePerception,
   type LiveOrder,
@@ -13,8 +13,8 @@ import {
 import { useLiveData } from "@/lib/use-live-data";
 import { useMenu } from "@/store/menu";
 import { getShiftTimer, getShiftLabel } from "@/lib/shifts";
-import SchedulePopup from "@/components/ui/SchedulePopup";
-import { ClockButton } from "@/components/ui/ClockButton";
+import SchedulePopup from "@/presentation/components/ui/SchedulePopup";
+import { ClockButton } from "@/presentation/components/ui/ClockButton";
 import { getOrderLabel } from "@/lib/order-label";
 import {
   requestNotificationPermission,

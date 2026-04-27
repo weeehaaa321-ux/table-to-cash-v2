@@ -5,7 +5,7 @@ import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { useCart } from "@/store/cart";
 
 const LocationPicker = lazy(() =>
-  import("@/components/ui/LocationPicker").then((m) => ({ default: m.LocationPicker }))
+  import("@/presentation/components/ui/LocationPicker").then((m) => ({ default: m.LocationPicker }))
 );
 
 type VipData = {

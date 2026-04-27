@@ -1,9 +1,9 @@
 import { Suspense } from "react";
-import { ImmersiveMenu } from "@/components/menu/ImmersiveMenu";
-import { JoinRequestOverlay } from "@/components/ui/JoinRequestOverlay";
-import { FloatingCart } from "@/components/ui/FloatingCart";
-import { CallWaiterButton } from "@/components/ui/CallWaiterButton";
-import { VipMenuInit } from "@/components/ui/VipMenuInit";
+import { ImmersiveMenu } from "@/presentation/components/menu/ImmersiveMenu";
+import { JoinRequestOverlay } from "@/presentation/components/ui/JoinRequestOverlay";
+import { FloatingCart } from "@/presentation/components/ui/FloatingCart";
+import { CallWaiterButton } from "@/presentation/components/ui/CallWaiterButton";
+import { VipMenuInit } from "@/presentation/components/ui/VipMenuInit";
 
 export default async function MenuRoute(props: {
   searchParams: Promise<{ table?: string; restaurant?: string; session?: string; slug?: string; sessionId?: string; vip?: string; vipGuestId?: string; vipName?: string; orderType?: string }>;

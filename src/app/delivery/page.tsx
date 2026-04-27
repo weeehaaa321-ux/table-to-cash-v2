@@ -6,7 +6,7 @@ import { startPoll } from "@/lib/polling";
 import { useRouter } from "next/navigation";
 import { staffFetch } from "@/lib/staff-fetch";
 import { useLanguage } from "@/lib/use-language";
-import { LanguageToggle } from "@/components/ui/LanguageToggle";
+import { LanguageToggle } from "@/presentation/components/ui/LanguageToggle";
 
 const RESTAURANT_SLUG = process.env.NEXT_PUBLIC_RESTAURANT_SLUG || "neom-dahab";
 const STORAGE_KEY = "delivery_staff";

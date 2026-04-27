@@ -1,14 +1,11 @@
-import type { PrismaRestaurantRepository } from "@/infrastructure/prisma/repositories/PrismaRestaurantRepository";
+import type { RestaurantRepository } from "@/application/ports/RestaurantRepository";
 
 /**
- * Restaurant config updates (waiter capacity, etc.). The base
- * RestaurantRepository port doesn't include mutations because they're
- * rare admin ops; this use case takes the concrete Prisma repo to
- * access the update method directly. If more surfaces need this, lift
- * an UpdateRestaurantRepository port.
+ * Restaurant config updates (waiter capacity, etc.). Talks only to the
+ * RestaurantRepository port — concrete adapter is wired in composition.
  */
 export class UpdateRestaurantConfigUseCase {
-  constructor(private readonly repo: PrismaRestaurantRepository) {}
+  constructor(private readonly repo: RestaurantRepository) {}
 
   async setWaiterCapacity(capacity: number): Promise<void> {
     await this.repo.updateWaiterCapacity(capacity);

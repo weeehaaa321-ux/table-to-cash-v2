@@ -5,16 +5,16 @@ import { motion, AnimatePresence } from "framer-motion";
 import { usePerception, type LiveOrder } from "@/lib/engine/perception";
 import { useLiveData } from "@/lib/use-live-data";
 import { useMenu } from "@/store/menu";
-import LogoutButton from "@/components/ui/LogoutButton";
+import LogoutButton from "@/presentation/components/ui/LogoutButton";
 import { getShiftTimer, getShiftLabel } from "@/lib/shifts";
-import SchedulePopup from "@/components/ui/SchedulePopup";
-import { ClockButton } from "@/components/ui/ClockButton";
-import { StaffHeaderMenu } from "@/components/ui/StaffHeaderMenu";
+import SchedulePopup from "@/presentation/components/ui/SchedulePopup";
+import { ClockButton } from "@/presentation/components/ui/ClockButton";
+import { StaffHeaderMenu } from "@/presentation/components/ui/StaffHeaderMenu";
 import { getOrderTag } from "@/lib/order-label";
 import { staffFetch } from "@/lib/staff-fetch";
 import { translateToArabic } from "@/lib/translate-notes";
 import { useLanguage } from "@/lib/use-language";
-import { LanguageToggle } from "@/components/ui/LanguageToggle";
+import { LanguageToggle } from "@/presentation/components/ui/LanguageToggle";
 
 type StaffInfo = { id: string; name: string; role: string; shift: number };
 

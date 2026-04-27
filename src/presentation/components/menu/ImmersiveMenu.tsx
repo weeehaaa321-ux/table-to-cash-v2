@@ -7,13 +7,13 @@ import { useCart } from "@/store/cart";
 import { useMenu } from "@/store/menu";
 import { useAction } from "@/lib/engine/action";
 import type { MenuItem, AddOn } from "@/types/menu";
-import { AddOnSheet } from "@/components/ui/AddOnSheet";
+import { AddOnSheet } from "@/presentation/components/ui/AddOnSheet";
 import { useLanguage } from "@/lib/use-language";
-import { LanguageToggle } from "@/components/ui/LanguageToggle";
+import { LanguageToggle } from "@/presentation/components/ui/LanguageToggle";
 import { getLocalizedName, getLocalizedDesc } from "@/i18n";
 import Link from "next/link";
-import { ChangeTableButton } from "@/components/ui/ChangeTableModal";
-import { GuestBadge } from "@/components/ui/GuestBadge";
+import { ChangeTableButton } from "@/presentation/components/ui/ChangeTableModal";
+import { GuestBadge } from "@/presentation/components/ui/GuestBadge";
 import { isSelfInitiatedMove } from "@/lib/self-move";
 
 // ═══════════════════════════════════════════════
