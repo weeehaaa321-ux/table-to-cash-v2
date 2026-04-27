@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { db } from "@/lib/db";
+import { legacyDb as db } from "@/infrastructure/composition";
 
 // GET: Check if any delivery drivers are currently online
 export async function GET(request: NextRequest) {

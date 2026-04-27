@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { db } from "@/lib/db";
+import { legacyDb as db } from "@/infrastructure/composition";
 import { sendPushToStaff } from "@/lib/web-push";
 import { maybeCloseSession } from "@/lib/queries";
 import { requireStaffAuth } from "@/lib/api-auth";

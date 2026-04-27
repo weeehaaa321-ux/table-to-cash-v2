@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { db } from "@/lib/db";
+import { legacyDb as db } from "@/infrastructure/composition";
 
 // POST: Delegate payment authority to another guest number (called by guest)
 // Body: { sessionId, guestNumber }

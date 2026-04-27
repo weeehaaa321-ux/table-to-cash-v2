@@ -1,12 +1,11 @@
 import { NextResponse } from "next/server";
-import { getCurrentShift, getShiftLabel, getShiftProgress } from "@/lib/shifts";
+import { useCases } from "@/infrastructure/composition";
 
-// GET: Current shift info
 export async function GET() {
-  const currentShift = getCurrentShift();
+  const currentShift = useCases.sessions.currentShift();
   return NextResponse.json({
     currentShift,
-    label: getShiftLabel(currentShift),
-    progress: Math.round(getShiftProgress()),
+    label: useCases.sessions.shiftLabel(currentShift),
+    progress: Math.round(useCases.sessions.shiftProgress()),
   });
 }

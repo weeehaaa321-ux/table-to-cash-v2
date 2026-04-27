@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { db } from "@/lib/db";
+import { legacyDb as db } from "@/infrastructure/composition";
 
 // PATCH /api/menu-admin/category
 // { id, availableFromHour?, availableToHour?, name?, nameAr?, nameRu? }

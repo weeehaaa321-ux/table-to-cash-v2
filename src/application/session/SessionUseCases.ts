@@ -3,7 +3,7 @@
 
 import { db } from "@/lib/db";
 import { maybeCloseSession } from "@/lib/queries";
-import { getCurrentShift } from "@/lib/shifts";
+import { getCurrentShift, getShiftLabel, getShiftProgress } from "@/lib/shifts";
 import { computeSessionRounds } from "@/lib/session-rounds";
 import { nowInRestaurantTz } from "@/lib/restaurant-config";
 
@@ -122,6 +122,14 @@ export class SessionUseCases {
   /** Helpers that legacy lib functions used to expose directly. */
   currentShift(): 1 | 2 | 3 {
     return getCurrentShift();
+  }
+
+  shiftLabel(s: 1 | 2 | 3): string {
+    return getShiftLabel(s);
+  }
+
+  shiftProgress(): number {
+    return getShiftProgress();
   }
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   computeRounds(orders: any[]): any {

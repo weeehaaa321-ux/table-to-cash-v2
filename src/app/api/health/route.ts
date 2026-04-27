@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { db } from "@/lib/db";
+import { legacyDb as db } from "@/infrastructure/composition";
 
 // Liveness probe for UptimeRobot / any external monitor. Fails fast if
 // the DB connection is broken so the monitor can page you before a

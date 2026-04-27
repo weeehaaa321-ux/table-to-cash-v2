@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { db } from "@/lib/db";
+import { legacyDb as db } from "@/infrastructure/composition";
 
 // POST: Create a join request (guest wants to join a session)
 export async function POST(request: NextRequest) {

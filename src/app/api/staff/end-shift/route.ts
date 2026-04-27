@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { db } from "@/lib/db";
+import { legacyDb as db } from "@/infrastructure/composition";
 import { transferWaiterSessions } from "@/lib/waiter-transfer";
 
 // Resolve restaurantId — could be a slug or a cuid

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { db } from "@/lib/db";
+import { legacyDb as db } from "@/infrastructure/composition";
 import { nowInRestaurantTz } from "@/lib/restaurant-config";
 import { requireOwnerAuth, requireStaffAuth } from "@/lib/api-auth";
 import { toNum } from "@/lib/money";

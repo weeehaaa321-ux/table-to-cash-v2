@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { db } from "@/lib/db";
+import { legacyDb as db } from "@/infrastructure/composition";
 import { getCurrentShift } from "@/lib/shifts";
 import { computeSessionRounds } from "@/lib/session-rounds";
 import { nowInRestaurantTz } from "@/lib/restaurant-config";

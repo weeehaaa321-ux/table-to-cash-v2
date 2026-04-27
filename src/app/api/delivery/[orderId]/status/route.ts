@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { db } from "@/lib/db";
+import { legacyDb as db } from "@/infrastructure/composition";
 import { maybeCloseSession } from "@/lib/queries";
 import { assignPendingDeliveries } from "@/lib/delivery-assignment";
 import { requireStaffAuth } from "@/lib/api-auth";

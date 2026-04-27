@@ -83,3 +83,10 @@ export const ports = {
   ratingRepo,
   pushNotifier,
 };
+
+// Transitional escape hatch: routes mid-migration may still need raw
+// Prisma access when their use cases haven't been written yet. Routing
+// through composition keeps imports as "presentation → composition"
+// rather than "presentation → @/lib/* directly". Each use of `legacyDb`
+// is a follow-up TODO to push the logic into a use case.
+export { db as legacyDb } from "@/lib/db";

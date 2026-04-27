@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import * as Sentry from "@sentry/nextjs";
-import { db } from "@/lib/db";
+import { legacyDb as db } from "@/infrastructure/composition";
 import { getOrdersForRestaurant, getDefaultRestaurant, getRestaurantBySlug } from "@/lib/queries";
 import { getCurrentShift } from "@/lib/shifts";
 import { computeSessionRounds } from "@/lib/session-rounds";

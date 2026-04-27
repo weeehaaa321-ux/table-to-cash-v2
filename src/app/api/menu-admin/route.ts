@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { db } from "@/lib/db";
+import { legacyDb as db } from "@/infrastructure/composition";
 
 async function resolveRestaurantId(id: string): Promise<string | null> {
   if (!id) return null;

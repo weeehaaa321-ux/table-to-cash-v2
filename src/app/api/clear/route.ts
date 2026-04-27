@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { db } from "@/lib/db";
+import { legacyDb as db } from "@/infrastructure/composition";
 
 // Resolve restaurantId — could be a slug or a cuid
 async function resolveRestaurantId(id: string): Promise<string | null> {

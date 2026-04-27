@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { appendItemsToOrder, AppendItemsError } from "@/lib/queries";
 import { requireStaffAuth } from "@/lib/api-auth";
-import { db } from "@/lib/db";
+import { legacyDb as db } from "@/infrastructure/composition";
 
 // ─── POST: Append items to an existing order ────
 //
