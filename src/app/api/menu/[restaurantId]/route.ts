@@ -13,7 +13,15 @@ export async function GET(
   }
   try {
     const result = await useCases.menuRead.forRestaurant(restaurantId);
-    return NextResponse.json(result);
+    // Menu changes are rare; allow CDN/browser to cache for 10s and
+    // serve stale-while-revalidate for 60s. This shaves DB load on
+    // repeat scans (a guest QR scan + page reload + menu fetch hits
+    // the same data 3-5 times in 30 seconds otherwise).
+    return NextResponse.json(result, {
+      headers: {
+        "Cache-Control": "public, s-maxage=10, stale-while-revalidate=60",
+      },
+    });
   } catch {
     return NextResponse.json({ error: "Failed to load menu" }, { status: 500 });
   }
