@@ -335,30 +335,39 @@ export async function GET(request: NextRequest) {
     const hoursElapsed = Math.max(1, (now.getTime() - since.getTime()) / 3600000);
     const ordersPerHour = paidOrders.length / hoursElapsed;
 
-    return NextResponse.json({
-      period,
-      since: since.toISOString(),
-      summary: {
-        revenue: Math.round(revenue),
-        orders: paidOrders.length,
-        sessions: sessions.length,
-        guests,
-        avgCheck: Math.round(avgCheck),
-        ordersPerHour: Math.round(ordersPerHour * 10) / 10,
+    return NextResponse.json(
+      {
+        period,
+        since: since.toISOString(),
+        summary: {
+          revenue: Math.round(revenue),
+          orders: paidOrders.length,
+          sessions: sessions.length,
+          guests,
+          avgCheck: Math.round(avgCheck),
+          ordersPerHour: Math.round(ordersPerHour * 10) / 10,
+        },
+        timeseries: buckets.map((b) => ({
+          t: b.t,
+          revenue: Math.round(b.revenue),
+          orders: b.orders,
+        })),
+        hourHeatmap,
+        topItems,
+        paymentMix,
+        staffQuality,
+        kitchen,
+        cancellations,
+        comps,
       },
-      timeseries: buckets.map((b) => ({
-        t: b.t,
-        revenue: Math.round(b.revenue),
-        orders: b.orders,
-      })),
-      hourHeatmap,
-      topItems,
-      paymentMix,
-      staffQuality,
-      kitchen,
-      cancellations,
-      comps,
-    });
+      {
+        headers: {
+          // Heavy aggregation endpoint — 30s cache materially cuts DB
+          // load while keeping the dashboard's perceived freshness.
+          "Cache-Control": "public, s-maxage=30, stale-while-revalidate=60",
+        },
+      },
+    );
   } catch (err) {
     console.error("Analytics fetch failed:", err);
     return NextResponse.json({ error: "Failed to fetch analytics" }, { status: 500 });
