@@ -1,13 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { legacyDb as db } from "@/infrastructure/composition";
+import { useCases } from "@/infrastructure/composition";
 import { nowInRestaurantTz } from "@/lib/restaurant-config";
-
-async function resolveRestaurantId(id: string): Promise<string | null> {
-  if (!id) return null;
-  if (id.startsWith("c") && id.length > 10) return id;
-  const r = await db.restaurant.findUnique({ where: { slug: id }, select: { id: true } });
-  return r?.id || null;
-}
 
 export async function GET(request: NextRequest) {
   const url = new URL(request.url);
@@ -15,19 +8,13 @@ export async function GET(request: NextRequest) {
   const orderId = url.searchParams.get("orderId");
   const rawId = url.searchParams.get("restaurantId") || "";
 
-  const restaurantId = await resolveRestaurantId(rawId);
+  const restaurantId = await useCases.delivery.resolveRestaurantId(rawId);
   if (!restaurantId) {
     return NextResponse.json({ error: "restaurantId required" }, { status: 400 });
   }
 
-  // Single-order lookup (used by VIP tracking page)
   if (orderId) {
-    const order = await db.order.findFirst({
-      where: { id: orderId, restaurantId, orderType: "DELIVERY" },
-      include: {
-        deliveryDriver: { select: { id: true, name: true } },
-      },
-    });
+    const order = await useCases.delivery.findOrderForTracking(orderId, restaurantId);
     if (!order) return NextResponse.json([]);
     return NextResponse.json([{
       id: order.id,
@@ -43,43 +30,10 @@ export async function GET(request: NextRequest) {
   const offset = new Date().getTime() - cairoNow.getTime();
   const todayStartUTC = new Date(todayStart.getTime() + offset);
 
-  const orders = await db.order.findMany({
-    where: {
-      restaurantId,
-      orderType: "DELIVERY",
-      AND: [
-        // Time scope: active orders OR delivered today
-        {
-          OR: [
-            { status: { notIn: ["PAID", "CANCELLED"] } },
-            { deliveredAt: { gte: todayStartUTC } },
-          ],
-        },
-        // Driver scope: show their orders + unassigned orders from CONFIRMED onward
-        // (drivers see orders early so they can head to restaurant while kitchen prepares)
-        ...(driverId ? [{
-          OR: [
-            { deliveryDriverId: driverId },
-            { deliveryDriverId: null, status: { notIn: ["PENDING", "CANCELLED", "PAID"] as never } },
-          ],
-        }] : []),
-        // Owner view: same logic — show assigned + unassigned from CONFIRMED onward
-        ...(!driverId ? [{
-          OR: [
-            { deliveryDriverId: { not: null } },
-            { deliveryDriverId: null, status: { notIn: ["PENDING", "CANCELLED", "PAID"] as never } },
-            { deliveredAt: { gte: todayStartUTC } },
-          ],
-        }] : []),
-      ],
-    },
-    include: {
-      items: { include: { menuItem: { select: { name: true } } } },
-      vipGuest: { select: { name: true, phone: true, address: true, addressNotes: true, locationLat: true, locationLng: true } },
-      deliveryDriver: { select: { id: true, name: true } },
-    },
-    orderBy: { createdAt: "desc" },
-    take: 50,
+  const orders = await useCases.delivery.listForBoard({
+    restaurantId,
+    driverId,
+    todayStartUTC,
   });
 
   return NextResponse.json(orders.map((o) => ({
@@ -119,27 +73,16 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    // Atomic claim: only assign if no driver yet AND kitchen has confirmed
-    const updated = await db.order.updateMany({
-      where: { id: orderId, deliveryDriverId: null, status: { notIn: ["PENDING", "CANCELLED", "PAID"] as never } },
-      data: {
-        deliveryDriverId: driverId,
-        deliveryStatus: "ASSIGNED",
-      },
-    });
-    if (updated.count === 0) {
+    const order = await useCases.delivery.claimOrder(orderId, driverId);
+    if (!order) {
       return NextResponse.json({ error: "Order already claimed by another driver" }, { status: 409 });
     }
-    const order = await db.order.findUnique({
-      where: { id: orderId },
-      select: { id: true, orderNumber: true, deliveryStatus: true },
-    });
 
     try {
       const { sendPushToStaff } = await import("@/lib/web-push");
       await sendPushToStaff(driverId, {
         title: "New Delivery Assigned",
-        body: `Order #${order?.orderNumber} — pick up from kitchen`,
+        body: `Order #${order.orderNumber} — pick up from kitchen`,
         tag: `delivery-${orderId}`,
         url: "/delivery",
       });

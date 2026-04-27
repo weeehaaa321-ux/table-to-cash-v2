@@ -1,17 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
-import { legacyDb as db } from "@/infrastructure/composition";
+import { useCases } from "@/infrastructure/composition";
 import { nowInRestaurantTz } from "@/lib/restaurant-config";
 import { toNum } from "@/lib/money";
-
-async function resolveRestaurantId(id: string): Promise<string | null> {
-  if (!id) return null;
-  if (id.startsWith("c") && id.length > 10) return id;
-  const restaurant = await db.restaurant.findUnique({
-    where: { slug: id },
-    select: { id: true },
-  });
-  return restaurant?.id || null;
-}
 
 // GET: Waiter performance stats — ranked by real service metrics
 export async function GET(request: NextRequest) {
@@ -24,7 +14,7 @@ export async function GET(request: NextRequest) {
   }
 
   try {
-    const realId = await resolveRestaurantId(restaurantId);
+    const realId = await useCases.staffManagement.resolveRestaurantId(restaurantId);
     if (!realId) return NextResponse.json({ waiters: [] });
 
     const now = new Date();
@@ -40,34 +30,8 @@ export async function GET(request: NextRequest) {
       since = new Date(since.getTime() + offset);
     }
 
-    const waiters = await db.staff.findMany({
-      where: { restaurantId: realId, role: "WAITER" },
-      select: { id: true, name: true, active: true, shift: true },
-      orderBy: { name: "asc" },
-    });
-
-    const sessions = await db.tableSession.findMany({
-      where: {
-        restaurantId: realId,
-        waiterId: { not: null },
-        openedAt: { gte: since },
-      },
-      include: {
-        orders: {
-          select: {
-            id: true,
-            total: true,
-            status: true,
-            paymentMethod: true,
-            items: { select: { quantity: true } },
-            createdAt: true,
-            updatedAt: true,
-            paidAt: true,
-          },
-        },
-        waiter: { select: { id: true } },
-      },
-    });
+    const waiters = await useCases.staffManagement.listWaitersBasic(realId);
+    const sessions = await useCases.staffManagement.listSessionsForPerformance(realId, since);
 
     type WaiterStats = {
       sessionsHandled: number;

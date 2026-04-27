@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { legacyDb as db } from "@/infrastructure/composition";
+import { useCases } from "@/infrastructure/composition";
 
-// GET: Fetch a single order by ID
 export async function GET(
   request: NextRequest,
   ctx: RouteContext<"/api/orders/[orderId]">
@@ -13,16 +12,7 @@ export async function GET(
   }
 
   try {
-    const order = await db.order.findUnique({
-      where: { id: orderId },
-      include: {
-        items: {
-          include: { menuItem: { select: { name: true, image: true } } },
-        },
-        table: { select: { number: true } },
-      },
-    });
-
+    const order = await useCases.orders.findById(orderId);
     if (!order) {
       return NextResponse.json(null);
     }

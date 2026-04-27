@@ -84,9 +84,7 @@ export const ports = {
   pushNotifier,
 };
 
-// Transitional escape hatch: routes mid-migration may still need raw
-// Prisma access when their use cases haven't been written yet. Routing
-// through composition keeps imports as "presentation → composition"
-// rather than "presentation → @/lib/* directly". Each use of `legacyDb`
-// is a follow-up TODO to push the logic into a use case.
-export { db as legacyDb } from "@/lib/db";
+// Note: the transitional `legacyDb` escape hatch was removed once every
+// API route was migrated to call use cases. Reintroducing it would
+// re-open the layering hole this architecture exists to close — write
+// a new use-case method instead.

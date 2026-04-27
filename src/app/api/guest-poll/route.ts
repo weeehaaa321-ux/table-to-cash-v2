@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { legacyDb as db } from "@/infrastructure/composition";
+import { useCases } from "@/infrastructure/composition";
 import { toNum } from "@/lib/money";
 
 /**
@@ -14,19 +14,10 @@ import { toNum } from "@/lib/money";
  *   orderId      — specific order to track (optional)
  */
 
-async function resolveRestaurantId(id: string): Promise<string | null> {
-  if (!id) return null;
-  if (id.startsWith("c") && id.length > 10) return id;
-  const r = await db.restaurant.findUnique({ where: { slug: id }, select: { id: true } });
-  return r?.id || null;
-}
-
 export async function GET(request: NextRequest) {
   const url = new URL(request.url);
   const sessionId = url.searchParams.get("sessionId");
-  const tableNumber = url.searchParams.get("tableNumber");
   const restaurantParam = url.searchParams.get("restaurantId") || "";
-  const guestNumber = parseInt(url.searchParams.get("guestNumber") || "0", 10);
   const orderId = url.searchParams.get("orderId");
 
   if (!sessionId || !restaurantParam) {
@@ -34,63 +25,13 @@ export async function GET(request: NextRequest) {
   }
 
   try {
-    const realId = await resolveRestaurantId(restaurantParam);
+    const realId = await useCases.sessions.resolveRestaurantId(restaurantParam);
     if (!realId) {
       return NextResponse.json({ session: null, orders: [], delegation: null, joinRequests: [] });
     }
 
-    // Run all queries in parallel
-    const [session, orders, delegation, joinRequests, singleOrder] = await Promise.all([
-      // 1. Session status + guest count
-      db.tableSession.findUnique({
-        where: { id: sessionId },
-        select: {
-          id: true,
-          status: true,
-          guestCount: true,
-          tableId: true,
-          table: { select: { number: true } },
-        },
-      }),
-
-      // 2. All orders in this session
-      db.order.findMany({
-        where: { sessionId, restaurantId: realId },
-        include: {
-          items: {
-            include: { menuItem: { select: { name: true } } },
-          },
-        },
-        orderBy: { createdAt: "desc" },
-      }),
-
-      // 3. Payment delegation (needed for everyone so the old owner
-      // loses authority and the new delegate gains it)
-      db.message.findFirst({
-        where: { type: "payment_delegate", to: sessionId },
-        orderBy: { createdAt: "desc" },
-        select: { command: true },
-      }),
-
-      // 4. Pending join requests (for session owner)
-      db.joinRequest.findMany({
-        where: { sessionId, status: "PENDING" },
-        select: { id: true, guestId: true },
-        orderBy: { createdAt: "asc" },
-      }),
-
-      // 5. Single order tracking (optional)
-      orderId
-        ? db.order.findUnique({
-            where: { id: orderId },
-            include: {
-              items: {
-                include: { menuItem: { select: { name: true } } },
-              },
-            },
-          })
-        : null,
-    ]);
+    const [session, orders, delegation, joinRequests, singleOrder] =
+      await useCases.livePoll.guestPollBundle({ sessionId, restaurantId: realId, orderId });
 
     // Merge split siblings (food + drinks from the same cart) into one
     // unified order for the guest. They never see the staff-side split.

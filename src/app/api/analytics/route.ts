@@ -1,17 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
-import { legacyDb as db } from "@/infrastructure/composition";
+import { useCases } from "@/infrastructure/composition";
 import { nowInRestaurantTz } from "@/lib/restaurant-config";
 import { toNum } from "@/lib/money";
-
-async function resolveRestaurantId(id: string): Promise<string | null> {
-  if (!id) return null;
-  if (id.startsWith("c") && id.length > 10) return id;
-  const r = await db.restaurant.findUnique({
-    where: { slug: id },
-    select: { id: true },
-  });
-  return r?.id || null;
-}
 
 function startOfCairoDay(d: Date): Date {
   const cairo = nowInRestaurantTz(d);
@@ -30,7 +20,7 @@ export async function GET(request: NextRequest) {
   }
 
   try {
-    const realId = await resolveRestaurantId(restaurantId);
+    const realId = await useCases.analytics.resolveRestaurantId(restaurantId);
     if (!realId) {
       return NextResponse.json({ error: "Restaurant not found" }, { status: 404 });
     }
@@ -53,87 +43,9 @@ export async function GET(request: NextRequest) {
       bucketMs = 60 * 60 * 1000;
     }
 
-    // Fetch in two stages to avoid overwhelming the connection pool.
-    // Stage 1: orders + sessions + staff (the core data).
-    const [orders, sessions, staff] = await Promise.all([
-      db.order.findMany({
-        where: {
-          restaurantId: realId,
-          createdAt: { gte: since },
-          status: { in: ["PAID", "SERVED", "READY", "PREPARING", "CONFIRMED"] },
-        },
-        select: {
-          id: true,
-          total: true,
-          createdAt: true,
-          paidAt: true,
-          readyAt: true,
-          servedAt: true,
-          status: true,
-          paymentMethod: true,
-          sessionId: true,
-          items: {
-            select: {
-              quantity: true,
-              price: true,
-              menuItem: { select: { id: true, name: true } },
-            },
-          },
-          session: { select: { waiterId: true } },
-        },
-      }),
-      db.tableSession.findMany({
-        where: {
-          restaurantId: realId,
-          openedAt: { gte: since },
-        },
-        select: {
-          id: true,
-          openedAt: true,
-          closedAt: true,
-          guestCount: true,
-          waiterId: true,
-        },
-      }),
-      db.staff.findMany({
-        where: { restaurantId: realId },
-        select: { id: true, name: true, role: true, active: true },
-      }),
-    ]);
-
-    // Stage 2: cancelled + comped items — filter by order IDs we already
-    // have to avoid the slow relation filter through `order.restaurantId`.
+    const { orders, sessions, staff } = await useCases.analytics.listForDashboard(realId, since);
     const orderIds = orders.map((o) => o.id);
-    const [cancelledItems, compedItems] = orderIds.length > 0
-      ? await Promise.all([
-          db.orderItem.findMany({
-            where: {
-              cancelled: true,
-              cancelledAt: { gte: since },
-              orderId: { in: orderIds },
-            },
-            select: {
-              quantity: true,
-              price: true,
-              cancelReason: true,
-              menuItem: { select: { name: true } },
-            },
-          }),
-          db.orderItem.findMany({
-            where: {
-              comped: true,
-              compedAt: { gte: since },
-              orderId: { in: orderIds },
-            },
-            select: {
-              quantity: true,
-              price: true,
-              compReason: true,
-              menuItem: { select: { name: true } },
-            },
-          }),
-        ])
-      : [[], []];
+    const [cancelledItems, compedItems] = await useCases.analytics.cancelledAndCompedForOrders(orderIds, since);
 
     // ── Summary ──
     const paidOrders = orders.filter((o) => o.status === "PAID");

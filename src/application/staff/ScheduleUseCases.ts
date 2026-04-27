@@ -9,7 +9,32 @@ export class ScheduleUseCases {
     });
   }
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  /** Month-of-staff list with optional staff filter; used by /api/schedule GET. */
+  async listMonth(input: { restaurantId: string; from: Date; to: Date; staffId?: string }) {
+    const where: Record<string, unknown> = {
+      restaurantId: input.restaurantId,
+      date: { gte: input.from, lt: input.to },
+    };
+    if (input.staffId) where.staffId = input.staffId;
+    return db.shiftSchedule.findMany({
+      where,
+      select: { id: true, staffId: true, date: true, shift: true },
+      orderBy: { date: "asc" },
+    });
+  }
+
+  async getStaffRole(id: string) {
+    return db.staff.findUnique({ where: { id }, select: { role: true } });
+  }
+
+  async deleteByStaffDate(staffId: string, date: Date) {
+    return db.shiftSchedule.deleteMany({ where: { staffId, date } });
+  }
+
+  invalidateSync(restaurantId: string) {
+    invalidateScheduleSync(restaurantId);
+  }
+
   async upsert(data: { staffId: string; date: Date; shift: number; restaurantId: string }) {
     return db.shiftSchedule.upsert({
       where: { staffId_date: { staffId: data.staffId, date: data.date } },
@@ -36,6 +61,42 @@ export class ScheduleUseCases {
     if (id.startsWith("c") && id.length > 10) return id;
     const r = await db.restaurant.findUnique({ where: { slug: id }, select: { id: true } });
     return r?.id || null;
+  }
+
+  async listWaitersAndCashiers(restaurantId: string) {
+    return db.staff.findMany({
+      where: { restaurantId, role: { in: ["WAITER", "CASHIER"] } },
+      select: { id: true, name: true, shift: true, active: true, role: true },
+    });
+  }
+
+  async listSessionsWithPaidOrdersInRange(input: {
+    restaurantId: string;
+    rangeStart: Date;
+    rangeEnd: Date;
+  }) {
+    const { restaurantId, rangeStart, rangeEnd } = input;
+    return db.tableSession.findMany({
+      where: {
+        restaurantId,
+        waiterId: { not: null },
+        orders: {
+          some: {
+            status: { not: "CANCELLED" },
+            paidAt: { gte: rangeStart, lt: rangeEnd },
+          },
+        },
+      },
+      include: {
+        orders: {
+          where: { status: { not: "CANCELLED" }, paidAt: { gte: rangeStart, lt: rangeEnd } },
+          select: { total: true, tip: true, paymentMethod: true, paidAt: true, createdAt: true },
+        },
+        waiter: { select: { id: true, name: true } },
+        table: { select: { number: true } },
+      },
+      orderBy: { openedAt: "asc" },
+    });
   }
 
   /** Cashout — sum of cash payments by waiter for a shift window. */

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { legacyDb as db } from "@/infrastructure/composition";
+import { useCases } from "@/infrastructure/composition";
 
 // PATCH /api/menu-admin/category
 // { id, availableFromHour?, availableToHour?, name?, nameAr?, nameRu? }
@@ -30,7 +30,7 @@ export async function PATCH(request: NextRequest) {
   }
 
   try {
-    const cat = await db.category.update({ where: { id }, data });
+    const cat = await useCases.menuAdmin.updateCategory(id, data);
     return NextResponse.json(cat);
   } catch (err) {
     console.error("Failed to update category:", err);
@@ -47,17 +47,8 @@ export async function DELETE(request: NextRequest) {
   }
 
   try {
-    const items = await db.menuItem.findMany({
-      where: { categoryId: id },
-      select: { id: true },
-    });
-    if (items.length > 0) {
-      const itemIds = items.map((i) => i.id);
-      await db.addOn.deleteMany({ where: { menuItemId: { in: itemIds } } });
-      await db.menuItem.deleteMany({ where: { categoryId: id } });
-    }
-    await db.category.delete({ where: { id } });
-    return NextResponse.json({ ok: true, deletedItems: items.length });
+    const { deletedItems } = await useCases.menuAdmin.deleteCategoryWithItems(id);
+    return NextResponse.json({ ok: true, deletedItems });
   } catch (err) {
     console.error("Failed to delete category:", err);
     return NextResponse.json({ error: "Failed to delete category" }, { status: 500 });

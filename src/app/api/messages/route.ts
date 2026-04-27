@@ -1,20 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { useCases, ports } from "@/infrastructure/composition";
-import { db } from "@/lib/db";
 import { sendPushToStaff, sendPushToRole, sendPushToRestaurant } from "@/lib/web-push";
 import type { MessageType, MessageCommand } from "@/domain/messaging/Message";
-
-async function resolveRestaurantId(id: string): Promise<string | null> {
-  if (!id) return null;
-  if (id.startsWith("c") && id.length > 10) return id;
-  const r = await db.restaurant.findUnique({ where: { slug: id }, select: { id: true } });
-  return r?.id || null;
-}
 
 export async function POST(request: NextRequest) {
   const body = await request.json();
   try {
-    const restaurantId = await resolveRestaurantId(
+    const restaurantId = await useCases.sessions.resolveRestaurantId(
       body.restaurantId || process.env.NEXT_PUBLIC_RESTAURANT_SLUG || "neom-dahab",
     );
     if (!restaurantId) {
@@ -41,10 +33,7 @@ export async function POST(request: NextRequest) {
           url: "/waiter",
         };
         try {
-          const session = await db.tableSession.findFirst({
-            where: { table: { number: body.tableId, restaurantId }, status: "OPEN" },
-            select: { waiterId: true },
-          });
+          const session = await useCases.sessions.findOpenSessionWaiter(body.tableId, restaurantId);
           if (session?.waiterId) sendPushToStaff(session.waiterId, payload).catch(() => {});
           else sendPushToRole("WAITER", restaurantId, payload).catch(() => {});
         } catch {

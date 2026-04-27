@@ -1,17 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { legacyDb as db } from "@/infrastructure/composition";
+import { useCases } from "@/infrastructure/composition";
 import { getShiftCount } from "@/lib/shifts";
-import { invalidateScheduleSync } from "@/lib/schedule-sync";
-
-async function resolveRestaurantId(id: string): Promise<string | null> {
-  if (!id) return null;
-  if (id.startsWith("c") && id.length > 10) return id;
-  const r = await db.restaurant.findUnique({
-    where: { slug: id },
-    select: { id: true },
-  });
-  return r?.id || null;
-}
 
 export async function GET(request: NextRequest) {
   const url = new URL(request.url);
@@ -25,22 +14,17 @@ export async function GET(request: NextRequest) {
   }
 
   try {
-    const realId = await resolveRestaurantId(restaurantId);
+    const realId = await useCases.schedule.resolveRestaurantId(restaurantId);
     if (!realId) return NextResponse.json([]);
 
     const from = new Date(Date.UTC(year, month - 1, 1));
     const to = new Date(Date.UTC(year, month, 1));
 
-    const where: Record<string, unknown> = {
+    const schedules = await useCases.schedule.listMonth({
       restaurantId: realId,
-      date: { gte: from, lt: to },
-    };
-    if (staffId) where.staffId = staffId;
-
-    const schedules = await db.shiftSchedule.findMany({
-      where,
-      select: { id: true, staffId: true, date: true, shift: true },
-      orderBy: { date: "asc" },
+      from,
+      to,
+      staffId: staffId || undefined,
     });
 
     return NextResponse.json(schedules);
@@ -59,10 +43,10 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    const realId = await resolveRestaurantId(restaurantId);
+    const realId = await useCases.schedule.resolveRestaurantId(restaurantId);
     if (!realId) return NextResponse.json({ error: "Restaurant not found" }, { status: 400 });
 
-    const staff = await db.staff.findUnique({ where: { id: staffId }, select: { role: true } });
+    const staff = await useCases.schedule.getStaffRole(staffId);
     if (!staff) return NextResponse.json({ error: "Staff not found" }, { status: 404 });
 
     const max = getShiftCount(staff.role);
@@ -71,13 +55,14 @@ export async function POST(request: NextRequest) {
     }
 
     const dateObj = new Date(date + "T00:00:00Z");
-    const entry = await db.shiftSchedule.upsert({
-      where: { staffId_date: { staffId, date: dateObj } },
-      create: { staffId, date: dateObj, shift, restaurantId: realId },
-      update: { shift },
+    const entry = await useCases.schedule.upsert({
+      staffId,
+      date: dateObj,
+      shift,
+      restaurantId: realId,
     });
 
-    invalidateScheduleSync(realId);
+    useCases.schedule.invalidateSync(realId);
     return NextResponse.json(entry);
   } catch (err) {
     console.error("Schedule update failed:", err);
@@ -95,10 +80,10 @@ export async function DELETE(request: NextRequest) {
 
   try {
     const dateObj = new Date(date + "T00:00:00Z");
-    await db.shiftSchedule.deleteMany({ where: { staffId, date: dateObj } });
+    await useCases.schedule.deleteByStaffDate(staffId, dateObj);
     if (restaurantId) {
-      const realId = await resolveRestaurantId(restaurantId);
-      if (realId) invalidateScheduleSync(realId);
+      const realId = await useCases.schedule.resolveRestaurantId(restaurantId);
+      if (realId) useCases.schedule.invalidateSync(realId);
     }
     return NextResponse.json({ ok: true });
   } catch (err) {

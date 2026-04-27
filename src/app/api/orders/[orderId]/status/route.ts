@@ -1,9 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
-import { legacyDb as db } from "@/infrastructure/composition";
-import { updateOrderStatus, closeSessionForOrder } from "@/lib/queries";
+import { useCases } from "@/infrastructure/composition";
+import { closeSessionForOrder } from "@/lib/queries";
 import { sendPushToStaff, sendPushToRole } from "@/lib/web-push";
 import { getShiftTimer } from "@/lib/shifts";
-import { autoAssignDelivery } from "@/lib/delivery-assignment";
 import { requireStaffAuth } from "@/lib/api-auth";
 
 // Order status updates come from kitchen, bar, waiter, cashier, delivery,
@@ -37,23 +36,13 @@ export async function PATCH(
     const authed = await requireStaffAuth(request, STATUS_ROLES);
     if (authed instanceof NextResponse) return authed;
 
-    // Restaurant scope — staff in restaurant A can't drive an order
-    // belonging to restaurant B by knowing the orderId.
-    const orderScope = await db.order.findUnique({
-      where: { id: orderId },
-      select: { restaurantId: true },
-    });
+    const orderScope = await useCases.orders.getRestaurantOfOrder(orderId);
     if (!orderScope || orderScope.restaurantId !== authed.restaurantId) {
       return NextResponse.json({ error: "Order not found" }, { status: 404 });
     }
 
-    // Enforce shift-based access: reject actions from off-shift staff.
-    // Owner is exempt (always on duty for override flows).
     {
-      const staff = await db.staff.findUnique({
-        where: { id: authed.id },
-        select: { shift: true, role: true },
-      });
+      const staff = await useCases.orders.getStaffShiftRole(authed.id);
       if (staff && staff.shift !== 0 && staff.role !== "OWNER") {
         const timer = getShiftTimer(staff.shift, staff.role);
         if (!timer.isOnShift) {
@@ -65,18 +54,13 @@ export async function PATCH(
       }
     }
 
-    // If the waiter marks a paid order as served, promote it directly to PAID
-    // so the cashier's earlier payment confirmation is honored end-to-end.
     let effectiveStatus = status;
     if (status === "SERVED") {
-      const existing = await db.order.findUnique({
-        where: { id: orderId },
-        select: { paymentMethod: true },
-      });
+      const existing = await useCases.orders.getOrderPaymentMethod(orderId);
       if (existing?.paymentMethod) effectiveStatus = "PAID";
     }
 
-    const order = await updateOrderStatus(orderId, effectiveStatus, restaurantId, notes);
+    const order = await useCases.orders.updateStatus(orderId, effectiveStatus, restaurantId, notes);
 
     // Auto-close session when order is paid
     if (effectiveStatus === "PAID") {
@@ -87,14 +71,7 @@ export async function PATCH(
 
     // Push notifications for key status changes
     if (status === "READY" || status === "CONFIRMED" || status === "PREPARING") {
-      const fullOrder = await db.order.findUnique({
-        where: { id: orderId },
-        include: {
-          session: { select: { waiterId: true } },
-          table: { select: { number: true } },
-          deliveryDriver: { select: { id: true } },
-        },
-      });
+      const fullOrder = await useCases.orders.findOrderForPushContext(orderId);
       if (fullOrder) {
         const isDelivery = fullOrder.orderType === "DELIVERY";
 
@@ -135,7 +112,7 @@ export async function PATCH(
 
         // Auto-assign unassigned delivery orders when they become READY
         if (isDelivery && status === "READY" && !fullOrder.deliveryDriver?.id && restaurantId) {
-          autoAssignDelivery(restaurantId, orderId).catch((err) =>
+          useCases.orders.assignDelivery(restaurantId, orderId).catch((err) =>
             console.error("Delivery auto-assign on READY failed:", err)
           );
         }

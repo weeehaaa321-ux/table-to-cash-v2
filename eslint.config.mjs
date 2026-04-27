@@ -80,15 +80,43 @@ const eslintConfig = defineConfig([
       "Infrastructure must not import from presentation.",
     ),
   },
-  // Presentation: may not directly import infrastructure (must go via application).
+  // Presentation: may not directly import concrete infrastructure adapters.
+  // Composition root is the explicit exception — it returns wired use cases.
   // Includes both src/presentation/ and src/app/ — Next.js 16 forces routes at src/app/,
   // so it's treated as part of the presentation layer.
   {
     files: ["src/presentation/**/*.{ts,tsx}", "src/app/**/*.{ts,tsx}"],
-    ...layerRule(
-      ["@/infrastructure/**"],
-      "Presentation must call application use cases, not infrastructure directly.",
-    ),
+    rules: {
+      "no-restricted-imports": [
+        "error",
+        {
+          patterns: [
+            {
+              group: ["@/infrastructure/**"],
+              importNames: [],
+              message: "Presentation must call application use cases, not infrastructure directly.",
+            },
+          ],
+        },
+      ],
+    },
+  },
+  // Allow the single composition import — it's the wiring boundary.
+  {
+    files: ["src/presentation/**/*.{ts,tsx}", "src/app/**/*.{ts,tsx}"],
+    rules: {
+      "no-restricted-imports": [
+        "error",
+        {
+          patterns: [
+            {
+              group: ["@/infrastructure/prisma/**", "@/infrastructure/auth/**", "@/infrastructure/push/**", "@/infrastructure/time/**"],
+              message: "Presentation must call application use cases, not infrastructure directly.",
+            },
+          ],
+        },
+      ],
+    },
   },
 ]);
 

@@ -1,18 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
-import { legacyDb as db } from "@/infrastructure/composition";
+import { useCases } from "@/infrastructure/composition";
 import { getCurrentShift } from "@/lib/shifts";
 import { nowInRestaurantTz } from "@/lib/restaurant-config";
 import { toNum } from "@/lib/money";
-
-async function resolveRestaurantId(id: string): Promise<string | null> {
-  if (!id) return null;
-  if (id.startsWith("c") && id.length > 10) return id;
-  const restaurant = await db.restaurant.findUnique({
-    where: { slug: id },
-    select: { id: true },
-  });
-  return restaurant?.id || null;
-}
 
 // Convert a Cairo-local date string (YYYY-MM-DD) to UTC Date
 function cairoDateToUTC(dateStr: string, hour: number = 0): Date {
@@ -48,41 +38,17 @@ export async function GET(request: NextRequest) {
   }
 
   try {
-    const realId = await resolveRestaurantId(restaurantId);
+    const realId = await useCases.schedule.resolveRestaurantId(restaurantId);
     if (!realId) return NextResponse.json({ days: [], totals: { cash: 0, card: 0, revenue: 0 } });
 
-    // Build date range: from start of fromDate to end of toDate (Cairo time)
     const rangeStart = cairoDateToUTC(fromDate, 0);
-    const rangeEnd = cairoDateToUTC(toDate, 24); // midnight next day
+    const rangeEnd = cairoDateToUTC(toDate, 24);
 
-    // Get all waiters and cashiers
-    const waiters = await db.staff.findMany({
-      where: { restaurantId: realId, role: { in: ["WAITER", "CASHIER"] } },
-      select: { id: true, name: true, shift: true, active: true, role: true },
-    });
-
-    // Get all sessions with PAID orders in the date range
-    // Include sessions opened before the range if they have orders paid within the range
-    const sessions = await db.tableSession.findMany({
-      where: {
-        restaurantId: realId,
-        waiterId: { not: null },
-        orders: {
-          some: {
-            status: { not: "CANCELLED" },
-            paidAt: { gte: rangeStart, lt: rangeEnd },
-          },
-        },
-      },
-      include: {
-        orders: {
-          where: { status: { not: "CANCELLED" }, paidAt: { gte: rangeStart, lt: rangeEnd } },
-          select: { total: true, tip: true, paymentMethod: true, paidAt: true, createdAt: true },
-        },
-        waiter: { select: { id: true, name: true } },
-        table: { select: { number: true } },
-      },
-      orderBy: { openedAt: "asc" },
+    const waiters = await useCases.schedule.listWaitersAndCashiers(realId);
+    const sessions = await useCases.schedule.listSessionsWithPaidOrdersInRange({
+      restaurantId: realId,
+      rangeStart,
+      rangeEnd,
     });
 
     // Determine shift based on Cairo-local hour of a timestamp

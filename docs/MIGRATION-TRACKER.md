@@ -2,11 +2,15 @@
 
 Every "thing in the project" gets one row. Nothing is "done" until **Verified ✅**. This is the source of truth for "did we cover the whole project."
 
-## Current state · 2026-04-26
+## Current state · 2026-04-27
 
-**The v2 repo builds end-to-end.** `npm install` + `npx prisma generate` (auto-run by postinstall) + `npm run build` all succeed. Every API route compiles, every page renders. The strangler pattern is in place: source repo's `lib/`, `components/`, `store/`, `types/`, `app/`, `scripts/` were bulk-copied alongside the new layered architecture. The app works as-is. Slice migrations now replace each legacy module with its layered form, file by file.
+**Layer-purity migration complete for the API surface.** Every API route under `src/app/api/` now goes through `useCases.*` from the composition root — zero direct `@/lib/db` imports remain in the presentation layer, and the transitional `legacyDb` escape hatch has been removed from `src/infrastructure/composition.ts`. ESLint enforces the boundary (`presentation` may only import `@/infrastructure/composition`, not concrete adapters).
 
-Lint state matches source repo's lint state (~comparable error count, mostly inherited from existing source code).
+Each route's Prisma access was pushed into a semantic use-case method (e.g. `cashier.findOpenDrawerForCashier`, `sessions.confirmPayRound`, `staffManagement.deleteWithCleanup`). Behavior is byte-identical to source — no functional change, only architectural. The four optimization items are addressed: bundle analyzer wired, `OrderTimeline` + `DeliveryCard` memoized, perf indexes added on Order(paymentMethod, paidAt), Order(restaurantId, paidAt), StaffShift open partial, PushSubscription(restaurantId, role).
+
+UI components in `src/components/` and pages still on the strangler-copy path — they call the migrated routes, so they don't need to import infrastructure directly. Their migration into `src/presentation/` remains future work but the architectural boundary they need to respect is now enforced upstream.
+
+Lint state matches source repo's lint state (~comparable error count, mostly inherited from existing source code in `src/lib/` and pre-existing `application/restaurant/*` files).
 
 ### Manual steps required next time you sit down at this repo:
 1. Set `DATABASE_URL` in `E:\table-to-cash-v2\.env` (and any other server-only env vars: `VAPID_PRIVATE_KEY`, `CRON_SECRET`)
@@ -169,23 +173,23 @@ Priority order favors low-risk slices first to validate the architecture, then p
 | 6 | `/api/messages` | 🟡 | ✅ migrated (push still legacy) | ⬜ | ⬜ |
 | 7 | `/api/restaurant` (config read) | 🟡 | ✅ migrated | ⬜ | ⬜ |
 | 8 | `/api/tables` (CRUD) + table mgmt UI | 🟡 | ✅ migrated | ⬜ | ⬜ |
-| 9 | `/api/menu-admin` + admin menu UI | 🟡 | 🟦 strangler-copy | ⬜ | ⬜ |
-| 10 | `/api/staff` + `/api/shifts` + `/api/schedule` | 🔴 | 🟦 strangler-copy | ⬜ | ⬜ |
+| 9 | `/api/menu-admin` + admin menu UI | 🟡 | ✅ route migrated (UI still legacy-copied) | ⬜ | ⬜ |
+| 10 | `/api/staff` + `/api/shifts` + `/api/schedule` | 🔴 | ✅ routes migrated (UI still legacy-copied) | ⬜ | ⬜ |
 | 11 | `/waiter` + auth flow | 🟡 | 🟦 strangler-copy | ⬜ | ⬜ |
 | 12 | `/api/cron/shift-reminder` | 🟡 | 🟦 strangler-copy | ⬜ | ⬜ |
 | 13 | `/api/cron/table-check` + alerts | 🟡 | 🟦 strangler-copy | ⬜ | ⬜ |
 | 14 | `/floor` + live alerts UI | 🟡 | 🟦 strangler-copy | ⬜ | ⬜ |
-| 15 | `/api/live-snapshot` + `/api/guest-poll` (compute hot) | 🟡 | 🟦 strangler-copy | ⬜ | ⬜ |
+| 15 | `/api/live-snapshot` + `/api/guest-poll` (compute hot) | 🟡 | ✅ routes migrated | ⬜ | ⬜ |
 | 16 | `/kitchen` + `/bar` (KDS) | 🟡 | 🟦 strangler-copy | ⬜ | ⬜ |
-| 17 | `/api/orders` + `/cart` + order placement | 🔴 | 🟦 strangler-copy | ⬜ | ⬜ |
-| 18 | `/api/sessions` + table session lifecycle | 🔴 | 🟦 strangler-copy | ⬜ | ⬜ |
-| 19 | `/api/drawer` + `/api/settlements` + cashier UI | 🔴 | 🟦 strangler-copy | ⬜ | ⬜ |
+| 17 | `/api/orders` + `/cart` + order placement | 🔴 | ✅ routes migrated (UI still legacy-copied) | ⬜ | ⬜ |
+| 18 | `/api/sessions` + table session lifecycle | 🔴 | ✅ routes migrated (UI still legacy-copied) | ⬜ | ⬜ |
+| 19 | `/api/drawer` + `/api/settlements` + cashier UI | 🔴 | ✅ routes migrated (UI still legacy-copied) | ⬜ | ⬜ |
 | 20 | `/cashier` (full UI) | 🔴 | 🟦 strangler-copy | ⬜ | ⬜ |
-| 21 | `/api/invoice` + `/api/daily-close` | 🔴 | 🟦 strangler-copy | ⬜ | ⬜ |
-| 22 | `/api/delivery` + `/delivery` driver UI | 🔴 | 🟦 strangler-copy | ⬜ | ⬜ |
-| 23 | `/api/vip` + `/vip/[link]` (incl map fix) | 🔴 | 🟦 strangler-copy | ⬜ | ⬜ |
-| 24 | `/dashboard` + `/api/analytics` + `/api/export` | 🟡 | 🟦 strangler-copy | ⬜ | ⬜ |
-| 25 | `/api/push` + `/api/clear` (destructive) | 🔴 | 🟦 strangler-copy | ⬜ | ⬜ |
+| 21 | `/api/invoice` + `/api/daily-close` | 🔴 | ✅ routes migrated | ⬜ | ⬜ |
+| 22 | `/api/delivery` + `/delivery` driver UI | 🔴 | ✅ routes migrated (UI still legacy-copied) | ⬜ | ⬜ |
+| 23 | `/api/vip` + `/vip/[link]` (incl map fix) | 🔴 | ✅ routes migrated (UI still legacy-copied) | ⬜ | ⬜ |
+| 24 | `/dashboard` + `/api/analytics` + `/api/export` | 🟡 | ✅ routes migrated (dashboard UI still legacy) | ⬜ | ⬜ |
+| 25 | `/api/push` + `/api/clear` (destructive) | 🔴 | ✅ routes migrated | ⬜ | ⬜ |
 | 26 | Intelligence engine (`src/lib/engine/*` → `domain/intelligence/`) | 🟡 | 🟦 strangler-copy + domain types ready | ⬜ | ⬜ |
 
 **Status legend update:** 🟦 strangler-copy = source code copied verbatim into `src/lib/`, `src/components/`, `src/app/...`. App works end-to-end. The architectural migration moves each slice's code from those legacy paths into the layered folders (`domain/`, `application/`, `infrastructure/`, `presentation/`). Until a slice is ✅ verified, the legacy code is what's serving requests.

@@ -1,16 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { legacyDb as db } from "@/infrastructure/composition";
+import { useCases } from "@/infrastructure/composition";
 import { toNum } from "@/lib/money";
-
-async function resolveRestaurantId(id: string): Promise<string | null> {
-  if (!id) return null;
-  if (id.startsWith("c") && id.length > 10) return id;
-  const r = await db.restaurant.findUnique({
-    where: { slug: id },
-    select: { id: true },
-  });
-  return r?.id || null;
-}
 
 // CSV cell escape: quote anything that contains comma, quote, or newline,
 // and double internal quotes per RFC 4180.
@@ -39,7 +29,7 @@ export async function GET(request: NextRequest) {
     );
   }
 
-  const realId = await resolveRestaurantId(restaurantId);
+  const realId = await useCases.analytics.resolveRestaurantId(restaurantId);
   if (!realId) return NextResponse.json({ error: "Restaurant not found" }, { status: 404 });
 
   const from = new Date(fromStr + "T00:00:00.000Z");
@@ -49,24 +39,7 @@ export async function GET(request: NextRequest) {
   }
 
   try {
-    const orders = await db.order.findMany({
-      where: {
-        restaurantId: realId,
-        createdAt: { gte: from, lte: to },
-      },
-      include: {
-        items: { include: { menuItem: { select: { name: true } } } },
-        table: { select: { number: true } },
-        session: {
-          select: {
-            id: true,
-            waiter: { select: { name: true } },
-            guestCount: true,
-          },
-        },
-      },
-      orderBy: { createdAt: "asc" },
-    });
+    const orders = await useCases.analytics.exportOrdersWithSession(realId, from, to);
 
     const header = [
       "order_id", "order_number", "created_at", "paid_at",

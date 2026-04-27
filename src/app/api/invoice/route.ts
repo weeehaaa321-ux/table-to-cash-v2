@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { legacyDb as db } from "@/infrastructure/composition";
+import { useCases } from "@/infrastructure/composition";
 import { toNum } from "@/lib/money";
 
 // GET: Fetch full invoice data for a session.
@@ -18,28 +18,7 @@ export async function GET(request: NextRequest) {
   }
 
   try {
-    const session = await db.tableSession.findUnique({
-      where: { id: sessionId },
-      include: {
-        table: { select: { number: true } },
-        waiter: { select: { name: true } },
-        restaurant: { select: { name: true, slug: true, currency: true } },
-        orders: {
-          // Anything with paidAt stamped is considered settled from the
-          // cashier's single-source-of-truth perspective. Walk-up flow
-          // stamps paidAt while status is still PREPARING, so filtering
-          // on status === "PAID" (the old behavior) would drop them and
-          // print a blank receipt.
-          where: { paidAt: { not: null }, status: { not: "CANCELLED" } },
-          include: {
-            items: {
-              include: { menuItem: { select: { name: true, nameAr: true } } },
-            },
-          },
-          orderBy: { createdAt: "asc" },
-        },
-      },
-    });
+    const session = await useCases.cashier.fetchSettledInvoice(sessionId);
 
     if (!session) {
       return NextResponse.json({ error: "Session not found" }, { status: 404 });

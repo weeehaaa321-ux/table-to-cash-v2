@@ -75,6 +75,185 @@ export class StaffManagementUseCase {
     return { ok: true, staff: { ...matched, shift: effectiveShift } };
   }
 
+  async findById(id: string) {
+    return db.staff.findUnique({ where: { id }, select: { id: true } });
+  }
+
+  async findOwnerPublic(id: string) {
+    return db.staff.findUnique({
+      where: { id },
+      select: { id: true, name: true, role: true },
+    });
+  }
+
+  async findOwnerForUpdate(id: string) {
+    return db.staff.findUnique({
+      where: { id },
+      select: { id: true, pin: true, role: true, restaurantId: true },
+    });
+  }
+
+  async verifyPin(plain: string, stored: string): Promise<boolean> {
+    const isHashed = stored.startsWith("$2a$") || stored.startsWith("$2b$");
+    return isHashed ? bcrypt.compare(plain, stored) : plain === stored;
+  }
+
+  async updateProfileSelectPublic(id: string, data: Record<string, unknown>) {
+    if (typeof data.pin === "string") {
+      data = { ...data, pin: await bcrypt.hash(data.pin, 10) };
+    }
+    return db.staff.update({
+      where: { id },
+      data,
+      select: { id: true, name: true },
+    });
+  }
+
+  async findActorIdentity(id: string) {
+    return db.staff.findUnique({
+      where: { id },
+      select: { id: true, name: true, restaurantId: true },
+    });
+  }
+
+  async listByIds(ids: string[]) {
+    return db.staff.findMany({
+      where: { id: { in: ids } },
+      select: { id: true, name: true, role: true },
+    });
+  }
+
+  async listWaitersBasic(restaurantId: string) {
+    return db.staff.findMany({
+      where: { restaurantId, role: "WAITER" },
+      select: { id: true, name: true, active: true, shift: true },
+      orderBy: { name: "asc" },
+    });
+  }
+
+  async listSessionsForPerformance(restaurantId: string, since: Date) {
+    return db.tableSession.findMany({
+      where: {
+        restaurantId,
+        waiterId: { not: null },
+        openedAt: { gte: since },
+      },
+      include: {
+        orders: {
+          select: {
+            id: true,
+            total: true,
+            status: true,
+            paymentMethod: true,
+            items: { select: { quantity: true } },
+            createdAt: true,
+            updatedAt: true,
+            paidAt: true,
+          },
+        },
+        waiter: { select: { id: true } },
+      },
+    });
+  }
+
+  async findRoleById(id: string) {
+    return db.staff.findUnique({ where: { id }, select: { role: true } });
+  }
+
+  async deactivateOnEndShift(staffId: string, opts: { setDeliveryOffline: boolean }) {
+    return db.staff.update({
+      where: { id: staffId },
+      data: {
+        active: false,
+        ...(opts.setDeliveryOffline ? { deliveryOnline: false } : {}),
+      },
+    });
+  }
+
+  async closeOpenStaffShifts(staffId: string) {
+    return db.staffShift.updateMany({
+      where: { staffId, clockOut: null },
+      data: { clockOut: new Date() },
+    });
+  }
+
+  async listOpenSettlementsForCashier(cashierId: string, restaurantId: string) {
+    return db.cashSettlement.findMany({
+      where: {
+        cashierId,
+        restaurantId,
+        status: { in: ["REQUESTED", "ACCEPTED"] },
+      },
+      select: { id: true },
+    });
+  }
+
+  async listOtherActiveCashiers(restaurantId: string, excludeStaffId: string) {
+    return db.staff.findMany({
+      where: { restaurantId, role: "CASHIER", active: true, id: { not: excludeStaffId } },
+      orderBy: { createdAt: "asc" },
+      select: { id: true, name: true },
+    });
+  }
+
+  async openSettlementCountsByCashier(restaurantId: string, cashierIds: string[]) {
+    return db.cashSettlement.groupBy({
+      by: ["cashierId"],
+      where: {
+        restaurantId,
+        cashierId: { in: cashierIds },
+        status: { in: ["REQUESTED", "ACCEPTED"] },
+      },
+      _count: true,
+    });
+  }
+
+  async reassignSettlements(settlementIds: string[], to: { id: string; name: string }) {
+    return db.cashSettlement.updateMany({
+      where: { id: { in: settlementIds } },
+      data: { cashierId: to.id, cashierName: to.name },
+    });
+  }
+
+  async findCurrentForUpdate(id: string) {
+    return db.staff.findUnique({
+      where: { id },
+      select: { role: true, active: true, restaurantId: true },
+    });
+  }
+
+  /** PIN uniqueness check used by create + edit. Returns true if pin already in use. */
+  async pinIsTaken(restaurantId: string, plainPin: string, exceptId?: string): Promise<boolean> {
+    const where = exceptId
+      ? { restaurantId, id: { not: exceptId } }
+      : { restaurantId };
+    const others = await db.staff.findMany({ where, select: { pin: true } });
+    for (const s of others) {
+      const isHashed = s.pin.startsWith("$2a$") || s.pin.startsWith("$2b$");
+      const dup = isHashed ? await bcrypt.compare(plainPin, s.pin) : plainPin === s.pin;
+      if (dup) return true;
+    }
+    return false;
+  }
+
+  async deleteWithCleanup(id: string) {
+    return db.$transaction([
+      db.pushSubscription.deleteMany({ where: { staffId: id } }),
+      db.cashSettlement.deleteMany({
+        where: { OR: [{ waiterId: id }, { cashierId: id }] },
+      }),
+      db.order.updateMany({
+        where: { deliveryDriverId: id },
+        data: { deliveryDriverId: null },
+      }),
+      db.tableSession.updateMany({
+        where: { waiterId: id },
+        data: { waiterId: null },
+      }),
+      db.staff.delete({ where: { id } }),
+    ]);
+  }
+
   async list(restaurantId: string) {
     return db.staff.findMany({
       where: { restaurantId, role: { not: "OWNER" } },

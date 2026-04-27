@@ -24,6 +24,129 @@ export class OrderUseCases {
     return r?.id || null;
   }
 
+  async findTableInRestaurant(restaurantId: string, number: number) {
+    return db.table.findUnique({
+      where: { restaurantId_number: { restaurantId, number } },
+    });
+  }
+
+  async getSessionStatus(sessionId: string) {
+    return db.tableSession.findUnique({
+      where: { id: sessionId },
+      select: { status: true },
+    });
+  }
+
+  /**
+   * Cancel or comp a single OrderItem and recompute the parent order
+   * total. Atomic — wraps both updates in a single transaction so a
+   * partial failure doesn't desync item flags from order totals.
+   */
+  async cancelOrCompItem(input: {
+    orderId: string;
+    itemId: string;
+    action: "cancel" | "comp";
+    reason: string | null;
+    actorStaffId: string;
+  }) {
+    const { orderId, itemId, action, reason, actorStaffId } = input;
+    const { toNum } = await import("@/lib/money");
+    return db.$transaction(async (tx) => {
+      if (action === "cancel") {
+        await tx.orderItem.update({
+          where: { id: itemId, orderId },
+          data: { cancelled: true, cancelReason: reason, cancelledAt: new Date() },
+        });
+      } else {
+        await tx.orderItem.update({
+          where: { id: itemId, orderId },
+          data: {
+            comped: true,
+            compReason: reason,
+            compedBy: actorStaffId,
+            compedAt: new Date(),
+          },
+        });
+      }
+
+      const effective = await tx.orderItem.findMany({
+        where: { orderId, cancelled: false, comped: false },
+        select: { price: true, quantity: true },
+      });
+      const newTotal = Math.round(
+        effective.reduce((s, i) => s + toNum(i.price) * i.quantity, 0),
+      );
+
+      const anyActive = await tx.orderItem.count({
+        where: { orderId, cancelled: false },
+      });
+
+      if (anyActive === 0) {
+        await tx.order.update({
+          where: { id: orderId },
+          data: { status: "CANCELLED", subtotal: 0, total: 0 },
+        });
+      } else {
+        await tx.order.update({
+          where: { id: orderId },
+          data: { subtotal: newTotal, total: newTotal },
+        });
+      }
+
+      return { newTotal, action, allCancelled: anyActive === 0 };
+    });
+  }
+
+  async getRestaurantOfOrder(orderId: string) {
+    return db.order.findUnique({
+      where: { id: orderId },
+      select: { restaurantId: true },
+    });
+  }
+
+  async getStaffShiftRole(staffId: string) {
+    return db.staff.findUnique({
+      where: { id: staffId },
+      select: { shift: true, role: true },
+    });
+  }
+
+  async getOrderPaymentMethod(orderId: string) {
+    return db.order.findUnique({
+      where: { id: orderId },
+      select: { paymentMethod: true },
+    });
+  }
+
+  async findOrderForPushContext(orderId: string) {
+    return db.order.findUnique({
+      where: { id: orderId },
+      include: {
+        session: { select: { waiterId: true } },
+        table: { select: { number: true } },
+        deliveryDriver: { select: { id: true } },
+      },
+    });
+  }
+
+  async findById(orderId: string) {
+    return db.order.findUnique({
+      where: { id: orderId },
+      include: {
+        items: { include: { menuItem: { select: { name: true, image: true } } } },
+        table: { select: { number: true } },
+      },
+    });
+  }
+
+  async findUnavailableMenuItems(itemIds: string[]) {
+    const items = await db.menuItem.findMany({
+      where: { id: { in: itemIds } },
+      select: { id: true, name: true, available: true },
+    });
+    return items.filter((i) => !i.available);
+  }
+
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   async create(input: Parameters<typeof createOrder>[0]): Promise<any> {
     return createOrder(input);

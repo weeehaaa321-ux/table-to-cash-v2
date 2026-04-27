@@ -1,36 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
-import { legacyDb as db } from "@/infrastructure/composition";
+import { useCases } from "@/infrastructure/composition";
 
-async function resolveRestaurantId(id: string): Promise<string | null> {
-  if (!id) return null;
-  if (id.startsWith("c") && id.length > 10) return id;
-  const r = await db.restaurant.findUnique({
-    where: { slug: id },
-    select: { id: true },
-  });
-  return r?.id || null;
-}
-
-// GET /api/menu-admin?restaurantId=slug
-// Returns every category + every item (including unavailable ones).
 export async function GET(request: NextRequest) {
   const url = new URL(request.url);
   const restaurantId = url.searchParams.get("restaurantId") || "";
 
   try {
-    const realId = await resolveRestaurantId(restaurantId);
+    const realId = await useCases.menuAdmin.resolveRestaurantId(restaurantId);
     if (!realId) return NextResponse.json({ categories: [] });
 
-    const categories = await db.category.findMany({
-      where: { restaurantId: realId },
-      orderBy: { sortOrder: "asc" },
-      include: {
-        items: {
-          orderBy: { sortOrder: "asc" },
-        },
-      },
-    });
-
+    const categories = await useCases.menuAdmin.listCategoriesWithItems(realId);
     return NextResponse.json({ categories });
   } catch (err) {
     console.error("Failed to fetch admin menu:", err);
@@ -38,9 +17,6 @@ export async function GET(request: NextRequest) {
   }
 }
 
-// POST /api/menu-admin
-// { restaurantId, categoryId, name, price, description?, image?, available?,
-//   bestSeller?, highMargin?, calories?, prepTime? }
 export async function POST(request: NextRequest) {
   const body = await request.json();
   const {
@@ -66,21 +42,19 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    const item = await db.menuItem.create({
-      data: {
-        categoryId,
-        name,
-        price,
-        description: description || null,
-        image: image || null,
-        available,
-        bestSeller,
-        highMargin,
-        calories: typeof calories === "number" ? calories : null,
-        prepTime: typeof prepTime === "number" ? prepTime : null,
-        availableFromHour: typeof availableFromHour === "number" ? availableFromHour : null,
-        availableToHour: typeof availableToHour === "number" ? availableToHour : null,
-      },
+    const item = await useCases.menuAdmin.createItem({
+      categoryId,
+      name,
+      price,
+      description: description || null,
+      image: image || null,
+      available,
+      bestSeller,
+      highMargin,
+      calories: typeof calories === "number" ? calories : null,
+      prepTime: typeof prepTime === "number" ? prepTime : null,
+      availableFromHour: typeof availableFromHour === "number" ? availableFromHour : null,
+      availableToHour: typeof availableToHour === "number" ? availableToHour : null,
     });
     return NextResponse.json(item, { status: 201 });
   } catch (err) {
@@ -89,9 +63,6 @@ export async function POST(request: NextRequest) {
   }
 }
 
-// PATCH /api/menu-admin
-// { id, ...fields }
-// Kitchen/Bar staff can toggle availability; full edits need owner
 export async function PATCH(request: NextRequest) {
   const body = await request.json();
   const { id, ...rest } = body;
@@ -121,7 +92,7 @@ export async function PATCH(request: NextRequest) {
   }
 
   try {
-    const item = await db.menuItem.update({ where: { id }, data });
+    const item = await useCases.menuAdmin.updateItem(id, data);
     return NextResponse.json(item);
   } catch (err) {
     console.error("Failed to update menu item:", err);
@@ -129,8 +100,6 @@ export async function PATCH(request: NextRequest) {
   }
 }
 
-// DELETE /api/menu-admin
-// { id }
 export async function DELETE(request: NextRequest) {
   const body = await request.json().catch(() => ({}));
   const { id } = body;
@@ -140,23 +109,13 @@ export async function DELETE(request: NextRequest) {
   }
 
   try {
-    // If any order items reference this menu item, deactivate instead of
-    // deleting so historical orders keep their item details.
-    const used = await db.orderItem.count({ where: { menuItemId: id } });
+    const used = await useCases.menuAdmin.countOrderItemsForMenuItem(id);
     if (used > 0) {
-      const item = await db.menuItem.update({
-        where: { id },
-        data: { available: false },
-      });
-      return NextResponse.json({
-        ok: true,
-        deactivated: true,
-        item,
-      });
+      const item = await useCases.menuAdmin.deactivateItem(id);
+      return NextResponse.json({ ok: true, deactivated: true, item });
     }
 
-    await db.addOn.deleteMany({ where: { menuItemId: id } });
-    await db.menuItem.delete({ where: { id } });
+    await useCases.menuAdmin.deleteItemAndAddOns(id);
     return NextResponse.json({ ok: true });
   } catch (err) {
     console.error("Failed to delete menu item:", err);

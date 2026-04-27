@@ -40,6 +40,60 @@ export class CashierUseCases {
     });
   }
 
+  async findOpenDrawerForCashier(restaurantId: string, cashierId: string) {
+    return db.cashDrawer.findFirst({
+      where: { restaurantId, cashierId, closedAt: null },
+      orderBy: { openedAt: "desc" },
+    });
+  }
+
+  async findDrawerById(id: string) {
+    return db.cashDrawer.findUnique({ where: { id } });
+  }
+
+  async sumCashSince(restaurantId: string, since: Date): Promise<number> {
+    const agg = await db.order.aggregate({
+      where: {
+        restaurantId,
+        paymentMethod: "CASH",
+        paidAt: { gte: since },
+        status: { not: "CANCELLED" },
+      },
+      _sum: { total: true },
+    });
+    const t = agg._sum.total;
+    return t == null ? 0 : Number(t);
+  }
+
+  async createOpenDrawer(input: { restaurantId: string; cashierId: string; openingFloat: number }) {
+    return db.cashDrawer.create({
+      data: {
+        restaurantId: input.restaurantId,
+        cashierId: input.cashierId,
+        openingFloat: input.openingFloat,
+      },
+    });
+  }
+
+  async finalizeDrawer(input: {
+    drawerId: string;
+    closingCount: number;
+    expectedCash: number;
+    variance: number;
+    notes: string | null;
+  }) {
+    return db.cashDrawer.update({
+      where: { id: input.drawerId },
+      data: {
+        closedAt: new Date(),
+        closingCount: input.closingCount,
+        expectedCash: input.expectedCash,
+        variance: input.variance,
+        notes: input.notes,
+      },
+    });
+  }
+
   async listDrawers(restaurantId: string, days = 14) {
     const since = new Date();
     since.setDate(since.getDate() - days);
@@ -53,6 +107,107 @@ export class CashierUseCases {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   async createSettlement(data: any) {
     return db.cashSettlement.create({ data });
+  }
+
+  async listTodaysSettlements(input: {
+    restaurantId: string;
+    waiterId?: string | null;
+    cashierId?: string | null;
+    status?: string | null;
+  }) {
+    const todayStart = new Date();
+    todayStart.setHours(0, 0, 0, 0);
+    const where: Record<string, unknown> = {
+      restaurantId: input.restaurantId,
+      requestedAt: { gte: todayStart },
+    };
+    if (input.waiterId) where.waiterId = input.waiterId;
+    if (input.cashierId) where.cashierId = input.cashierId;
+    if (input.status) where.status = input.status;
+    return db.cashSettlement.findMany({
+      where,
+      include: {
+        waiter: { select: { id: true, name: true } },
+        cashier: { select: { id: true, name: true } },
+      },
+      orderBy: { requestedAt: "desc" },
+    });
+  }
+
+  async findStaffScope(staffId: string) {
+    return db.staff.findUnique({
+      where: { id: staffId },
+      select: { restaurantId: true, role: true },
+    });
+  }
+
+  async findStaffName(staffId: string) {
+    return db.staff.findUnique({ where: { id: staffId }, select: { name: true } });
+  }
+
+  async createSettlementWithRelations(input: {
+    amount: number;
+    waiterId: string;
+    cashierId: string;
+    cashierName: string;
+    restaurantId: string;
+  }) {
+    return db.cashSettlement.create({
+      data: input,
+      include: {
+        waiter: { select: { id: true, name: true } },
+        cashier: { select: { id: true, name: true } },
+      },
+    });
+  }
+
+  async findSettlementScope(settlementId: string) {
+    return db.cashSettlement.findUnique({
+      where: { id: settlementId },
+      select: { restaurantId: true, waiterId: true, cashierId: true, status: true },
+    });
+  }
+
+  async acceptSettlement(settlementId: string) {
+    return db.cashSettlement.update({
+      where: { id: settlementId },
+      data: { status: "ACCEPTED", acceptedAt: new Date() },
+      include: { waiter: { select: { name: true } }, cashier: { select: { id: true, name: true } } },
+    });
+  }
+
+  async confirmSettlement(settlementId: string) {
+    return db.cashSettlement.update({
+      where: { id: settlementId },
+      data: { status: "CONFIRMED", confirmedAt: new Date() },
+      include: { waiter: { select: { id: true, name: true } } },
+    });
+  }
+
+  async rejectSettlement(settlementId: string) {
+    return db.cashSettlement.update({
+      where: { id: settlementId },
+      data: { status: "REJECTED" },
+    });
+  }
+
+  async logSettlementMessage(input: {
+    cashierId: string;
+    waiterId: string;
+    text: string;
+    settlementId: string;
+    restaurantId: string;
+  }) {
+    return db.message.create({
+      data: {
+        type: "command",
+        from: input.cashierId,
+        to: input.waiterId,
+        text: input.text,
+        command: `settle_cash:${input.settlementId}`,
+        restaurantId: input.restaurantId,
+      },
+    });
   }
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -73,6 +228,70 @@ export class CashierUseCases {
   }
 
   // ─── Daily close ──────────────────────────────
+  async resolveRestaurantId(id: string): Promise<string | null> {
+    if (!id) return null;
+    if (id.startsWith("c") && id.length > 10) return id;
+    const r = await db.restaurant.findUnique({ where: { slug: id }, select: { id: true } });
+    return r?.id || null;
+  }
+
+  async listRecentDailyCloses(restaurantId: string, take = 30) {
+    return db.dailyClose.findMany({
+      where: { restaurantId },
+      orderBy: { date: "desc" },
+      take,
+    });
+  }
+
+  async findDailyClose(restaurantId: string, date: Date) {
+    return db.dailyClose.findUnique({
+      where: { restaurantId_date: { restaurantId, date } },
+    });
+  }
+
+  async listOrdersForCloseWindow(restaurantId: string, dayStart: Date, dayEnd: Date) {
+    return db.order.findMany({
+      where: {
+        restaurantId,
+        paidAt: { gte: dayStart, lte: dayEnd },
+        status: { not: "CANCELLED" },
+      },
+      include: {
+        session: { select: { waiterId: true } },
+        items: {
+          select: {
+            quantity: true,
+            price: true,
+            cancelled: true,
+            comped: true,
+            menuItem: { select: { name: true } },
+          },
+        },
+      },
+    });
+  }
+
+  async countSessionsInWindow(restaurantId: string, dayStart: Date, dayEnd: Date) {
+    return db.tableSession.count({
+      where: { restaurantId, openedAt: { gte: dayStart, lte: dayEnd } },
+    });
+  }
+
+  async listStaffNamesByIds(ids: string[]) {
+    return db.staff.findMany({ where: { id: { in: ids } }, select: { id: true, name: true } });
+  }
+
+  async createDailyClose(input: {
+    restaurantId: string;
+    date: Date;
+    closedById: string;
+    closedByName: string;
+    totals: unknown;
+    notes: string | null;
+  }) {
+    return db.dailyClose.create({ data: input as never });
+  }
+
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   async upsertDailyClose(data: any) {
     return db.dailyClose.upsert({
@@ -110,6 +329,25 @@ export class CashierUseCases {
         restaurant: { select: { name: true, currency: true } },
         orders: {
           include: { items: { include: { menuItem: { select: { name: true } } } } },
+          orderBy: { createdAt: "asc" },
+        },
+      },
+    });
+  }
+
+  /** Print invoice — only settled (paidAt) orders, with bilingual names. */
+  async fetchSettledInvoice(sessionId: string) {
+    return db.tableSession.findUnique({
+      where: { id: sessionId },
+      include: {
+        table: { select: { number: true } },
+        waiter: { select: { name: true } },
+        restaurant: { select: { name: true, slug: true, currency: true } },
+        orders: {
+          where: { paidAt: { not: null }, status: { not: "CANCELLED" } },
+          include: {
+            items: { include: { menuItem: { select: { name: true, nameAr: true } } } },
+          },
           orderBy: { createdAt: "asc" },
         },
       },

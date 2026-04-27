@@ -1,18 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
-import { legacyDb as db } from "@/infrastructure/composition";
+import { useCases } from "@/infrastructure/composition";
 import { nowInRestaurantTz } from "@/lib/restaurant-config";
 import { requireOwnerAuth, requireStaffAuth } from "@/lib/api-auth";
 import { toNum } from "@/lib/money";
-
-async function resolveRestaurantId(id: string): Promise<string | null> {
-  if (!id) return null;
-  if (id.startsWith("c") && id.length > 10) return id;
-  const r = await db.restaurant.findUnique({
-    where: { slug: id },
-    select: { id: true },
-  });
-  return r?.id || null;
-}
 
 // Convert a Cairo-local Date to a midnight @db.Date value.
 function cairoDateOnly(d: Date): Date {
@@ -34,18 +24,14 @@ export async function GET(request: NextRequest) {
   // need the day-end recap, not just owners.
   const authed = await requireStaffAuth(request, ["OWNER", "FLOOR_MANAGER", "CASHIER"]);
   if (authed instanceof NextResponse) return authed;
-  const realId = await resolveRestaurantId(restaurantId);
+  const realId = await useCases.cashier.resolveRestaurantId(restaurantId);
   if (!realId) return NextResponse.json({ closes: [] });
   if (realId !== authed.restaurantId) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
   try {
-    const closes = await db.dailyClose.findMany({
-      where: { restaurantId: realId },
-      orderBy: { date: "desc" },
-      take: 30,
-    });
+    const closes = await useCases.cashier.listRecentDailyCloses(realId, 30);
     return NextResponse.json({
       closes: closes.map((c) => ({
         id: c.id,
@@ -92,16 +78,13 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Owner only" }, { status: 403 });
   }
 
-  const realId = await resolveRestaurantId(restaurantId);
+  const realId = await useCases.cashier.resolveRestaurantId(restaurantId);
   if (!realId) return NextResponse.json({ error: "Restaurant not found" }, { status: 404 });
   if (realId !== authed.restaurantId) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
-  const staff = await db.staff.findUnique({
-    where: { id: authed.id },
-    select: { id: true, name: true },
-  });
+  const staff = await useCases.staffManagement.findActorIdentity(authed.id);
   if (!staff) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
@@ -122,10 +105,7 @@ export async function POST(request: NextRequest) {
     }
   }
 
-  // Existing close? Don't overwrite.
-  const existing = await db.dailyClose.findUnique({
-    where: { restaurantId_date: { restaurantId: realId, date: target } },
-  });
+  const existing = await useCases.cashier.findDailyClose(realId, target);
   if (existing) {
     return NextResponse.json(
       { error: "ALREADY_CLOSED", message: "This day is already closed" },
@@ -143,25 +123,7 @@ export async function POST(request: NextRequest) {
   const dayEnd = new Date(target.getTime() + 27 * 60 * 60 * 1000);
 
   try {
-    const orders = await db.order.findMany({
-      where: {
-        restaurantId: realId,
-        paidAt: { gte: dayStart, lte: dayEnd },
-        status: { not: "CANCELLED" },
-      },
-      include: {
-        session: { select: { waiterId: true } },
-        items: {
-          select: {
-            quantity: true,
-            price: true,
-            cancelled: true,
-            comped: true,
-            menuItem: { select: { name: true } },
-          },
-        },
-      },
-    });
+    const orders = await useCases.cashier.listOrdersForCloseWindow(realId, dayStart, dayEnd);
 
     // Tighten to actual Cairo day.
     const targetISO = target.toISOString().slice(0, 10);
@@ -207,20 +169,10 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // Sessions opened that day (not all paid)
-    const sessionsCount = await db.tableSession.count({
-      where: {
-        restaurantId: realId,
-        openedAt: { gte: dayStart, lte: dayEnd },
-      },
-    });
+    const sessionsCount = await useCases.cashier.countSessionsInWindow(realId, dayStart, dayEnd);
 
-    // Resolve waiter names
     const waiterIds = Array.from(byWaiter.keys()).filter((id) => id !== "unassigned");
-    const waiters = await db.staff.findMany({
-      where: { id: { in: waiterIds } },
-      select: { id: true, name: true },
-    });
+    const waiters = await useCases.cashier.listStaffNamesByIds(waiterIds);
     const nameById = new Map(waiters.map((w) => [w.id, w.name]));
 
     const totals = {
@@ -245,15 +197,13 @@ export async function POST(request: NextRequest) {
       })),
     };
 
-    const close = await db.dailyClose.create({
-      data: {
-        restaurantId: realId,
-        date: target,
-        closedById: authed.id,
-        closedByName: staff.name,
-        totals,
-        notes: notes || null,
-      },
+    const close = await useCases.cashier.createDailyClose({
+      restaurantId: realId,
+      date: target,
+      closedById: authed.id,
+      closedByName: staff.name,
+      totals,
+      notes: notes || null,
     });
 
     return NextResponse.json({

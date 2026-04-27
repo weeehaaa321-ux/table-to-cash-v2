@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
-import { appendItemsToOrder, AppendItemsError } from "@/lib/queries";
+import { AppendItemsError } from "@/lib/queries";
 import { requireStaffAuth } from "@/lib/api-auth";
-import { legacyDb as db } from "@/infrastructure/composition";
+import { useCases } from "@/infrastructure/composition";
 
 // ─── POST: Append items to an existing order ────
 //
@@ -27,18 +27,13 @@ export async function POST(
   const authed = await requireStaffAuth(request, ALLOWED_ROLES);
   if (authed instanceof NextResponse) return authed;
 
-  // Restaurant scope check — staff in restaurant A must not be able to
-  // append items to an order in restaurant B by passing its orderId.
-  const orderScope = await db.order.findUnique({
-    where: { id: orderId },
-    select: { restaurantId: true },
-  });
+  const orderScope = await useCases.orders.getRestaurantOfOrder(orderId);
   if (!orderScope || orderScope.restaurantId !== authed.restaurantId) {
     return NextResponse.json({ error: "Order not found" }, { status: 404 });
   }
 
   try {
-    const order = await appendItemsToOrder(orderId, items);
+    const order = await useCases.orders.appendItems(orderId, items);
     return NextResponse.json(order);
   } catch (err) {
     if (err instanceof AppendItemsError) {

@@ -1,46 +1,16 @@
 import { NextRequest, NextResponse } from "next/server";
-import { legacyDb as db } from "@/infrastructure/composition";
+import { useCases } from "@/infrastructure/composition";
 import { getShiftCount } from "@/lib/shifts";
 import { transferWaiterSessions } from "@/lib/waiter-transfer";
-import { allocateStaffCode } from "@/lib/staff-code";
-import bcrypt from "bcryptjs";
-
-// Resolve restaurantId — could be a slug or a cuid
-async function resolveRestaurantId(id: string): Promise<string | null> {
-  if (!id) return null;
-  if (id.startsWith("c") && id.length > 10) return id;
-  const restaurant = await db.restaurant.findUnique({
-    where: { slug: id },
-    select: { id: true },
-  });
-  return restaurant?.id || null;
-}
 
 export async function GET(request: NextRequest) {
   const url = new URL(request.url);
   const restaurantId = url.searchParams.get("restaurantId") || "";
 
   try {
-    const realId = await resolveRestaurantId(restaurantId);
+    const realId = await useCases.staffManagement.resolveRestaurantId(restaurantId);
     if (!realId) return NextResponse.json([]);
-    // OWNER rows are excluded from the staff list: the owner is not an
-    // employee and should not appear in Staff/Schedule/Shift panels. The
-    // dashboard already knows the logged-in ownerId separately.
-    const staff = await db.staff.findMany({
-      where: { restaurantId: realId, role: { not: "OWNER" } },
-      orderBy: { createdAt: "desc" },
-      select: {
-        id: true,
-        name: true,
-        code: true,
-        role: true,
-        active: true,
-        shift: true,
-        deliveryOnline: true,
-        restaurantId: true,
-        createdAt: true,
-      },
-    });
+    const staff = await useCases.staffManagement.list(realId);
     return NextResponse.json(staff);
   } catch (err) {
     console.error("Failed to fetch staff:", err);
@@ -61,28 +31,14 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    const realId = await resolveRestaurantId(restaurantId);
+    const realId = await useCases.staffManagement.resolveRestaurantId(restaurantId);
     if (!realId) return NextResponse.json({ error: "Restaurant not found" }, { status: 400 });
 
-    // Check PIN uniqueness by comparing against all existing PINs in this restaurant
-    const existing = await db.staff.findMany({
-      where: { restaurantId: realId },
-      select: { pin: true },
-    });
-    for (const s of existing) {
-      const isHashed = s.pin.startsWith("$2a$") || s.pin.startsWith("$2b$");
-      const dup = isHashed ? await bcrypt.compare(pin, s.pin) : pin === s.pin;
-      if (dup) {
-        return NextResponse.json({ error: "PIN already in use" }, { status: 409 });
-      }
+    if (await useCases.staffManagement.pinIsTaken(realId, pin)) {
+      return NextResponse.json({ error: "PIN already in use" }, { status: 409 });
     }
 
-    const hashedPin = await bcrypt.hash(pin, 10);
     const finalRole = role || "WAITER";
-
-    // OWNER rows should never be created through this endpoint — owners
-    // are provisioned via scripts/create-owner.ts. Blocking here also
-    // keeps Staff-tab POST from ever producing an OWNER.
     if (finalRole === "OWNER") {
       return NextResponse.json(
         { error: "Owner accounts cannot be created via the staff panel." },
@@ -90,18 +46,11 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const code = await allocateStaffCode(finalRole, realId, (candidate) =>
-      db.staff.findFirst({
-        where: { restaurantId: realId, code: candidate },
-        select: { id: true },
-      })
-    );
-
-    const staff = await db.staff.create({
-      data: { name, code, pin: hashedPin, role: finalRole, restaurantId: realId },
+    const staff = await useCases.staffManagement.create({
+      name, pin, role: finalRole, restaurantId: realId,
     });
     return NextResponse.json(staff, { status: 201 });
-  } catch (err: unknown) {
+  } catch (err) {
     console.error("Failed to create staff:", err);
     return NextResponse.json({ error: "Failed to create staff" }, { status: 500 });
   }
@@ -116,37 +65,19 @@ export async function PATCH(request: NextRequest) {
   }
 
   try {
-    // Pull the row once so we can validate shift AND detect a
-    // waiter-deactivation that should trigger table reassignment.
-    const current = await db.staff.findUnique({
-      where: { id },
-      select: { role: true, active: true, restaurantId: true },
-    });
+    const current = await useCases.staffManagement.findCurrentForUpdate(id);
     if (!current) return NextResponse.json({ error: "Staff not found" }, { status: 404 });
 
     const data: Record<string, unknown> = {};
     if (name !== undefined) data.name = name;
     if (pin !== undefined) {
-      // Check PIN uniqueness against other staff in this restaurant
-      const others = await db.staff.findMany({
-        where: { restaurantId: current.restaurantId, id: { not: id } },
-        select: { pin: true },
-      });
-      for (const s of others) {
-        const isHashed = s.pin.startsWith("$2a$") || s.pin.startsWith("$2b$");
-        const dup = isHashed ? await bcrypt.compare(pin, s.pin) : pin === s.pin;
-        if (dup) {
-          return NextResponse.json({ error: "PIN already in use" }, { status: 409 });
-        }
+      if (await useCases.staffManagement.pinIsTaken(current.restaurantId, pin, id)) {
+        return NextResponse.json({ error: "PIN already in use" }, { status: 409 });
       }
-      data.pin = await bcrypt.hash(pin, 10);
+      data.pin = pin;
     }
     if (active !== undefined) data.active = active;
 
-    // Validate shift against the staff member's role. A CASHIER only has 2
-    // shifts, a KITCHEN only has 2, etc. — reject out-of-range values so
-    // stale dashboards or direct API calls can't strand someone on a shift
-    // their role doesn't serve.
     if (shift !== undefined) {
       const maxShift = getShiftCount(current.role);
       const s = Number(shift);
@@ -159,13 +90,8 @@ export async function PATCH(request: NextRequest) {
       data.shift = s;
     }
 
-    const staff = await db.staff.update({ where: { id }, data });
+    const staff = await useCases.staffManagement.update(id, data);
 
-    // If a WAITER is being turned off (either by the end-shift button or
-    // the manager toggling them off in the staff panel), move their open
-    // tables onto another active waiter. We only do this at the moment
-    // the waiter is taken off duty — never mid-shift — so no table is
-    // ever stolen from a waiter who is still working on it.
     if (
       current.role === "WAITER" &&
       current.active === true &&
@@ -191,14 +117,7 @@ export async function DELETE(request: NextRequest) {
   }
 
   try {
-    // Refuse to delete any OWNER. The owner row is the only key into the
-    // dashboard PIN gate — losing it locks everyone out and requires a
-    // CLI script to recover. Owners can be deactivated (PATCH active=false)
-    // if they leave; deletion is never the right answer.
-    const target = await db.staff.findUnique({
-      where: { id },
-      select: { role: true },
-    });
+    const target = await useCases.staffManagement.findRoleById(id);
     if (!target) {
       return NextResponse.json({ error: "Staff not found" }, { status: 404 });
     }
@@ -209,21 +128,7 @@ export async function DELETE(request: NextRequest) {
       );
     }
 
-    await db.$transaction([
-      db.pushSubscription.deleteMany({ where: { staffId: id } }),
-      db.cashSettlement.deleteMany({
-        where: { OR: [{ waiterId: id }, { cashierId: id }] },
-      }),
-      db.order.updateMany({
-        where: { deliveryDriverId: id },
-        data: { deliveryDriverId: null },
-      }),
-      db.tableSession.updateMany({
-        where: { waiterId: id },
-        data: { waiterId: null },
-      }),
-      db.staff.delete({ where: { id } }),
-    ]);
+    await useCases.staffManagement.deleteWithCleanup(id);
     return NextResponse.json({ ok: true });
   } catch (err) {
     console.error("Failed to delete staff:", err);

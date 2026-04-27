@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { legacyDb as db } from "@/infrastructure/composition";
+import { useCases } from "@/infrastructure/composition";
 import { requireStaffAuth } from "@/lib/api-auth";
 import { toNum } from "@/lib/money";
 
@@ -20,16 +20,6 @@ import { toNum } from "@/lib/money";
 
 const DRAWER_ROLES = ["CASHIER", "OWNER", "FLOOR_MANAGER"];
 
-async function resolveRestaurantId(id: string): Promise<string | null> {
-  if (!id) return null;
-  if (id.startsWith("c") && id.length > 10) return id;
-  const r = await db.restaurant.findUnique({ where: { slug: id }, select: { id: true } });
-  return r?.id || null;
-}
-
-// GET ?restaurantId=&cashierId= — returns the cashier's currently open
-// drawer, or null if none. Also returns expectedCash-so-far so the UI
-// can show a running expected total before the cashier counts out.
 export async function GET(request: NextRequest) {
   const url = new URL(request.url);
   const rawId = url.searchParams.get("restaurantId") || "";
@@ -41,37 +31,21 @@ export async function GET(request: NextRequest) {
 
   const authed = await requireStaffAuth(request, DRAWER_ROLES);
   if (authed instanceof NextResponse) return authed;
-  // A cashier can only read their own drawer; managers/owners can read
-  // any cashier's drawer in their restaurant.
   if (authed.role === "CASHIER" && cashierId !== authed.id) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
   try {
-    const realId = await resolveRestaurantId(rawId);
+    const realId = await useCases.sessions.resolveRestaurantId(rawId);
     if (!realId) return NextResponse.json({ drawer: null });
     if (realId !== authed.restaurantId) {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
 
-    const drawer = await db.cashDrawer.findFirst({
-      where: { restaurantId: realId, cashierId, closedAt: null },
-      orderBy: { openedAt: "desc" },
-    });
-
+    const drawer = await useCases.cashier.findOpenDrawerForCashier(realId, cashierId);
     if (!drawer) return NextResponse.json({ drawer: null });
 
-    // Running expected cash = openingFloat + CASH orders paid since open.
-    const agg = await db.order.aggregate({
-      where: {
-        restaurantId: realId,
-        paymentMethod: "CASH",
-        paidAt: { gte: drawer.openedAt },
-        status: { not: "CANCELLED" },
-      },
-      _sum: { total: true },
-    });
-    const cashSince = toNum(agg._sum.total);
+    const cashSince = await useCases.cashier.sumCashSince(realId, drawer.openedAt);
     const openingFloat = toNum(drawer.openingFloat);
 
     return NextResponse.json({
@@ -89,8 +63,6 @@ export async function GET(request: NextRequest) {
   }
 }
 
-// POST — open a new drawer. body: { restaurantId, cashierId, openingFloat }
-// Fails if this cashier already has an open drawer.
 export async function POST(request: NextRequest) {
   const body = await request.json().catch(() => ({}));
   const { restaurantId, cashierId, openingFloat } = body as {
@@ -105,23 +77,18 @@ export async function POST(request: NextRequest) {
 
   const authed = await requireStaffAuth(request, DRAWER_ROLES);
   if (authed instanceof NextResponse) return authed;
-  // Cashiers can only open their own drawer. Managers/owners may open
-  // a drawer on behalf of a cashier (rare — typically when a cashier
-  // forgot to open before taking the first order).
   if (authed.role === "CASHIER" && cashierId !== authed.id) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
   try {
-    const realId = await resolveRestaurantId(restaurantId);
+    const realId = await useCases.sessions.resolveRestaurantId(restaurantId);
     if (!realId) return NextResponse.json({ error: "restaurant not found" }, { status: 404 });
     if (realId !== authed.restaurantId) {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
 
-    const existing = await db.cashDrawer.findFirst({
-      where: { restaurantId: realId, cashierId, closedAt: null },
-    });
+    const existing = await useCases.cashier.findOpenDrawerForCashier(realId, cashierId);
     if (existing) {
       return NextResponse.json(
         { error: "ALREADY_OPEN", message: "Close your current drawer before opening a new one.", drawerId: existing.id },
@@ -129,8 +96,10 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const drawer = await db.cashDrawer.create({
-      data: { restaurantId: realId, cashierId, openingFloat: Math.round(openingFloat) },
+    const drawer = await useCases.cashier.createOpenDrawer({
+      restaurantId: realId,
+      cashierId,
+      openingFloat: Math.round(openingFloat),
     });
 
     return NextResponse.json({ drawer: { id: drawer.id, openedAt: drawer.openedAt.toISOString(), openingFloat: toNum(drawer.openingFloat) } });
@@ -140,8 +109,6 @@ export async function POST(request: NextRequest) {
   }
 }
 
-// PATCH — close a drawer. body: { drawerId, closingCount, notes? }
-// Computes expected and variance server-side so the cashier can't fudge.
 export async function PATCH(request: NextRequest) {
   const body = await request.json().catch(() => ({}));
   const { drawerId, closingCount, notes } = body as {
@@ -158,7 +125,7 @@ export async function PATCH(request: NextRequest) {
   if (authed instanceof NextResponse) return authed;
 
   try {
-    const drawer = await db.cashDrawer.findUnique({ where: { id: drawerId } });
+    const drawer = await useCases.cashier.findDrawerById(drawerId);
     if (!drawer) return NextResponse.json({ error: "drawer not found" }, { status: 404 });
     if (drawer.closedAt) return NextResponse.json({ error: "ALREADY_CLOSED" }, { status: 409 });
     if (drawer.restaurantId !== authed.restaurantId) {
@@ -168,29 +135,17 @@ export async function PATCH(request: NextRequest) {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
 
-    const agg = await db.order.aggregate({
-      where: {
-        restaurantId: drawer.restaurantId,
-        paymentMethod: "CASH",
-        paidAt: { gte: drawer.openedAt },
-        status: { not: "CANCELLED" },
-      },
-      _sum: { total: true },
-    });
-    const cashSince = Math.round(toNum(agg._sum.total));
+    const cashSince = Math.round(await useCases.cashier.sumCashSince(drawer.restaurantId, drawer.openedAt));
     const expected = Math.round(toNum(drawer.openingFloat) + cashSince);
     const count = Math.round(closingCount);
     const variance = count - expected;
 
-    const closed = await db.cashDrawer.update({
-      where: { id: drawerId },
-      data: {
-        closedAt: new Date(),
-        closingCount: count,
-        expectedCash: expected,
-        variance,
-        notes: notes?.trim() || null,
-      },
+    const closed = await useCases.cashier.finalizeDrawer({
+      drawerId,
+      closingCount: count,
+      expectedCash: expected,
+      variance,
+      notes: notes?.trim() || null,
     });
 
     return NextResponse.json({

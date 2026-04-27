@@ -3,7 +3,6 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { useCases } from "@/infrastructure/composition";
-import { db } from "@/lib/db";
 import { makeId } from "@/domain/shared/Identifier";
 
 // GET ?staffId= → { open: { id, clockIn } | null }
@@ -34,8 +33,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "staffId and action=in|out required" }, { status: 400 });
   }
 
-  // Source returns 404 specifically for unknown staff — preserve that signal.
-  const staff = await db.staff.findUnique({ where: { id: staffId }, select: { id: true } });
+  const staff = await useCases.staffManagement.findById(staffId);
   if (!staff) return NextResponse.json({ error: "Staff not found" }, { status: 404 });
 
   if (action === "in") {
@@ -78,10 +76,7 @@ export async function PUT(request: NextRequest) {
   );
 
   const staffIds = Array.from(new Set(shifts.map((s) => s.staffId)));
-  const staff = await db.staff.findMany({
-    where: { id: { in: staffIds } },
-    select: { id: true, name: true, role: true },
-  });
+  const staff = await useCases.staffManagement.listByIds(staffIds);
   const byId = new Map(staff.map((s) => [s.id, s]));
 
   return NextResponse.json({

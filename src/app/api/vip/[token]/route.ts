@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { legacyDb as db } from "@/infrastructure/composition";
+import { useCases } from "@/infrastructure/composition";
 
 export async function GET(
   _request: NextRequest,
@@ -12,13 +12,7 @@ export async function GET(
   }
 
   try {
-    const guest = await db.vipGuest.findUnique({
-      where: { linkToken: token },
-      include: {
-        restaurant: { select: { id: true, name: true, slug: true, currency: true } },
-      },
-    });
-
+    const guest = await useCases.vip.findByTokenWithRestaurantId(token);
     if (!guest || !guest.active) {
       return NextResponse.json({ error: "VIP link not found or inactive" }, { status: 404 });
     }
@@ -47,14 +41,11 @@ export async function PATCH(
   const body = await request.json();
 
   try {
-    const guest = await db.vipGuest.update({
-      where: { linkToken: token },
-      data: {
-        ...(body.address !== undefined ? { address: body.address } : {}),
-        ...(body.addressNotes !== undefined ? { addressNotes: body.addressNotes } : {}),
-        ...(body.locationLat !== undefined ? { locationLat: body.locationLat } : {}),
-        ...(body.locationLng !== undefined ? { locationLng: body.locationLng } : {}),
-      },
+    const guest = await useCases.vip.updateByToken(token, {
+      ...(body.address !== undefined ? { address: body.address } : {}),
+      ...(body.addressNotes !== undefined ? { addressNotes: body.addressNotes } : {}),
+      ...(body.locationLat !== undefined ? { locationLat: body.locationLat } : {}),
+      ...(body.locationLng !== undefined ? { locationLng: body.locationLng } : {}),
     });
     return NextResponse.json(guest);
   } catch (err) {

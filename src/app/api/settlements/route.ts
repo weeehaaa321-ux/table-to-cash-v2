@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { legacyDb as db } from "@/infrastructure/composition";
+import { useCases } from "@/infrastructure/composition";
 import { sendPushToStaff } from "@/lib/web-push";
 import { requireStaffAuth } from "@/lib/api-auth";
 
@@ -7,17 +7,6 @@ const STAFF_VIEW_ROLES = ["CASHIER", "WAITER", "OWNER", "FLOOR_MANAGER"];
 const CREATE_ROLES = ["CASHIER", "OWNER", "FLOOR_MANAGER"];
 const UPDATE_ROLES = ["CASHIER", "WAITER", "OWNER", "FLOOR_MANAGER"];
 
-async function resolveRestaurantId(id: string): Promise<string | null> {
-  if (!id) return null;
-  if (id.startsWith("c") && id.length > 10) return id;
-  const restaurant = await db.restaurant.findUnique({
-    where: { slug: id },
-    select: { id: true },
-  });
-  return restaurant?.id || null;
-}
-
-// GET: List settlements for a restaurant (optionally filtered by waiterId or cashierId)
 export async function GET(request: NextRequest) {
   const url = new URL(request.url);
   const restaurantId = url.searchParams.get("restaurantId") || "";
@@ -33,29 +22,17 @@ export async function GET(request: NextRequest) {
   if (authed instanceof NextResponse) return authed;
 
   try {
-    const realId = await resolveRestaurantId(restaurantId);
+    const realId = await useCases.sessions.resolveRestaurantId(restaurantId);
     if (!realId) return NextResponse.json({ settlements: [] });
     if (realId !== authed.restaurantId) {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
 
-    const where: Record<string, unknown> = { restaurantId: realId };
-    if (waiterId) where.waiterId = waiterId;
-    if (cashierId) where.cashierId = cashierId;
-    if (status) where.status = status;
-
-    // Only show today's settlements by default
-    const todayStart = new Date();
-    todayStart.setHours(0, 0, 0, 0);
-    where.requestedAt = { gte: todayStart };
-
-    const settlements = await db.cashSettlement.findMany({
-      where,
-      include: {
-        waiter: { select: { id: true, name: true } },
-        cashier: { select: { id: true, name: true } },
-      },
-      orderBy: { requestedAt: "desc" },
+    const settlements = await useCases.cashier.listTodaysSettlements({
+      restaurantId: realId,
+      waiterId,
+      cashierId,
+      status,
     });
 
     return NextResponse.json({
@@ -78,8 +55,6 @@ export async function GET(request: NextRequest) {
   }
 }
 
-// POST: Cashier requests a waiter to settle cash
-// Body: { cashierId, waiterId, amount, restaurantId }
 export async function POST(request: NextRequest) {
   const body = await request.json();
   const { cashierId, waiterId, amount, restaurantId } = body;
@@ -90,8 +65,6 @@ export async function POST(request: NextRequest) {
 
   const authed = await requireStaffAuth(request, CREATE_ROLES);
   if (authed instanceof NextResponse) return authed;
-  // Cashiers can only file settlements as themselves; manager/owner can
-  // override (e.g. logging a paper-trail handover from staff who left).
   if (authed.role === "CASHIER" && cashierId !== authed.id) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
@@ -100,39 +73,27 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    const realId = await resolveRestaurantId(restaurantId);
+    const realId = await useCases.sessions.resolveRestaurantId(restaurantId);
     if (!realId) return NextResponse.json({ error: "Restaurant not found" }, { status: 400 });
     if (realId !== authed.restaurantId) {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
 
-    // Waiter must exist in this restaurant — prevents fake settlements
-    // pointing at staff in another tenant.
-    const waiter = await db.staff.findUnique({
-      where: { id: waiterId },
-      select: { restaurantId: true, role: true },
-    });
+    const waiter = await useCases.cashier.findStaffScope(waiterId);
     if (!waiter || waiter.restaurantId !== realId) {
       return NextResponse.json({ error: "Waiter not found" }, { status: 400 });
     }
 
-    const cashier = await db.staff.findUnique({ where: { id: cashierId }, select: { name: true } });
+    const cashier = await useCases.cashier.findStaffName(cashierId);
 
-    const settlement = await db.cashSettlement.create({
-      data: {
-        amount,
-        waiterId,
-        cashierId,
-        cashierName: cashier?.name || "Cashier",
-        restaurantId: realId,
-      },
-      include: {
-        waiter: { select: { id: true, name: true } },
-        cashier: { select: { id: true, name: true } },
-      },
+    const settlement = await useCases.cashier.createSettlementWithRelations({
+      amount,
+      waiterId,
+      cashierId,
+      cashierName: cashier?.name || "Cashier",
+      restaurantId: realId,
     });
 
-    // Push notification to waiter
     sendPushToStaff(waiterId, {
       title: "Cash Settlement Request",
       body: `Cashier ${cashier?.name || ""} requests you settle ${amount} EGP`,
@@ -140,16 +101,12 @@ export async function POST(request: NextRequest) {
       url: "/waiter",
     }).catch(() => {});
 
-    // Also send as a message so it shows in the waiter's message banner
-    await db.message.create({
-      data: {
-        type: "command",
-        from: cashierId,
-        to: waiterId,
-        text: `Settle ${amount} EGP cash to cashier ${cashier?.name || ""}`,
-        command: `settle_cash:${settlement.id}`,
-        restaurantId,
-      },
+    await useCases.cashier.logSettlementMessage({
+      cashierId,
+      waiterId,
+      text: `Settle ${amount} EGP cash to cashier ${cashier?.name || ""}`,
+      settlementId: settlement.id,
+      restaurantId: realId,
     }).catch(() => {});
 
     return NextResponse.json({
@@ -165,8 +122,6 @@ export async function POST(request: NextRequest) {
   }
 }
 
-// PATCH: Update settlement status
-// Body: { settlementId, action: "accept" | "confirm" | "reject" }
 export async function PATCH(request: NextRequest) {
   const body = await request.json();
   const { settlementId, action } = body;
@@ -178,12 +133,7 @@ export async function PATCH(request: NextRequest) {
   const authed = await requireStaffAuth(request, UPDATE_ROLES);
   if (authed instanceof NextResponse) return authed;
 
-  // Each action belongs to one role. Waiter accepts, cashier confirms.
-  // Reject can come from either side. Manager/owner override either.
-  const existing = await db.cashSettlement.findUnique({
-    where: { id: settlementId },
-    select: { restaurantId: true, waiterId: true, cashierId: true, status: true },
-  });
+  const existing = await useCases.cashier.findSettlementScope(settlementId);
   if (!existing) {
     return NextResponse.json({ error: "Settlement not found" }, { status: 404 });
   }
@@ -203,48 +153,29 @@ export async function PATCH(request: NextRequest) {
 
   try {
     if (action === "accept") {
-      // Waiter accepts — they will bring the cash
-      const settlement = await db.cashSettlement.update({
-        where: { id: settlementId },
-        data: { status: "ACCEPTED", acceptedAt: new Date() },
-        include: { waiter: { select: { name: true } }, cashier: { select: { id: true, name: true } } },
-      });
-
-      // Notify cashier that waiter accepted
+      const settlement = await useCases.cashier.acceptSettlement(settlementId);
       sendPushToStaff(settlement.cashier.id, {
         title: "Settlement Accepted",
         body: `${settlement.waiter.name} is bringing ${settlement.amount} EGP`,
         tag: `settle-accepted-${settlementId}`,
         url: "/cashier",
       }).catch(() => {});
-
       return NextResponse.json({ success: true, status: "ACCEPTED" });
     }
 
     if (action === "confirm") {
-      // Cashier confirms they received the cash
-      const settlement = await db.cashSettlement.update({
-        where: { id: settlementId },
-        data: { status: "CONFIRMED", confirmedAt: new Date() },
-        include: { waiter: { select: { id: true, name: true } } },
-      });
-
-      // Notify waiter that cash was confirmed received
+      const settlement = await useCases.cashier.confirmSettlement(settlementId);
       sendPushToStaff(settlement.waiter.id, {
         title: "Cash Settled",
         body: `Cashier confirmed receipt of ${settlement.amount} EGP`,
         tag: `settle-confirmed-${settlementId}`,
         url: "/waiter",
       }).catch(() => {});
-
       return NextResponse.json({ success: true, status: "CONFIRMED" });
     }
 
     if (action === "reject") {
-      await db.cashSettlement.update({
-        where: { id: settlementId },
-        data: { status: "REJECTED" },
-      });
+      await useCases.cashier.rejectSettlement(settlementId);
       return NextResponse.json({ success: true, status: "REJECTED" });
     }
 

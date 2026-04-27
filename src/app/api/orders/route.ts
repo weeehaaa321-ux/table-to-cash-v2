@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
 import { useCases } from "@/infrastructure/composition";
-import { db } from "@/lib/db";
 
 export async function POST(request: NextRequest) {
   const body = await request.json();
@@ -16,9 +15,7 @@ export async function POST(request: NextRequest) {
     let tableId = body.tableId || null;
     if (tableId && !tableId.startsWith("c")) {
       const tableNum = parseInt(tableId.replace(/\D/g, ""), 10) || 1;
-      const table = await db.table.findUnique({
-        where: { restaurantId_number: { restaurantId, number: tableNum } },
-      });
+      const table = await useCases.orders.findTableInRestaurant(restaurantId, tableNum);
       if (!table) {
         return NextResponse.json({ error: `Table ${tableNum} not found` }, { status: 400 });
       }
@@ -26,10 +23,7 @@ export async function POST(request: NextRequest) {
     }
 
     if (body.sessionId) {
-      const session = await db.tableSession.findUnique({
-        where: { id: body.sessionId },
-        select: { status: true },
-      });
+      const session = await useCases.orders.getSessionStatus(body.sessionId);
       if (session?.status === "CLOSED") {
         return NextResponse.json(
           { error: "SESSION_CLOSED", message: "This session has been closed. Please scan the QR code to start a new session." },
@@ -39,11 +33,7 @@ export async function POST(request: NextRequest) {
     }
 
     const itemIds = body.items.map((i: { menuItemId: string }) => i.menuItemId);
-    const availableItems = await db.menuItem.findMany({
-      where: { id: { in: itemIds } },
-      select: { id: true, name: true, available: true },
-    });
-    const unavailable = availableItems.filter((i) => !i.available);
+    const unavailable = await useCases.orders.findUnavailableMenuItems(itemIds);
     if (unavailable.length > 0) {
       return NextResponse.json(
         { error: "ITEMS_UNAVAILABLE", items: unavailable.map((i) => i.name) },
