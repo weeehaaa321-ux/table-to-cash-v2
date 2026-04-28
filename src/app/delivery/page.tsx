@@ -222,125 +222,135 @@ function DeliveryCard({
     : null;
 
   return (
-    <div className="rounded-2xl bg-white border-2 border-sand-200 p-4 shadow-sm">
-      <div className="flex items-center justify-between mb-3">
-        <div>
-          <span className="text-xs font-bold text-text-muted">#{order.orderNumber}</span>
-          <h3 className="text-base font-bold text-text-primary">{order.vipGuestName || "VIP"}</h3>
+    <div className="rounded-2xl bg-white border-2 border-sand-200 overflow-hidden shadow-sm">
+      <div className="px-4 pt-4 pb-3 flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="flex items-center gap-2 mb-0.5">
+            <span className="text-[10px] font-extrabold text-text-muted uppercase tracking-widest tabular-nums">#{order.orderNumber}</span>
+            {order.paymentMethod && (
+              <span className={`text-[10px] font-extrabold uppercase tracking-wider px-2 py-0.5 rounded-full ${
+                order.paymentMethod === "CASH" ? "bg-status-good-100 text-status-good-700" :
+                order.paymentMethod === "CARD" ? "bg-status-info-100 text-status-info-700" :
+                "bg-status-wait-100 text-status-wait-700"
+              }`}>
+                {order.paymentMethod === "CASH" ? t("delivery.cash") : order.paymentMethod === "CARD" ? t("delivery.card") : t("delivery.instapay")}
+              </span>
+            )}
+          </div>
+          <h3 className="text-xl font-extrabold text-text-primary truncate">{order.vipGuestName || "VIP"}</h3>
           {isUnassigned && (
-            <span className="text-[10px] text-status-warn-600 font-bold">{t("delivery.waitingDriver")}</span>
+            <span className="text-[11px] text-status-warn-600 font-extrabold uppercase tracking-wider">{t("delivery.waitingDriver")}</span>
           )}
           {order.deliveryDriverName && isOwner && (
-            <span className="text-[10px] text-text-muted font-bold">{t("delivery.driver")}: {order.deliveryDriverName}</span>
+            <span className="text-[11px] text-text-muted font-bold block mt-0.5">{t("delivery.driver")}: {order.deliveryDriverName}</span>
           )}
         </div>
-        <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full uppercase ${statusColor}`}>
+        <span className={`text-[10px] font-extrabold px-2.5 py-1 rounded-full uppercase tracking-wider whitespace-nowrap ${statusColor}`}>
           {statusLabel}
         </span>
       </div>
 
-      {/* Kitchen status — shown when driver is assigned but food isn't ready yet */}
-      {order.deliveryDriverId && !kitchenReady && (
-        <div className="mb-3 flex items-center gap-2">
-          <div className="w-2 h-2 rounded-full bg-status-warn-400 animate-pulse" />
-          <span className="text-[11px] font-bold text-status-warn-600 uppercase">
-            {t("delivery.kitchen")}: {order.status === "CONFIRMED" ? t("delivery.confirmed") : order.status === "PREPARING" ? t("delivery.preparing") : order.status}
-          </span>
-        </div>
-      )}
-      {order.deliveryDriverId && kitchenReady && order.deliveryStatus === "ASSIGNED" && (
-        <div className="mb-3 flex items-center gap-2">
-          <div className="w-2 h-2 rounded-full bg-status-good-500" />
-          <span className="text-[11px] font-bold text-status-good-700 uppercase">{t("delivery.foodReady")}</span>
-        </div>
-      )}
-
-      {/* Payment method */}
-      {order.paymentMethod && (
-        <div className="mb-3">
-          <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
-            order.paymentMethod === "CASH" ? "bg-status-good-100 text-status-good-700" :
-            order.paymentMethod === "CARD" ? "bg-status-info-100 text-status-info-700" :
-            "bg-status-wait-100 text-status-wait-700"
-          }`}>
-            {order.paymentMethod === "CASH" ? t("delivery.cash") : order.paymentMethod === "CARD" ? t("delivery.card") : t("delivery.instapay")}
-          </span>
-        </div>
-      )}
-
-      {/* Items */}
-      <div className="space-y-1 mb-3 pb-3 border-b border-sand-100">
-        {order.items.map((item, i) => (
-          <div key={i} className="flex justify-between text-sm">
-            <span className="text-text-secondary">{item.quantity}x {item.name}</span>
-            <span className="text-text-muted">{item.price * item.quantity} EGP</span>
+      {/* HERO: Total to collect + kitchen state */}
+      <div className="mx-4 mb-3 p-4 rounded-xl bg-gradient-to-br from-ocean-50 to-ocean-100 border-2 border-ocean-200">
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <div className="text-[10px] font-extrabold text-ocean-700 uppercase tracking-widest">{t("delivery.totalToCollect")}</div>
+            <div className="text-3xl font-extrabold text-ocean-700 tabular-nums tracking-tight leading-none mt-0.5">{order.total} <span className="text-base">EGP</span></div>
           </div>
-        ))}
-        <div className="flex justify-between text-sm pt-1">
-          <span className="text-text-muted">{t("delivery.subtotal")}</span>
-          <span className="text-text-muted">{order.total - order.deliveryFee} EGP</span>
-        </div>
-        <div className="flex justify-between text-sm">
-          <span className="text-text-muted">{t("delivery.deliveryFee")}</span>
-          <span className="text-text-muted">{order.deliveryFee} EGP</span>
-        </div>
-        <div className="flex justify-between text-sm font-bold pt-1 border-t border-sand-100">
-          <span>{t("delivery.totalToCollect")}</span>
-          <span className="text-ocean-600">{order.total} EGP</span>
-        </div>
-      </div>
-
-      {/* Address */}
-      {order.deliveryAddress && (
-        <div className="mb-3">
-          <p className="text-xs font-bold text-text-muted uppercase mb-1">{t("delivery.address")}</p>
-          <p className="text-sm text-text-primary">{order.deliveryAddress}</p>
-          {order.deliveryNotes && (
-            <p className="text-xs text-text-muted mt-0.5">{order.deliveryNotes}</p>
+          {order.deliveryDriverId && !kitchenReady && (
+            <div className="flex items-center gap-1.5 text-status-warn-600">
+              <div className="w-2 h-2 rounded-full bg-status-warn-400 animate-pulse" />
+              <span className="text-[10px] font-extrabold uppercase tracking-widest">
+                {order.status === "CONFIRMED" ? t("delivery.confirmed") : order.status === "PREPARING" ? t("delivery.preparing") : order.status}
+              </span>
+            </div>
+          )}
+          {order.deliveryDriverId && kitchenReady && order.deliveryStatus === "ASSIGNED" && (
+            <div className="flex items-center gap-1.5 text-status-good-700">
+              <div className="w-2 h-2 rounded-full bg-status-good-500" />
+              <span className="text-[10px] font-extrabold uppercase tracking-widest">{t("delivery.foodReady")}</span>
+            </div>
           )}
         </div>
-      )}
+      </div>
 
-      {/* Phone */}
-      {order.vipGuestPhone && (
-        <a href={`tel:${order.vipGuestPhone}`} className="inline-flex items-center gap-1.5 text-sm text-ocean-600 font-bold mb-3">
-          &#x1F4DE; {order.vipGuestPhone}
-        </a>
-      )}
+      <div className="px-4 pb-4">
+        {/* Address */}
+        {order.deliveryAddress && (
+          <div className="mb-3 p-3 rounded-xl bg-sand-50 border border-sand-200">
+            <p className="text-[10px] font-extrabold text-text-muted uppercase tracking-widest mb-1">{t("delivery.address")}</p>
+            <p className="text-sm font-bold text-text-primary leading-snug">{order.deliveryAddress}</p>
+            {order.deliveryNotes && (
+              <p className="text-xs text-text-muted mt-1.5 leading-snug">{order.deliveryNotes}</p>
+            )}
+          </div>
+        )}
 
-      {/* Actions */}
-      <div className="flex gap-2">
-        {mapsUrl && (
-          <a
-            href={mapsUrl}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="flex-1 py-2.5 rounded-xl border-2 border-sand-200 text-center text-sm font-bold text-text-primary active:scale-95 transition"
-          >
-            &#x1F4CD; {t("delivery.navigate")}
+        {/* Phone */}
+        {order.vipGuestPhone && (
+          <a href={`tel:${order.vipGuestPhone}`} className="inline-flex items-center gap-2 text-base text-ocean-600 font-extrabold mb-3">
+            &#x1F4DE; {order.vipGuestPhone}
           </a>
         )}
-        {next && (
-          <button
-            onClick={async () => {
-              setUpdating(true);
-              await onStatusUpdate(order.id, next.status);
-              setUpdating(false);
-            }}
-            disabled={updating}
-            className={`flex-1 py-2.5 rounded-xl text-white text-sm font-bold active:scale-95 transition disabled:opacity-50 ${next.color}`}
-          >
-            {updating ? "..." : next.label}
-          </button>
-        )}
+
+        {/* Items collapse — driver doesn't need full breakdown by default */}
+        <details className="mb-3 group">
+          <summary className="cursor-pointer text-[10px] font-extrabold text-text-muted uppercase tracking-widest list-none flex items-center gap-1">
+            <span className="group-open:rotate-90 transition-transform">▸</span>
+            {order.items.length} items · {order.total - order.deliveryFee} + {order.deliveryFee} EGP
+          </summary>
+          <div className="space-y-1 mt-2 pb-3 border-b border-sand-100">
+            {order.items.map((item, i) => (
+              <div key={i} className="flex justify-between text-sm">
+                <span className="text-text-secondary"><span className="font-extrabold text-text-primary">{item.quantity}×</span> {item.name}</span>
+                <span className="text-text-muted tabular-nums">{item.price * item.quantity}</span>
+              </div>
+            ))}
+            <div className="flex justify-between text-xs pt-1.5 text-text-muted">
+              <span>{t("delivery.subtotal")}</span>
+              <span className="tabular-nums">{order.total - order.deliveryFee}</span>
+            </div>
+            <div className="flex justify-between text-xs text-text-muted">
+              <span>{t("delivery.deliveryFee")}</span>
+              <span className="tabular-nums">{order.deliveryFee}</span>
+            </div>
+          </div>
+        </details>
+
+        {/* Actions */}
+        <div className="flex gap-2">
+          {mapsUrl && (
+            <a
+              href={mapsUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex-1 py-3.5 rounded-xl border-2 border-sand-200 bg-white text-center text-sm font-extrabold uppercase tracking-wider text-text-primary active:scale-95 transition"
+            >
+              &#x1F4CD; {t("delivery.navigate")}
+            </a>
+          )}
+          {next && (
+            <button
+              onClick={async () => {
+                setUpdating(true);
+                await onStatusUpdate(order.id, next.status);
+                setUpdating(false);
+              }}
+              disabled={updating}
+              className={`flex-1 py-3.5 rounded-xl text-white text-sm font-extrabold uppercase tracking-wider active:scale-95 transition disabled:opacity-50 shadow-sm ${next.color}`}
+            >
+              {updating ? "..." : next.label}
+            </button>
+          )}
+        </div>
+        {/* Receipt download */}
+        <button
+          onClick={() => downloadReceipt(order)}
+          className="w-full mt-2 py-2 rounded-xl border border-sand-200 text-[11px] font-extrabold uppercase tracking-wider text-text-muted active:scale-95 transition"
+        >
+          {t("delivery.downloadReceipt")}
+        </button>
       </div>
-      {/* Receipt download */}
-      <button
-        onClick={() => downloadReceipt(order)}
-        className="w-full mt-2 py-2 rounded-xl border border-sand-200 text-xs font-bold text-text-muted active:scale-95 transition"
-      >
-        {t("delivery.downloadReceipt")}
-      </button>
     </div>
   );
 }
@@ -499,7 +509,7 @@ function DeliveryDashboard({ staff }: { staff: Staff }) {
             {/* My active deliveries */}
             {myActive.length > 0 && (
               <div className="space-y-3 mb-6">
-                <h2 className="text-xs font-bold text-text-muted uppercase tracking-wider">{t("delivery.myDeliveries")} ({myActive.length})</h2>
+                <h2 className="text-[11px] font-extrabold text-text-primary uppercase tracking-[0.2em] px-1">{t("delivery.myDeliveries")} · {myActive.length}</h2>
                 {myActive.map((o) => (
                   <DeliveryCard key={o.id} order={o} onStatusUpdate={updateStatus} isOwner={isOwner} />
                 ))}
@@ -509,9 +519,9 @@ function DeliveryDashboard({ staff }: { staff: Staff }) {
             {/* Unassigned orders — visible to owner and online drivers */}
             {unassigned.length > 0 && (isOwner || isOnline) && (
               <div className="space-y-3 mb-6">
-                <h2 className="text-xs font-bold text-status-warn-600 uppercase tracking-wider flex items-center gap-2">
+                <h2 className="text-[11px] font-extrabold text-status-warn-600 uppercase tracking-[0.2em] px-1 flex items-center gap-2">
                   <span className="w-2 h-2 rounded-full bg-status-warn-400 animate-pulse" />
-                  {t("delivery.awaitingDriverSection")} ({unassigned.length})
+                  {t("delivery.awaitingDriverSection")} · {unassigned.length}
                 </h2>
                 {unassigned.map((o) => (
                   <DeliveryCard key={o.id} order={o} onStatusUpdate={updateStatus} isOwner={isOwner} />
@@ -522,7 +532,7 @@ function DeliveryDashboard({ staff }: { staff: Staff }) {
             {/* Other drivers' active deliveries — owner only */}
             {othersActive.length > 0 && (
               <div className="space-y-3 mb-6">
-                <h2 className="text-xs font-bold text-text-muted uppercase tracking-wider">{t("delivery.otherDrivers")} ({othersActive.length})</h2>
+                <h2 className="text-[11px] font-extrabold text-text-muted uppercase tracking-[0.2em] px-1">{t("delivery.otherDrivers")} · {othersActive.length}</h2>
                 {othersActive.map((o) => (
                   <DeliveryCard key={o.id} order={o} onStatusUpdate={updateStatus} isOwner={isOwner} />
                 ))}
@@ -532,9 +542,9 @@ function DeliveryDashboard({ staff }: { staff: Staff }) {
             {/* Empty state */}
             {myActive.length === 0 && unassigned.length === 0 && othersActive.length === 0 && (
               <div className="rounded-2xl bg-sand-50 border-2 border-sand-200 p-8 text-center mb-6">
-                <span className="text-3xl mb-2 block">&#x1F6F5;</span>
-                <p className="text-sm text-text-muted font-bold">{t("delivery.noActive")}</p>
-                <p className="text-xs text-text-muted mt-1">
+                <span className="text-4xl mb-3 block">&#x1F6F5;</span>
+                <p className="text-base text-text-secondary font-extrabold uppercase tracking-wider">{t("delivery.noActive")}</p>
+                <p className="text-xs text-text-muted mt-2 leading-snug">
                   {!isOwner && !isOnline ? t("delivery.goOnlineShort") : t("delivery.autoAssign")}
                 </p>
               </div>
@@ -542,13 +552,13 @@ function DeliveryDashboard({ staff }: { staff: Staff }) {
 
             {/* Completed */}
             {completed.length > 0 && (
-              <div className="space-y-3">
-                <h2 className="text-xs font-bold text-text-muted uppercase tracking-wider">{t("delivery.completedToday")} ({completed.length})</h2>
+              <div className="space-y-2">
+                <h2 className="text-[11px] font-extrabold text-text-muted uppercase tracking-[0.2em] px-1">{t("delivery.completedToday")} · {completed.length}</h2>
                 {completed.map((o) => (
-                  <div key={o.id} className="rounded-xl bg-sand-50 border border-sand-200 p-3">
+                  <div key={o.id} className="rounded-xl bg-sand-50 border border-sand-200 px-3 py-2.5">
                     <div className="flex items-center justify-between">
-                      <span className="text-sm font-bold text-text-secondary">#{o.orderNumber} — {o.vipGuestName || "VIP"}</span>
-                      <span className="text-xs text-status-good-600 font-bold">{o.total} EGP</span>
+                      <span className="text-sm font-extrabold text-text-secondary truncate">#{o.orderNumber} — {o.vipGuestName || "VIP"}</span>
+                      <span className="text-base text-status-good-600 font-extrabold tabular-nums tracking-tight flex-shrink-0">{o.total} EGP</span>
                     </div>
                   </div>
                 ))}

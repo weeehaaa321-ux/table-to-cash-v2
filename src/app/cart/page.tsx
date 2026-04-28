@@ -1327,15 +1327,18 @@ function CartPage() {
                   <span className="text-text-secondary font-semibold tabular-nums">{formatEGP(DELIVERY_FEE)} EGP</span>
                 </div>
               )}
-              <div className="border-t border-sand-100 pt-3 flex justify-between items-center">
-                <span className="font-bold text-text-primary">Total</span>
+              <div className="border-t border-sand-200 pt-4 flex justify-between items-baseline">
+                <div>
+                  <div className="text-[10px] font-extrabold uppercase tracking-[0.2em] text-text-muted">Total</div>
+                  <div className="text-xs text-text-muted mt-0.5">VAT included</div>
+                </div>
                 <motion.span
                   key={grandTotal}
-                  className="font-semibold text-xl text-text-primary tabular-nums"
+                  className="font-extrabold text-3xl text-text-primary tabular-nums tracking-tight leading-none"
                   initial={{ y: -5, opacity: 0 }}
                   animate={{ y: 0, opacity: 1 }}
                 >
-                  {formatEGP(grandTotal + (isDelivery ? DELIVERY_FEE : 0))} <span className="text-sm font-semibold text-text-muted">EGP</span>
+                  {formatEGP(grandTotal + (isDelivery ? DELIVERY_FEE : 0))} <span className="text-base font-bold text-text-muted">EGP</span>
                 </motion.span>
               </div>
             </div>
@@ -1411,9 +1414,9 @@ function CartPage() {
           <motion.button
             onClick={handlePlaceOrder}
             disabled={!canOrder || isSubmitting}
-            className={`w-full text-center py-4 rounded-2xl font-bold text-[15px] transition-all relative overflow-hidden ${
+            className={`w-full text-center py-5 rounded-2xl font-extrabold text-base uppercase tracking-wider transition-all relative overflow-hidden ${
               canOrder && !isSubmitting
-                ? "bg-ocean-600 hover:bg-ocean-700 text-white shadow-xl shadow-ocean-500/20"
+                ? "bg-ocean-600 hover:bg-ocean-700 text-white shadow-xl shadow-ocean-500/25"
                 : "bg-sand-200 text-text-muted cursor-not-allowed"
             }`}
             whileTap={canOrder && !isSubmitting ? { scale: 0.98 } : {}}

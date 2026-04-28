@@ -386,7 +386,6 @@ function AcceptPaymentPanel({ sessions, onAcceptPayment, onReversePayment, recen
   const awaitingKitchen = sessions.filter(
     (s) => s.status === "OPEN" && (s.unpaidTotal || 0) === 0 && (s.orderTotal || 0) > 0 && s.paymentReceived
   );
-  const [confirming, setConfirming] = useState<string | null>(null);
   const [printing, setPrinting] = useState<string | null>(null);
   const [justPaid, setJustPaid] = useState<{ tableNumber: number | null; orderType?: string; vipGuestName?: string | null; method: "CASH" | "CARD"; total: number } | null>(null);
   // Final "did you actually receive the payment?" guard before we settle.
@@ -448,7 +447,6 @@ function AcceptPaymentPanel({ sessions, onAcceptPayment, onReversePayment, recen
   const handleMethodChosen = (sessionId: string, method: "CASH" | "CARD") => {
     const session = sessions.find((s) => s.id === sessionId);
     if (!session) return;
-    setConfirming(null);
     const priorRounds = session.paidRounds || [];
     const nextRoundIndex = priorRounds.length + 1;
     const roundLabel = priorRounds.length > 0
@@ -707,83 +705,99 @@ function AcceptPaymentPanel({ sessions, onAcceptPayment, onReversePayment, recen
         </div>
       )}
 
-      {/* Open bills */}
-      <div className="bg-white rounded-2xl border-2 border-sand-200 overflow-hidden">
-        <div className="px-4 py-3 bg-sand-50 border-b-2 border-sand-200">
-          <h3 className="text-sm font-semibold text-text-primary uppercase tracking-wide">{t("cashier.acceptPayment")}</h3>
-          <p className="text-[10px] text-text-secondary">{openSessions.length} {t("cashier.openBills")}</p>
+      {/* Open bills — money-side hero. Total amount is the largest thing on the card. */}
+      <div>
+        <div className="flex items-baseline justify-between mb-3 px-1">
+          <h3 className="text-xl font-extrabold text-text-primary leading-none">{t("cashier.acceptPayment")}</h3>
+          <span className="text-[11px] font-extrabold uppercase tracking-widest text-text-muted">
+            {openSessions.length} {t("cashier.openBills")}
+          </span>
         </div>
         {openSessions.length === 0 ? (
-          <div className="p-6 text-center">
-            <p className="text-text-muted text-sm">{t("cashier.noPendingBillsShort")}</p>
+          <div className="bg-white rounded-2xl border-2 border-sand-200 p-10 text-center">
+            <div className="text-5xl mb-3 opacity-40">💸</div>
+            <p className="text-sm text-text-muted">{t("cashier.noPendingBillsShort")}</p>
           </div>
         ) : (
-          <div className="divide-y divide-sand-100 max-h-[400px] lg:max-h-[600px] overflow-y-auto">
+          <div className="space-y-3 max-h-[600px] overflow-y-auto pr-1">
             {openSessions.map((s) => {
               const priorRounds = s.paidRounds || [];
               const priorSummary = summarizePriorRounds(priorRounds);
               const nextRoundIndex = priorRounds.length + 1;
               const hasPriorPayment = priorRounds.length > 0;
-              const methodLabel = hasPriorPayment
-                ? `${t("cashier.payment")} ${nextRoundIndex}`
-                : t("cashier.payment");
               return (
-              <div key={s.id} className="px-4 py-3">
-                <div className="flex items-center justify-between mb-2">
-                  <div className="flex items-center gap-3">
-                    <div className={`w-10 h-10 rounded-xl border-2 flex items-center justify-center text-sm font-semibold ${
-                      s.orderType === "DELIVERY" ? "bg-status-warn-50 border-status-warn-200 text-status-warn-700" :
-                      s.orderType === "VIP_DINE_IN" ? "bg-status-wait-50 border-status-wait-200 text-status-wait-700" :
-                      "bg-status-wait-50 border-status-wait-200 text-status-wait-700"
-                    }`}>
-                      {s.orderType === "DELIVERY" ? "\u{1F6F5}" : s.orderType === "VIP_DINE_IN" ? "\u{1F451}" : s.tableNumber}
+              <div key={s.id} className="bg-white rounded-2xl border-2 border-sand-200 overflow-hidden">
+                {/* Identity row */}
+                <div className="px-5 pt-5 pb-3 flex items-start gap-4">
+                  <div className={`flex-shrink-0 w-16 h-16 rounded-2xl border-2 flex items-center justify-center text-2xl font-extrabold ${
+                    s.orderType === "DELIVERY" ? "bg-status-warn-50 border-status-warn-200 text-status-warn-700" :
+                    s.orderType === "VIP_DINE_IN" ? "bg-status-wait-50 border-status-wait-200 text-status-wait-700" :
+                    "bg-status-wait-50 border-status-wait-200 text-status-wait-700"
+                  }`}>
+                    {s.orderType === "DELIVERY" ? "\u{1F6F5}" : s.orderType === "VIP_DINE_IN" ? "\u{1F451}" : s.tableNumber}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="text-xl font-extrabold text-text-primary leading-tight truncate">
+                      {getOrderLabel(s)}
                     </div>
-                    <div>
-                      <span className="text-sm font-bold text-text-primary">{getOrderLabel(s)}</span>
-                      <div className="flex items-center gap-2">
-                        {s.orderType !== "DELIVERY" && <span className="text-[10px] text-text-muted">{s.guestCount} {s.guestCount !== 1 ? t("common.guests") : t("common.guest")}</span>}
-                        {s.waiterName && <span className="text-[10px] text-text-muted">· {s.waiterName}</span>}
-                      </div>
+                    <div className="text-xs text-text-muted mt-1 truncate">
+                      {s.orderType !== "DELIVERY" && (
+                        <>{s.guestCount} {s.guestCount !== 1 ? t("common.guests") : t("common.guest")}</>
+                      )}
+                      {s.waiterName && (
+                        <>{s.orderType !== "DELIVERY" ? " · " : ""}{s.waiterName}</>
+                      )}
                     </div>
                   </div>
-                  <div className="flex items-center gap-2">
-                    <button onClick={() => handlePrint(s.id)} disabled={printing === s.id}
-                      className="px-2.5 py-2 rounded-xl bg-sand-100 text-text-secondary text-sm font-bold active:scale-95 hover:bg-sand-200 disabled:opacity-50"
-                      title={t("cashier.printBillPreview")}>
-                      {printing === s.id ? "..." : "🖨"}
-                    </button>
-                    <span className="text-lg font-semibold text-text-primary">{formatEGP(s.unpaidTotal || 0)} <span className="text-xs text-text-muted">{t("common.egp")}</span></span>
+                  <button
+                    onClick={() => handlePrint(s.id)}
+                    disabled={printing === s.id}
+                    className="flex-shrink-0 w-11 h-11 rounded-xl bg-sand-100 hover:bg-sand-200 text-text-secondary flex items-center justify-center text-base transition disabled:opacity-50 active:scale-95"
+                    title={t("cashier.printBillPreview")}
+                  >
+                    {printing === s.id ? "…" : "🖨"}
+                  </button>
+                </div>
+
+                {/* HERO — total due. The single largest element on the card. */}
+                <div className="px-5 pb-3 text-center">
+                  <div className="text-[10px] font-extrabold uppercase tracking-[0.2em] text-text-muted mb-1.5">
+                    {hasPriorPayment ? `${t("cashier.payment")} ${nextRoundIndex}` : t("cashier.totalDue")}
+                  </div>
+                  <div className="text-5xl font-extrabold text-text-primary tabular-nums leading-none tracking-tight">
+                    {formatEGP(s.unpaidTotal || 0)}
+                    <span className="text-xl text-text-muted font-bold ms-2">{t("common.egp")}</span>
                   </div>
                 </div>
+
+                {/* Prior rounds context (when this is a follow-up payment) */}
                 {hasPriorPayment && priorSummary && (
-                  <div className="mb-2 rounded-lg bg-status-good-50 border border-status-good-100 px-2.5 py-1.5 flex items-center justify-between">
-                    <span className="text-[10px] font-semibold text-status-good-700 uppercase tracking-wider">
+                  <div className="mx-5 mb-4 rounded-lg bg-status-good-50 border border-status-good-200 px-3 py-2 flex items-center justify-between gap-2">
+                    <span className="text-[11px] font-extrabold text-status-good-700 uppercase tracking-widest">
                       {t("cashier.alreadyPaid")} · {priorRounds.length} {priorRounds.length !== 1 ? t("cashier.roundsPlural") : t("cashier.rounds")}
                     </span>
-                    <span className="text-[11px] font-bold text-status-good-800 tabular-nums">{priorSummary}</span>
+                    <span className="text-sm font-extrabold text-status-good-800 tabular-nums">{priorSummary}</span>
                   </div>
                 )}
-                {confirming === s.id ? (
-                  <div className="flex gap-2">
-                    <button onClick={() => handleMethodChosen(s.id, "CASH")}
-                      className="flex-1 py-2.5 rounded-xl bg-status-good-600 text-white text-sm font-bold active:scale-95">
-                      {hasPriorPayment ? `💵 ${t("cashier.processCash")} · ${methodLabel}` : `💵 ${t("cashier.processCash")}`}
-                    </button>
-                    <button onClick={() => handleMethodChosen(s.id, "CARD")}
-                      className="flex-1 py-2.5 rounded-xl bg-status-info-600 text-white text-sm font-bold active:scale-95">
-                      {hasPriorPayment ? `💳 ${t("cashier.processCard")} · ${methodLabel}` : `💳 ${t("cashier.processCard")}`}
-                    </button>
-                    <button onClick={() => setConfirming(null)}
-                      className="px-3 py-2.5 rounded-xl bg-sand-100 text-text-secondary text-sm font-bold">
-                      ✕
-                    </button>
-                  </div>
-                ) : (
-                  <button onClick={() => setConfirming(s.id)}
-                    className="w-full py-2.5 rounded-xl bg-status-wait-100 text-status-wait-700 text-sm font-bold hover:bg-status-wait-200 transition active:scale-95">
-                    {hasPriorPayment ? `${t("cashier.processPayment")} · ${methodLabel}` : t("cashier.processPayment")}
+
+                {/* Direct payment-method buttons. No intermediate "Process Payment" step —
+                    safety is in the confirm modal that fires next. */}
+                <div className="grid grid-cols-2 border-t-2 border-sand-200">
+                  <button
+                    onClick={() => handleMethodChosen(s.id, "CASH")}
+                    className="py-5 text-base font-extrabold uppercase tracking-wider bg-status-good-500 hover:bg-status-good-600 text-white transition active:scale-[0.99] flex items-center justify-center gap-2"
+                  >
+                    <span className="text-2xl leading-none">💵</span>
+                    {t("cashier.cash")}
                   </button>
-                )}
+                  <button
+                    onClick={() => handleMethodChosen(s.id, "CARD")}
+                    className="py-5 text-base font-extrabold uppercase tracking-wider bg-status-info-500 hover:bg-status-info-600 text-white transition active:scale-[0.99] flex items-center justify-center gap-2 border-l-2 border-sand-200"
+                  >
+                    <span className="text-2xl leading-none">💳</span>
+                    {t("cashier.card")}
+                  </button>
+                </div>
               </div>
               );
             })}
@@ -807,22 +821,28 @@ function CashierWallet({ cashCollected, cardCollected, totalOrders }: {
   const { t } = useLanguage();
   return (
     <div className="bg-gradient-to-br from-status-wait-600 to-status-wait-800 rounded-2xl p-5 text-white shadow-lg">
-      <div className="flex items-center justify-between mb-4">
-        <h3 className="text-sm font-bold opacity-80 uppercase tracking-wide">{t("cashier.myRegister")}</h3>
-        <span className="text-[10px] font-bold bg-white/20 px-2.5 py-1 rounded-full">{totalOrders} {t("cashier.orders")}</span>
+      <div className="flex items-center justify-between mb-5">
+        <div>
+          <div className="text-[10px] font-extrabold uppercase tracking-[0.2em] opacity-70">
+            {t("cashier.myRegister")}
+          </div>
+        </div>
+        <span className="text-[11px] font-extrabold bg-white/20 px-2.5 py-1 rounded-full uppercase tracking-widest">
+          {totalOrders} {t("cashier.orders")}
+        </span>
       </div>
       <div className="grid grid-cols-3 gap-3">
         <div>
-          <div className="text-2xl font-semibold">{formatEGP(cashCollected)}</div>
-          <div className="text-[10px] opacity-70">{t("cashier.cash")}</div>
+          <div className="text-[10px] font-extrabold uppercase tracking-widest opacity-70 mb-1">{t("cashier.cash")}</div>
+          <div className="text-3xl font-extrabold tabular-nums tracking-tight leading-none">{formatEGP(cashCollected)}</div>
         </div>
         <div>
-          <div className="text-2xl font-semibold">{formatEGP(cardCollected)}</div>
-          <div className="text-[10px] opacity-70">{t("cashier.cardDigital")}</div>
+          <div className="text-[10px] font-extrabold uppercase tracking-widest opacity-70 mb-1">{t("cashier.cardDigital")}</div>
+          <div className="text-3xl font-extrabold tabular-nums tracking-tight leading-none">{formatEGP(cardCollected)}</div>
         </div>
         <div>
-          <div className="text-2xl font-semibold">{formatEGP(cashCollected + cardCollected)}</div>
-          <div className="text-[10px] opacity-70">{t("cashier.grandTotal")}</div>
+          <div className="text-[10px] font-extrabold uppercase tracking-widest opacity-70 mb-1">{t("cashier.grandTotal")}</div>
+          <div className="text-3xl font-extrabold tabular-nums tracking-tight leading-none">{formatEGP(cashCollected + cardCollected)}</div>
         </div>
       </div>
     </div>
@@ -838,20 +858,20 @@ function RevenueSummary({ dayRevenue, shiftRevenue, dayOrders, shiftOrders }: {
 }) {
   const { t } = useLanguage();
   return (
-    <div className="bg-white rounded-2xl border-2 border-sand-200 overflow-hidden">
-      <div className="px-4 py-3 bg-sand-50 border-b-2 border-sand-200">
-        <h3 className="text-sm font-semibold text-text-primary uppercase tracking-wide">{t("cashier.revenue")}</h3>
+    <div className="bg-white rounded-2xl border-2 border-sand-200 overflow-hidden shadow-sm">
+      <div className="px-5 py-3 bg-sand-50 border-b-2 border-sand-200">
+        <h3 className="text-[11px] font-extrabold text-text-primary uppercase tracking-[0.2em]">{t("cashier.revenue")}</h3>
       </div>
-      <div className="grid grid-cols-2 divide-x divide-sand-100">
-        <div className="p-4 text-center">
-          <p className="text-[10px] text-text-muted font-bold uppercase mb-1">{t("cashier.today")}</p>
-          <p className="text-2xl font-semibold text-text-primary">{formatEGP(dayRevenue)}</p>
-          <p className="text-[10px] text-text-muted">{dayOrders} {t("cashier.orders")}</p>
+      <div className="grid grid-cols-2 divide-x-2 divide-sand-100">
+        <div className="p-5 text-center">
+          <p className="text-[10px] text-text-muted font-extrabold uppercase tracking-widest mb-1.5">{t("cashier.today")}</p>
+          <p className="text-3xl font-extrabold text-text-primary tabular-nums tracking-tight leading-none">{formatEGP(dayRevenue)}</p>
+          <p className="text-[10px] text-text-muted font-medium mt-1.5">{dayOrders} {t("cashier.orders")}</p>
         </div>
-        <div className="p-4 text-center">
-          <p className="text-[10px] text-text-muted font-bold uppercase mb-1">{t("cashier.thisShift")}</p>
-          <p className="text-2xl font-semibold text-status-wait-700">{formatEGP(shiftRevenue)}</p>
-          <p className="text-[10px] text-text-muted">{shiftOrders} {t("cashier.orders")}</p>
+        <div className="p-5 text-center">
+          <p className="text-[10px] text-text-muted font-extrabold uppercase tracking-widest mb-1.5">{t("cashier.thisShift")}</p>
+          <p className="text-3xl font-extrabold text-status-wait-700 tabular-nums tracking-tight leading-none">{formatEGP(shiftRevenue)}</p>
+          <p className="text-[10px] text-text-muted font-medium mt-1.5">{shiftOrders} {t("cashier.orders")}</p>
         </div>
       </div>
     </div>
@@ -886,57 +906,58 @@ function ShiftComparison({
   const hasLeakage = gap > 5; // tolerance of 5 EGP for rounding
 
   return (
-    <div className="bg-white rounded-2xl border-2 border-sand-200 overflow-hidden">
-      <div className={`px-4 py-3 border-b-2 ${hasLeakage ? "bg-status-bad-50 border-status-bad-200" : "bg-status-good-50 border-status-good-200"}`}>
-        <h3 className={`text-sm font-semibold uppercase tracking-wide ${hasLeakage ? "text-status-bad-800" : "text-status-good-800"}`}>
+    <div className="bg-white rounded-2xl border-2 border-sand-200 overflow-hidden shadow-sm">
+      <div className={`px-5 py-3 border-b-2 flex items-center gap-2 ${hasLeakage ? "bg-status-bad-50 border-status-bad-200" : "bg-status-good-50 border-status-good-200"}`}>
+        <span className={`w-2 h-2 rounded-full ${hasLeakage ? "bg-status-bad-500 animate-pulse" : "bg-status-good-500"}`} />
+        <h3 className={`text-[11px] font-extrabold uppercase tracking-[0.2em] ${hasLeakage ? "text-status-bad-800" : "text-status-good-800"}`}>
           {hasLeakage ? t("cashier.leakageDetected") : t("cashier.shiftBalanced")}
         </h3>
       </div>
-      <div className="p-4 space-y-3">
-        <div className="flex justify-between text-sm">
-          <span className="text-text-secondary font-medium">{t("cashier.totalSales")}</span>
-          <span className="font-semibold text-text-primary">{formatEGP(expectedCollected)} {t("common.egp")}</span>
+      <div className="p-5 space-y-3">
+        <div className="flex justify-between items-baseline">
+          <span className="text-[10px] text-text-muted font-extrabold uppercase tracking-widest">{t("cashier.totalSales")}</span>
+          <span className="text-2xl font-extrabold text-text-primary tabular-nums tracking-tight leading-none">{formatEGP(expectedCollected)}</span>
         </div>
-        <div className="border-t border-sand-100 pt-2 space-y-1.5">
-          <div className="flex justify-between text-xs">
-            <span className="text-text-muted">{t("cashier.cashCollected")}</span>
-            <span className="font-bold text-status-good-600">{formatEGP(cashCollected)} {t("common.egp")}</span>
+        <div className="border-t border-sand-100 pt-3 space-y-2">
+          <div className="flex justify-between items-center">
+            <span className="text-xs text-text-muted font-semibold">{t("cashier.cashCollected")}</span>
+            <span className="text-base font-extrabold text-status-good-600 tabular-nums">{formatEGP(cashCollected)}</span>
           </div>
-          <div className="flex justify-between text-xs">
-            <span className="text-text-muted">{t("cashier.cardCollected")}</span>
-            <span className="font-bold text-status-info-600">{formatEGP(cardCollected)} {t("common.egp")}</span>
+          <div className="flex justify-between items-center">
+            <span className="text-xs text-text-muted font-semibold">{t("cashier.cardCollected")}</span>
+            <span className="text-base font-extrabold text-status-info-600 tabular-nums">{formatEGP(cardCollected)}</span>
           </div>
           {unpaidCount > 0 && (
-            <div className="flex justify-between text-xs">
-              <span className="text-status-warn-600 font-medium">{unpaidCount} {t("cashier.activeTablesUnpaid")}</span>
-              <span className="font-bold text-status-warn-600">{formatEGP(unpaidTotal)} {t("common.egp")}</span>
+            <div className="flex justify-between items-center">
+              <span className="text-xs text-status-warn-600 font-semibold">{unpaidCount} {t("cashier.activeTablesUnpaid")}</span>
+              <span className="text-base font-extrabold text-status-warn-600 tabular-nums">{formatEGP(unpaidTotal)}</span>
             </div>
           )}
         </div>
-        <div className="border-t-2 border-sand-200 pt-2">
-          <div className="flex justify-between text-sm">
-            <span className="font-bold text-text-secondary">{t("cashier.accountedFor")}</span>
-            <span className="font-semibold text-text-primary">{formatEGP(accounted)} {t("common.egp")}</span>
+        <div className="border-t-2 border-sand-200 pt-3">
+          <div className="flex justify-between items-baseline">
+            <span className="text-[10px] text-text-secondary font-extrabold uppercase tracking-widest">{t("cashier.accountedFor")}</span>
+            <span className="text-2xl font-extrabold text-text-primary tabular-nums tracking-tight leading-none">{formatEGP(accounted)}</span>
           </div>
         </div>
         {hasLeakage && (
-          <div className="bg-status-bad-50 border border-status-bad-200 rounded-xl p-3 mt-2">
-            <div className="flex justify-between items-center">
-              <span className="text-xs font-bold text-status-bad-700">{t("cashier.unaccountedGap")}</span>
-              <span className="text-sm font-semibold text-status-bad-700">{formatEGP(gap)} {t("common.egp")}</span>
+          <div className="bg-status-bad-50 border-2 border-status-bad-200 rounded-xl p-4 mt-2">
+            <div className="flex justify-between items-baseline">
+              <span className="text-[10px] font-extrabold text-status-bad-700 uppercase tracking-widest">{t("cashier.unaccountedGap")}</span>
+              <span className="text-2xl font-extrabold text-status-bad-700 tabular-nums tracking-tight leading-none">{formatEGP(gap)}</span>
             </div>
-            <p className="text-[10px] text-status-bad-500 mt-1">
+            <p className="text-[10px] text-status-bad-500 mt-2 leading-snug">
               {t("cashier.unaccountedGapDesc")}
             </p>
           </div>
         )}
         {!hasLeakage && gap < -5 && (
-          <div className="bg-status-warn-50 border border-status-warn-200 rounded-xl p-3 mt-2">
-            <div className="flex justify-between items-center">
-              <span className="text-xs font-bold text-status-warn-700">{t("cashier.overCollection")}</span>
-              <span className="text-sm font-semibold text-status-warn-700">{formatEGP(Math.abs(gap))} {t("common.egp")}</span>
+          <div className="bg-status-warn-50 border-2 border-status-warn-200 rounded-xl p-4 mt-2">
+            <div className="flex justify-between items-baseline">
+              <span className="text-[10px] font-extrabold text-status-warn-700 uppercase tracking-widest">{t("cashier.overCollection")}</span>
+              <span className="text-2xl font-extrabold text-status-warn-700 tabular-nums tracking-tight leading-none">{formatEGP(Math.abs(gap))}</span>
             </div>
-            <p className="text-[10px] text-status-warn-500 mt-1">
+            <p className="text-[10px] text-status-warn-500 mt-2 leading-snug">
               {t("cashier.overCollectionDesc")}
             </p>
           </div>

@@ -305,22 +305,22 @@ function VipTrackContent() {
           <div className="flex items-center gap-3">
             <Link
               href={menuUrl}
-              className="w-10 h-10 rounded-full bg-sand-100 flex items-center justify-center text-text-muted active:scale-95 transition"
+              className="w-11 h-11 rounded-full bg-sand-100 flex items-center justify-center text-text-secondary active:scale-95 transition flex-shrink-0"
             >
               <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M10.5 19.5L3 12m0 0l7.5-7.5M3 12h18" />
               </svg>
             </Link>
-            <div className="flex-1">
-              <h1 className="text-lg font-semibold text-text-primary tracking-tight">Track Order</h1>
-              <p className="text-[11px] text-text-muted font-medium flex items-center gap-1.5">
-                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-status-wait-50 border border-status-wait-200 text-status-wait-700 text-[10px] font-bold">{"\u{1F451}"} VIP</span>
-                {decodeURIComponent(vipName)}
+            <div className="flex-1 min-w-0">
+              <p className="text-[10px] font-extrabold text-text-muted uppercase tracking-[0.2em]">Track Order</p>
+              <p className="text-xs text-text-secondary font-bold flex items-center gap-1.5 mt-0.5 truncate">
+                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-status-wait-50 border border-status-wait-200 text-status-wait-700 text-[10px] font-extrabold tracking-wider">{"\u{1F451}"} VIP</span>
+                <span className="truncate">{decodeURIComponent(vipName)}</span>
                 {activeOrders.length > 0 && <span className="text-text-muted">·</span>}
-                {activeOrders.length > 0 && <span>{activeOrders.length} order{activeOrders.length > 1 ? "s" : ""}</span>}
+                {activeOrders.length > 0 && <span className="tabular-nums">{activeOrders.length} order{activeOrders.length > 1 ? "s" : ""}</span>}
               </p>
             </div>
-            <span className="text-[10px] font-bold px-2.5 py-1 rounded-full bg-sand-100 text-text-secondary uppercase">
+            <span className="text-[10px] font-extrabold px-2.5 py-1 rounded-full bg-sand-100 text-text-secondary uppercase tracking-wider flex-shrink-0">
               {isDelivery ? "Delivery" : "Dine-In"}
             </span>
           </div>
@@ -422,10 +422,10 @@ function VipTrackContent() {
                       <StepIcon icon={kitchenSteps[Math.min(kitchenIndex, kitchenSteps.length - 1)].icon} active={true} done={false} />
                     )}
                   </motion.div>
-                  <h2 className="text-xl font-semibold text-text-primary mb-1 tracking-tight relative">
-                    {kitchenIndex >= 0 ? kitchenSteps[Math.min(kitchenIndex, kitchenSteps.length - 1)].label : "Waiting for confirmation"}
+                  <h2 className="text-3xl font-extrabold text-text-primary mb-2 tracking-tight relative leading-none">
+                    {kitchenIndex >= 0 ? kitchenSteps[Math.min(kitchenIndex, kitchenSteps.length - 1)].label : "Waiting"}
                   </h2>
-                  <p className="text-sm text-text-muted font-light relative">
+                  <p className="text-sm text-text-secondary font-medium relative">
                     {kitchenIndex === -1 && "Your order is being reviewed"}
                     {kitchenIndex === 0 && "Your order has been confirmed"}
                     {kitchenIndex === 1 && "The kitchen is preparing your food"}
@@ -449,10 +449,10 @@ function VipTrackContent() {
                       <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
                     </svg>
                   </motion.div>
-                  <h2 className="text-xl font-semibold text-text-primary mb-1">
+                  <h2 className="text-3xl font-extrabold text-text-primary mb-2 tracking-tight leading-none">
                     {isDelivery ? "Delivered!" : "All Done!"}
                   </h2>
-                  <p className="text-sm text-text-muted font-light">
+                  <p className="text-sm text-text-secondary font-medium">
                     {isDelivery ? "Your order has been delivered. Enjoy!" : "Thank you for dining with us!"}
                   </p>
                 </motion.div>
@@ -501,32 +501,32 @@ function VipTrackContent() {
                     className="bg-white rounded-2xl p-5 shadow-sm border border-sand-100"
                     initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}
                   >
-                    <div className="flex items-center justify-between mb-3">
-                      <span className="text-xs font-bold text-text-muted uppercase tracking-wider">Order #{ord.orderNumber}</span>
+                    <div className="flex items-center justify-between mb-4">
+                      <span className="text-[10px] font-extrabold text-text-muted uppercase tracking-[0.2em] tabular-nums">Order #{ord.orderNumber}</span>
                       {ord.paidAt ? (
-                        <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-status-good-100 text-status-good-700">PAID</span>
+                        <span className="text-[10px] font-extrabold px-2.5 py-1 rounded-full bg-status-good-100 text-status-good-700 uppercase tracking-wider">PAID</span>
                       ) : (
-                        <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full uppercase ${
-                          ord.status === "SERVED" ? "bg-status-good-50 text-status-good-600" :
-                          ord.status === "READY" ? "bg-status-warn-50 text-status-warn-600" :
-                          ord.status === "PREPARING" ? "bg-status-warn-50 text-status-warn-600" :
+                        <span className={`text-[10px] font-extrabold px-2.5 py-1 rounded-full uppercase tracking-wider ${
+                          ord.status === "SERVED" ? "bg-status-good-50 text-status-good-700" :
+                          ord.status === "READY" ? "bg-status-warn-50 text-status-warn-700" :
+                          ord.status === "PREPARING" ? "bg-status-warn-50 text-status-warn-700" :
                           "bg-sand-50 text-text-secondary"
                         }`}>{ord.status}</span>
                       )}
                     </div>
-                    <div className="space-y-1.5">
+                    <div className="space-y-2">
                       {ord.items.map((item, i) => (
                         <div key={i} className="flex items-center justify-between text-sm">
                           <span className="text-text-secondary">
-                            <span className="font-semibold text-text-primary">{item.quantity}x</span> {item.name}
+                            <span className="font-extrabold text-text-primary tabular-nums">{item.quantity}×</span> {item.name}
                           </span>
-                          <span className="text-text-muted font-bold tabular-nums">{formatEGP(item.price * item.quantity)} EGP</span>
+                          <span className="text-text-muted font-bold tabular-nums">{formatEGP(item.price * item.quantity)}</span>
                         </div>
                       ))}
                     </div>
-                    <div className="border-t border-sand-100 pt-3 mt-3 flex justify-between items-center">
-                      <span className="font-bold text-text-primary text-sm">Subtotal</span>
-                      <span className="font-semibold text-text-primary">{formatEGP(ord.total)} EGP</span>
+                    <div className="border-t-2 border-sand-100 pt-3 mt-3 flex justify-between items-baseline">
+                      <span className="text-[10px] font-extrabold text-text-secondary uppercase tracking-widest">Subtotal</span>
+                      <span className="text-2xl font-extrabold text-text-primary tabular-nums tracking-tight leading-none">{formatEGP(ord.total)}</span>
                     </div>
                   </motion.div>
                 ))}

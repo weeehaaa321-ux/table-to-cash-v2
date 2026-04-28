@@ -222,7 +222,18 @@ export class SessionUseCases {
     });
   }
 
-  /** Close a session, cancelling unpaid (or pending if VIP) orders. */
+  /** Close a session, cancelling in-flight (or pending if VIP) orders.
+   *
+   * Table close: only cancel orders that haven't been consumed.
+   * PENDING / CONFIRMED / PREPARING / READY → CANCELLED (kitchen
+   * stops, or never started — food may be wasted but no customer
+   * received it).
+   * SERVED → leave alone. The customer ate the food. Cancelling
+   * would erase a real event from the books; the owner's dashboard
+   * would show the table as "never occupied" when in fact someone
+   * walked out without paying. Bookkeeping reality beats a tidy
+   * queue.
+   * PAID → already revenue, untouched. */
   async closeWithCancellations(input: {
     sessionId: string;
     isVipSession: boolean;
@@ -230,7 +241,7 @@ export class SessionUseCases {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const orderWhere: any = input.isVipSession
       ? { sessionId: input.sessionId, status: "PENDING" }
-      : { sessionId: input.sessionId, status: { notIn: ["PAID", "CANCELLED"] } };
+      : { sessionId: input.sessionId, status: { in: ["PENDING", "CONFIRMED", "PREPARING", "READY"] } };
 
     const orders = await db.order.findMany({ where: orderWhere, select: { id: true } });
     let cancelledCount = 0;

@@ -147,38 +147,39 @@ export default function VipEntryPage() {
     return (
       <div className="min-h-dvh bg-beach">
         <div className="max-w-md mx-auto px-5 py-8">
-          <button onClick={() => setMode("choose")} className="text-ocean-600 text-sm font-bold mb-6 flex items-center gap-1">
+          <button onClick={() => setMode("choose")} className="text-ocean-600 text-xs font-extrabold uppercase tracking-wider mb-6 flex items-center gap-1.5 active:scale-95 transition">
             <span>&larr;</span> Back
           </button>
 
-          <h1 className="text-2xl font-extrabold text-text-primary mb-1">Delivery Details</h1>
-          <p className="text-sm text-text-muted mb-6">Confirm your delivery address</p>
+          <p className="text-[10px] font-extrabold text-text-muted uppercase tracking-[0.25em] mb-1">Step 2 of 2</p>
+          <h1 className="text-3xl font-extrabold text-text-primary mb-2 tracking-tight">Delivery Details</h1>
+          <p className="text-sm text-text-muted mb-8">Confirm your delivery address</p>
 
-          <div className="space-y-4">
+          <div className="space-y-5">
             <div>
-              <label className="block text-xs font-bold text-text-secondary mb-1.5 uppercase tracking-wider">Delivery Address</label>
+              <label className="block text-[10px] font-extrabold text-text-muted mb-2 uppercase tracking-widest">Delivery Address</label>
               <input
                 type="text"
                 value={address}
                 onChange={(e) => setAddress(e.target.value)}
                 placeholder="e.g. 15 Mashraba St, Dahab"
-                className="w-full px-4 py-3 rounded-xl border-2 border-sand-200 bg-white text-text-primary focus:border-ocean-400 focus:outline-none text-sm"
+                className="w-full px-4 py-3.5 rounded-xl border-2 border-sand-200 bg-white text-text-primary font-semibold focus:border-ocean-400 focus:outline-none text-sm transition"
               />
             </div>
 
             <div>
-              <label className="block text-xs font-bold text-text-secondary mb-1.5 uppercase tracking-wider">Notes for Driver</label>
+              <label className="block text-[10px] font-extrabold text-text-muted mb-2 uppercase tracking-widest">Notes for Driver</label>
               <textarea
                 value={addressNotes}
                 onChange={(e) => setAddressNotes(e.target.value)}
                 placeholder="e.g. Blue gate, 2nd floor, ring doorbell"
                 rows={2}
-                className="w-full px-4 py-3 rounded-xl border-2 border-sand-200 bg-white text-text-primary focus:border-ocean-400 focus:outline-none text-sm resize-none"
+                className="w-full px-4 py-3.5 rounded-xl border-2 border-sand-200 bg-white text-text-primary focus:border-ocean-400 focus:outline-none text-sm resize-none transition"
               />
             </div>
 
             <div>
-              <label className="block text-xs font-bold text-text-secondary mb-1.5 uppercase tracking-wider">Location Pin</label>
+              <label className="block text-[10px] font-extrabold text-text-muted mb-2 uppercase tracking-widest">Location Pin</label>
               <Suspense fallback={
                 <div className="w-full h-[220px] rounded-xl border-2 border-sand-200 bg-sand-50 flex items-center justify-center">
                   <div className="w-6 h-6 border-2 border-ocean-400 border-t-transparent rounded-full animate-spin" />
@@ -199,7 +200,7 @@ export default function VipEntryPage() {
           <button
             onClick={() => startSession("DELIVERY")}
             disabled={!address.trim() || creating}
-            className="w-full mt-8 py-4 rounded-2xl bg-gradient-to-r from-ocean-500 to-ocean-600 text-white font-bold text-base shadow-lg disabled:opacity-50 active:scale-[0.98] transition"
+            className="w-full mt-8 py-4 rounded-2xl bg-gradient-to-r from-ocean-500 to-ocean-600 text-white font-extrabold text-sm uppercase tracking-wider shadow-lg disabled:opacity-50 active:scale-[0.98] transition"
           >
             {creating ? "Starting..." : "Continue to Menu"}
           </button>
@@ -213,14 +214,15 @@ export default function VipEntryPage() {
       <div className="max-w-md mx-auto px-5 py-8">
         {/* Welcome */}
         <div className="text-center mb-10">
-          <div className="w-20 h-20 rounded-full bg-gradient-to-br from-status-warn-400 to-status-warn-600 flex items-center justify-center mx-auto mb-4 shadow-lg">
-            <span className="text-3xl text-white font-extrabold">V</span>
+          <div className="w-24 h-24 rounded-full bg-gradient-to-br from-status-warn-400 to-status-warn-600 flex items-center justify-center mx-auto mb-5 shadow-xl">
+            <span className="text-4xl text-white font-extrabold">V</span>
           </div>
-          <h1 className="text-2xl font-extrabold text-text-primary mb-1">
-            Welcome back, {vip.name}
+          <p className="text-[10px] font-extrabold text-text-muted uppercase tracking-[0.25em] mb-2">VIP Experience</p>
+          <h1 className="text-3xl font-extrabold text-text-primary tracking-tight leading-tight">
+            Welcome back,<br />{vip.name}
           </h1>
-          <p className="text-sm text-text-muted">
-            {vip.restaurant.name} &mdash; VIP Experience
+          <p className="text-sm text-text-muted mt-2 font-medium">
+            {vip.restaurant.name}
           </p>
         </div>
 
@@ -234,14 +236,15 @@ export default function VipEntryPage() {
             <div className="relative overflow-hidden rounded-2xl bg-gradient-to-r from-ocean-500 to-ocean-600 p-6 shadow-lg transition-all active:scale-[0.98]">
               <div className="absolute top-0 right-0 w-32 h-32 bg-white/10 rounded-full -translate-y-8 translate-x-8" />
               <div className="relative flex items-center gap-4">
-                <div className="w-14 h-14 rounded-xl bg-white/20 flex items-center justify-center text-3xl flex-shrink-0">
+                <div className="w-16 h-16 rounded-xl bg-white/20 flex items-center justify-center text-3xl flex-shrink-0">
                   &#x2615;
                 </div>
                 <div className="flex-1">
-                  <h2 className="text-white font-bold text-lg">Dine In</h2>
-                  <p className="text-white/70 text-sm">Order at the cafe — no table needed</p>
+                  <p className="text-white/60 text-[10px] font-extrabold uppercase tracking-widest mb-0.5">Option A</p>
+                  <h2 className="text-white font-extrabold text-2xl tracking-tight leading-none">Dine In</h2>
+                  <p className="text-white/70 text-xs mt-1.5">Order at the cafe — no table needed</p>
                 </div>
-                <span className="text-white/40 text-xl">&rarr;</span>
+                <span className="text-white/40 text-2xl">&rarr;</span>
               </div>
             </div>
           </button>
@@ -258,16 +261,17 @@ export default function VipEntryPage() {
             }`}>
               <div className="absolute top-0 right-0 w-32 h-32 bg-white/10 rounded-full -translate-y-8 translate-x-8" />
               <div className="relative flex items-center gap-4">
-                <div className="w-14 h-14 rounded-xl bg-white/20 flex items-center justify-center text-3xl flex-shrink-0">
+                <div className="w-16 h-16 rounded-xl bg-white/20 flex items-center justify-center text-3xl flex-shrink-0">
                   &#x1F6F5;
                 </div>
                 <div className="flex-1">
-                  <h2 className="text-white font-bold text-lg">Delivery</h2>
-                  <p className="text-white/70 text-sm">
+                  <p className="text-white/60 text-[10px] font-extrabold uppercase tracking-widest mb-0.5">Option B</p>
+                  <h2 className="text-white font-extrabold text-2xl tracking-tight leading-none">Delivery</h2>
+                  <p className="text-white/70 text-xs mt-1.5">
                     {deliveryAvailable ? "Get it delivered to your door" : "Currently unavailable"}
                   </p>
                 </div>
-                {deliveryAvailable && <span className="text-white/40 text-xl">&rarr;</span>}
+                {deliveryAvailable && <span className="text-white/40 text-2xl">&rarr;</span>}
               </div>
             </div>
           </button>

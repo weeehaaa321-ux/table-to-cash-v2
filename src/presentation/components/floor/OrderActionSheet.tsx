@@ -3,8 +3,7 @@
 import { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useLanguage } from "@/lib/use-language";
-import { getOrderTag } from "@/lib/order-label";
-import { minsAgo, STATUS_COLORS } from "./constants";
+import { minsAgo } from "./constants";
 import { OrderTimeline } from "./OrderTimeline";
 import type { LiveOrder, SessionInfo, StaffInfo } from "./types";
 
@@ -35,7 +34,19 @@ export function OrderActionSheet({
   );
   const waiters = staff.filter((s) => s.role === "WAITER" && s.active);
   const drivers = staff.filter((s) => s.role === "DELIVERY" && s.active);
-  const sc = STATUS_COLORS[order.status] || STATUS_COLORS.pending;
+  // Saturated banner colors. Map status → solid color class so the
+  // hero banner gets high-contrast white copy on a saturated block.
+  const STATUS_BANNER: Record<string, string> = {
+    pending: "bg-status-warn-500",
+    confirmed: "bg-status-info-500",
+    preparing: "bg-status-wait-500",
+    ready: "bg-status-good-500",
+    served: "bg-sand-400",
+    paid: "bg-sand-500",
+    cancelled: "bg-status-bad-500",
+  };
+  const bannerBg = STATUS_BANNER[order.status] || "bg-sand-400";
+  const statusLabel = { pending: t("floor.statusPending"), confirmed: t("floor.statusConfirmed"), preparing: t("floor.preparing"), ready: t("floor.ready"), served: t("floor.served"), paid: t("floor.statusPaid"), cancelled: t("floor.statusCancelled") }[order.status] || order.status.toUpperCase();
   const nextStatusMap: Record<string, { label: string; status: string }> = {
     pending: { label: t("floor.confirm"), status: "CONFIRMED" },
     confirmed: { label: t("floor.startPrep"), status: "PREPARING" },
@@ -44,6 +55,7 @@ export function OrderActionSheet({
   };
   const next = nextStatusMap[order.status];
   const isDelivery = order.orderType === "DELIVERY";
+  const isVip = order.orderType === "VIP_DINE_IN";
   const cancelReasons = [t("floor.cancelReasons.customerChanged"), t("floor.cancelReasons.outOfStock"), t("floor.cancelReasons.wrongItem"), t("floor.cancelReasons.tooLong"), t("floor.cancelReasons.managerDecision")];
 
   return (
@@ -54,23 +66,30 @@ export function OrderActionSheet({
         initial={{ y: "100%" }} animate={{ y: 0 }} exit={{ y: "100%" }}
         transition={{ type: "spring", damping: 25 }}
       >
-        <div className="sticky top-0 bg-white border-b border-sand-100 px-5 py-4 flex items-center justify-between z-10">
-          <div className="flex items-center gap-3">
-            <div className={`w-10 h-10 rounded-xl flex items-center justify-center text-xs font-semibold text-white ${
-              isDelivery ? "bg-status-warn-500" : order.orderType === "VIP_DINE_IN" ? "bg-status-wait-600" : "bg-ocean-600"
+        {/* Status hero banner — full-width saturated strip */}
+        <div className={`sticky top-0 z-10 ${bannerBg} px-5 py-2.5 flex items-center justify-between`}>
+          <span className="text-white text-xs font-extrabold uppercase tracking-[0.25em]">{statusLabel}</span>
+          <span className="text-white/80 text-[10px] font-extrabold uppercase tracking-wider tabular-nums">{minsAgo(order.createdAt)}{t("common.minutes")} · {order.total} EGP</span>
+        </div>
+        <div className="bg-white border-b border-sand-100 px-5 py-4 flex items-center justify-between">
+          <div className="flex items-center gap-3 min-w-0">
+            {/* Hero table/VIP/delivery block */}
+            <div className={`w-16 h-16 rounded-2xl flex flex-col items-center justify-center text-white flex-shrink-0 ${
+              isDelivery ? "bg-status-warn-500" : isVip ? "bg-status-wait-600" : "bg-ocean-600"
             }`}>
-              {getOrderTag(order)}
+              <span className="text-[8px] leading-none font-extrabold uppercase tracking-widest opacity-80">
+                {isDelivery ? "Delivery" : isVip ? "VIP" : "Table"}
+              </span>
+              <span className="text-3xl leading-none font-extrabold tabular-nums tracking-tight mt-1">
+                {isDelivery ? "🛵" : isVip ? "👑" : (order.tableNumber ?? "?")}
+              </span>
             </div>
-            <div>
-              <h3 className="text-lg font-semibold text-text-primary">{t("common.order")} #{order.orderNumber}</h3>
-              <div className="flex items-center gap-2">
-                <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${sc.bg} ${sc.text}`}>{{ pending: t("floor.statusPending"), confirmed: t("floor.statusConfirmed"), preparing: t("floor.preparing"), ready: t("floor.ready"), served: t("floor.served"), paid: t("floor.statusPaid"), cancelled: t("floor.statusCancelled") }[order.status] || order.status.toUpperCase()}</span>
-                <span className="text-[10px] text-text-muted">{minsAgo(order.createdAt)}{t("common.minutes")}</span>
-                <span className="text-[10px] font-bold text-status-good-600">{order.total} EGP</span>
-              </div>
+            <div className="min-w-0">
+              <div className="text-[10px] font-extrabold text-text-muted uppercase tracking-widest">{t("common.order")}</div>
+              <h3 className="text-2xl font-extrabold text-text-primary tabular-nums tracking-tight leading-none mt-0.5">#{order.orderNumber}</h3>
             </div>
           </div>
-          <button onClick={onClose} className="w-8 h-8 rounded-full bg-sand-100 flex items-center justify-center text-text-secondary text-sm font-bold">&times;</button>
+          <button onClick={onClose} className="w-10 h-10 rounded-full bg-sand-100 flex items-center justify-center text-text-secondary text-base font-bold flex-shrink-0">&times;</button>
         </div>
 
         <div className="px-5 py-3">

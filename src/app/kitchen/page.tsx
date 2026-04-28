@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback, useMemo, useRef, memo } from "react";
+import { useEffect, useState, useCallback, useMemo, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { usePerception, type LiveOrder } from "@/lib/engine/perception";
 import { useLiveData } from "@/lib/use-live-data";
@@ -12,6 +12,7 @@ import type { Lang } from "@/i18n";
 import { DEFAULT_KITCHEN_CONFIG, computeKitchenCapacity, normalizeKitchenConfig, type KitchenConfig } from "@/lib/kitchen-config";
 import { getShiftTimer, getShiftLabel } from "@/lib/shifts";
 import SchedulePopup from "@/presentation/components/ui/SchedulePopup";
+import { OrderHistoryDrawer } from "@/presentation/components/ui/OrderHistoryDrawer";
 import { ClockButton } from "@/presentation/components/ui/ClockButton";
 import { StaffHeaderMenu } from "@/presentation/components/ui/StaffHeaderMenu";
 import { translateToArabic } from "@/lib/translate-notes";
@@ -189,6 +190,16 @@ const STATUS_PILL: Record<string, { bg: string; text: string }> = {
   served: { bg: "bg-sand-100", text: "text-text-secondary" },
 };
 
+// Whole-card fill per status — at-a-glance state recognition.
+// Kept light so existing text colors remain readable.
+const STATUS_FILL: Record<string, string> = {
+  pending: "bg-status-warn-50",
+  confirmed: "bg-status-info-50",
+  preparing: "bg-status-wait-50",
+  ready: "bg-status-good-50",
+  served: "bg-sand-100",
+};
+
 // ─── ORDER CARD ──────────────────────────────────────
 
 function OrderCard({
@@ -203,7 +214,6 @@ function OrderCard({
   onAdvance: (id: string) => void;
 }) {
   const { t } = useLanguage();
-  const ss = STATUS_PILL[order.status] || STATUS_PILL.pending;
   const waitMs = now - order.createdAt;
   const waitMin = Math.round(waitMs / 60000);
   const stations = [...new Set(order.items.map((i) => getStation(i.id)))];
@@ -231,90 +241,112 @@ function OrderCard({
       initial={{ opacity: 0, y: 12 }}
       animate={{ opacity: 1, y: 0 }}
       exit={{ opacity: 0, x: -60 }}
-      className={`bg-white rounded-xl border border-sand-200 border-l-4 ${borderColor} shadow-sm overflow-hidden`}
+      className={`${STATUS_FILL[order.status] || "bg-white"} rounded-xl border border-sand-200 border-l-4 ${borderColor} shadow-sm overflow-hidden`}
     >
-      {/* Header */}
-      <div className="px-4 py-3 flex items-center gap-3">
-        <div className={`w-2.5 h-2.5 rounded-full flex-shrink-0 ${PRIORITY_DOT[priority.level]} ${priority.level === "critical" ? "animate-pulse" : ""}`} />
+      {/* Header — table is the hero (cooks route by table, not order #) */}
+      <div className="px-6 pt-5 pb-4">
+        <div className="flex items-start gap-4">
+          <div className="flex-1 min-w-0">
+            <div className="text-[10px] font-extrabold uppercase tracking-[0.15em] text-text-muted mb-1">
+              {t("kitchen.deliverTo")}
+            </div>
+            <div className="text-4xl font-extrabold text-text-primary leading-none tracking-tight truncate">
+              {getOrderTag(order)}
+            </div>
+          </div>
 
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2 flex-wrap">
-            <span className="text-base font-semibold text-text-primary tabular-nums">#{order.orderNumber}</span>
-            <span className="text-sm font-semibold text-text-secondary">{getOrderTag(order)}</span>
-            <span className={`text-[10px] font-bold uppercase px-2 py-0.5 rounded-full ${ss.bg} ${ss.text}`}>
-              {t("kitchen.status." + order.status)}
-            </span>
-            {order.isDelayed && (
-              <span className="text-[10px] font-bold uppercase px-2 py-0.5 rounded-full bg-status-bad-50 text-status-bad-600 animate-pulse">
-                {t("kitchen.delayed.badge")}
-              </span>
-            )}
+          <div className="text-right flex-shrink-0">
+            <div className="text-[10px] font-extrabold uppercase tracking-[0.15em] text-text-muted mb-1">
+              {t("kitchen.waiting")}
+            </div>
+            <div className={`text-3xl font-extrabold tabular-nums leading-none tracking-tight ${
+              waitMin > 15 ? "text-status-bad-600"
+              : waitMin > 8 ? "text-status-warn-600"
+              : "text-text-secondary"
+            }`}>
+              {fmtWait(waitMs)}
+            </div>
           </div>
         </div>
 
-        <div className="text-right flex-shrink-0">
-          <div className={`text-sm font-bold tabular-nums ${waitMin > 15 ? "text-status-bad-500" : waitMin > 8 ? "text-status-warn-500" : "text-text-muted"}`}>
-            {fmtWait(waitMs)}
+        {order.isDelayed && (
+          <div className="mt-3 inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-status-bad-500 text-white text-[10px] font-extrabold uppercase tracking-widest animate-pulse">
+            <span>⚠</span>
+            {t("kitchen.delayed.badge")}
           </div>
-        </div>
+        )}
       </div>
 
-      {/* Items */}
-      <div className="px-4 pb-2">
-        <div className="flex flex-wrap gap-1.5">
-          {order.items.map((item, idx) => (
-            <div key={`${item.id}-${idx}`} className="flex flex-col">
-              <span className="text-xs font-medium text-text-secondary bg-sand-50 px-2.5 py-1 rounded-lg">
-                {item.quantity > 1 && <span className="font-bold text-text-primary">{item.quantity}x </span>}
+      {/* Items — quantity prefix + name on a single baseline, scannable like a recipe */}
+      <div className="px-6 pb-4 border-t border-sand-200/60 pt-4 space-y-3">
+        {order.items.map((item, idx) => (
+          <div key={`${item.id}-${idx}`}>
+            <div className="flex items-baseline gap-3">
+              <span className="text-2xl font-extrabold text-text-primary tabular-nums leading-none flex-shrink-0 min-w-[2.5rem]">
+                ×{item.quantity}
+              </span>
+              <span className="text-xl font-semibold text-text-primary leading-tight">
                 {item.name || t("kitchen.itemFallback")}
               </span>
-              {item.notes && (
-                <span className="text-[10px] text-status-warn-600 italic px-2.5 mt-0.5">
-                  * {item.notes}
-                  {translateToArabic(item.notes) && (
-                    <span className="block text-status-warn-700 font-semibold not-italic" dir="rtl">{translateToArabic(item.notes)}</span>
-                  )}
-                </span>
-              )}
             </div>
-          ))}
-        </div>
-        {order.notes && (
-          <div className="mt-2 px-2.5 py-1.5 bg-status-warn-50 border border-status-warn-200 rounded-lg">
-            <span className="text-[10px] font-bold uppercase text-status-warn-700 tracking-wider">{t("kitchen.notes")} </span>
-            <span className="text-xs text-status-warn-800">{order.notes}</span>
-            {translateToArabic(order.notes) && (
-              <span className="block text-xs text-status-warn-900 font-semibold mt-1" dir="rtl">{translateToArabic(order.notes)}</span>
+            {item.notes && (
+              <div className="mt-1 ml-[3.25rem] text-sm text-status-warn-700 italic leading-snug">
+                ↳ {item.notes}
+                {translateToArabic(item.notes) && (
+                  <span className="block text-status-warn-800 font-semibold not-italic" dir="rtl">
+                    {translateToArabic(item.notes)}
+                  </span>
+                )}
+              </div>
             )}
+          </div>
+        ))}
+      </div>
+
+      {/* Order-wide note — visually distinct warning block */}
+      {order.notes && (
+        <div className="mx-6 mb-4 px-3 py-2.5 bg-status-warn-100 border-l-4 border-status-warn-500 rounded-r-lg">
+          <div className="flex items-center gap-1.5 text-[10px] font-extrabold uppercase tracking-widest text-status-warn-800 mb-1">
+            <span>⚠</span>{t("kitchen.notes")}
+          </div>
+          <div className="text-base font-semibold text-status-warn-900 leading-snug">
+            {order.notes}
+          </div>
+          {translateToArabic(order.notes) && (
+            <div className="mt-0.5 text-base text-status-warn-900 font-semibold leading-snug" dir="rtl">
+              {translateToArabic(order.notes)}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Footer reference row — order # + stations · de-emphasized */}
+      <div className={`px-6 ${action ? "pb-3" : "pb-4"} flex items-center justify-between gap-3 text-[11px] font-extrabold uppercase tracking-widest text-text-muted`}>
+        <span className="tabular-nums">#{order.orderNumber}</span>
+        {stations.length > 0 && (
+          <div className="flex gap-2.5">
+            {stations.map((s) => (
+              <span key={s}>{t("kitchen.station." + s)}</span>
+            ))}
           </div>
         )}
       </div>
 
-      {/* Footer */}
-      <div className="px-4 pb-3 flex items-center justify-between">
-        <div className="flex gap-1.5">
-          {stations.map((s) => (
-            <span key={s} className="text-[10px] font-semibold uppercase tracking-wider text-text-muted">
-              {t("kitchen.station." + s)}
-            </span>
-          ))}
-        </div>
-
-        {action && (
-          <button
-            onClick={handleAdvance}
-            className={`px-4 py-1.5 rounded-lg text-xs font-bold transition-all active:scale-95 ${
-              order.status === "pending"
-                ? "bg-status-warn-500 text-white"
-                : order.status === "preparing"
-                  ? "bg-status-good-500 text-white"
-                  : "bg-sand-800 text-white"
-            }`}
-          >
-            {action}
-          </button>
-        )}
-      </div>
+      {/* Full-width action — flush to card edges, sized for tablet thumbs */}
+      {action && (
+        <button
+          onClick={handleAdvance}
+          className={`w-full py-4 text-base font-bold transition-all active:scale-[0.99] ${
+            order.status === "pending"
+              ? "bg-status-warn-500 hover:bg-status-warn-600 text-white"
+              : order.status === "preparing"
+                ? "bg-status-good-500 hover:bg-status-good-600 text-white"
+                : "bg-sand-800 hover:bg-sand-900 text-white"
+          }`}
+        >
+          {action}
+        </button>
+      )}
     </motion.div>
   );
 }
@@ -609,6 +641,7 @@ function KitchenSystem({ staff }: { staff: StaffInfo }) {
 
   const [mounted, setMounted] = useState(false);
   const [showSchedule, setShowSchedule] = useState(false);
+  const [showHistory, setShowHistory] = useState(false);
   const [now, setNow] = useState(0);
   const [kitchenConfig, setKitchenConfigState] = useState<KitchenConfig>(DEFAULT_KITCHEN_CONFIG);
   const [dismissedAlerts, setDismissedAlerts] = useState<Set<string>>(new Set());
@@ -798,8 +831,11 @@ function KitchenSystem({ staff }: { staff: StaffInfo }) {
               )}
             </div>
             <ClockButton staffId={staff.id} name={staff.name} role={staff.role} />
-            {/* Desktop: inline schedule + language + logout. */}
+            {/* Desktop: inline history + schedule + language + logout. */}
             <div className="hidden sm:flex items-center gap-2">
+              <button onClick={() => setShowHistory(true)} className="p-2 hover:bg-sand-100 rounded-xl transition" title="Order history">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><polyline points="3 3 3 8 8 8"/><polyline points="12 7 12 12 15 14"/></svg>
+              </button>
               <button onClick={() => setShowSchedule(true)} className="p-2 hover:bg-sand-100 rounded-xl transition" title={t("kitchen.mySchedule")}>
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
               </button>
@@ -850,6 +886,7 @@ function KitchenSystem({ staff }: { staff: StaffInfo }) {
         </div>
       </header>
       {showSchedule && <SchedulePopup staffId={staff.id} role={staff.role} onClose={() => setShowSchedule(false)} />}
+      {showHistory && <OrderHistoryDrawer orders={orders} role="kitchen" onClose={() => setShowHistory(false)} />}
 
       {/* ─── OWNER MESSAGES ──────────────────────── */}
       <AnimatePresence>

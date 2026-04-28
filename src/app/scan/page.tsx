@@ -296,7 +296,7 @@ function ScanPage() {
                 <div className="w-16 h-16 rounded-full bg-status-warn-500/20 border-2 border-status-warn-500/40 flex items-center justify-center mb-6">
                   <span className="text-3xl">⚠</span>
                 </div>
-                <h2 className="text-xl font-bold text-white mb-3">
+                <h2 className="text-2xl font-extrabold text-white mb-3 tracking-tight">
                   {lang === "ar" ? "تعذر الاتصال بالمطعم" : "Couldn't connect to restaurant"}
                 </h2>
                 <p className="text-white/50 text-sm leading-relaxed mb-6">
@@ -309,7 +309,7 @@ function ScanPage() {
                     // Re-run the check from scratch
                     window.location.reload();
                   }}
-                  className="px-8 py-3.5 rounded-2xl bg-status-warn-500 text-white font-bold text-sm shadow-lg shadow-status-warn-500/20 active:scale-95 transition"
+                  className="px-8 py-3.5 rounded-2xl bg-status-warn-500 text-white font-extrabold text-sm uppercase tracking-wider shadow-lg shadow-status-warn-500/20 active:scale-95 transition"
                 >
                   {lang === "ar" ? "حاول مرة أخرى" : "Try Again"}
                 </button>
@@ -394,9 +394,9 @@ function ScanPage() {
                 <div className="w-16 h-16 rounded-full bg-status-bad-500/20 border-2 border-status-bad-500/40 flex items-center justify-center mb-6">
                   <span className="text-3xl">✋</span>
                 </div>
-                <h2 className="text-xl font-bold text-white mb-3">Active Session Exists</h2>
+                <h2 className="text-2xl font-extrabold text-white mb-3 tracking-tight">Active Session Exists</h2>
                 <p className="text-white/50 text-sm leading-relaxed mb-6">
-                  You already have an active session on <span className="text-white font-semibold">Table {blockedTable}</span>.
+                  You already have an active session on <span className="text-white font-extrabold">Table {blockedTable}</span>.
                   Please close that session first before joining a new table.
                 </p>
                 <button
@@ -404,7 +404,7 @@ function ScanPage() {
                     const sid = localStorage.getItem("ttc_sessionId");
                     router.push(`/track?session=${sid}&table=${blockedTable}&restaurant=${restaurantSlug}`);
                   }}
-                  className="px-6 py-3 rounded-2xl bg-white/10 border border-white/20 text-white font-semibold text-sm"
+                  className="px-8 py-3.5 rounded-2xl bg-white/10 border-2 border-white/20 text-white font-extrabold text-sm uppercase tracking-wider active:scale-95 transition"
                 >
                   Go to Table {blockedTable}
                 </button>

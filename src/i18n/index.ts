@@ -5,8 +5,19 @@ export type Lang = "en" | "ar";
 
 const dictionaries: Record<Lang, Record<string, string>> = { en, ar };
 
+function humanizeKey(key: string): string {
+  const last = key.split(".").pop() || key;
+  const spaced = last.replace(/([a-z])([A-Z])/g, "$1 $2").replace(/[_-]+/g, " ");
+  return spaced.charAt(0).toUpperCase() + spaced.slice(1);
+}
+
 export function t(key: string, lang: Lang): string {
-  return dictionaries[lang]?.[key] || dictionaries.en[key] || key;
+  const hit = dictionaries[lang]?.[key] || dictionaries.en[key];
+  if (hit) return hit;
+  if (process.env.NODE_ENV !== "production") {
+    console.warn(`[i18n] missing key: ${key} (lang=${lang})`);
+  }
+  return humanizeKey(key);
 }
 
 export function tReplace(key: string, lang: Lang, replacements: Record<string, string | number>): string {

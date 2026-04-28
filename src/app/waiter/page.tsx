@@ -14,6 +14,7 @@ import { useLiveData } from "@/lib/use-live-data";
 import { useMenu } from "@/store/menu";
 import { getShiftTimer, getShiftLabel } from "@/lib/shifts";
 import SchedulePopup from "@/presentation/components/ui/SchedulePopup";
+import { OrderHistoryDrawer } from "@/presentation/components/ui/OrderHistoryDrawer";
 import { ClockButton } from "@/presentation/components/ui/ClockButton";
 import { getOrderLabel } from "@/lib/order-label";
 import {
@@ -173,26 +174,6 @@ function detectErrors(
         type: "missing_items",
         message: `Order #${order.orderNumber}: No items — cannot process`,
         severity: "block",
-        orderId: order.id,
-      });
-    }
-  }
-
-  // 3. Served but unpaid — escalating severity
-  for (const order of orders.filter((o) => o.status === "served")) {
-    const servedMins = order.servedAt ? minsAgo(order.servedAt) : minsAgo(order.createdAt);
-    if (servedMins > 45) {
-      errors.push({
-        type: "unpaid",
-        message: `${getOrderLabel(order)} (#${order.orderNumber}): Served ${servedMins}m ago — needs attention`,
-        severity: "block",
-        orderId: order.id,
-      });
-    } else if (servedMins > 20) {
-      errors.push({
-        type: "unpaid",
-        message: `${getOrderLabel(order)} (#${order.orderNumber}): Served ${servedMins}m ago — check if ready to pay`,
-        severity: "warn",
         orderId: order.id,
       });
     }
@@ -582,58 +563,71 @@ function TableDetailPanel({
         animate={{ y: 0, opacity: 1 }}
         exit={{ y: 40, opacity: 0 }}
       >
-        {/* Header */}
-        <div className="p-5 bg-sand-50 border-b-2 border-sand-200">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              <div
-                className={`w-14 h-14 rounded-2xl flex items-center justify-center ${
-                  statusColors[table.status]
-                }`}
-              >
-                <span className="text-2xl font-semibold">{table.id}</span>
+        {/* Header — table # is hero (~5xl), status pill below it, close button stays comfortable */}
+        <div className="px-6 pt-6 pb-5 bg-sand-50 border-b-2 border-sand-200">
+          <div className="flex items-start justify-between gap-3">
+            <div className="flex items-start gap-4 min-w-0 flex-1">
+              <div className={`w-20 h-20 rounded-2xl flex items-center justify-center flex-shrink-0 ${statusColors[table.status]}`}>
+                <span className="text-4xl font-extrabold leading-none">{table.id}</span>
               </div>
-              <div>
-                <h3 className="text-xl font-semibold text-text-primary">
-                  {t("common.table")} {table.id}
-                </h3>
-                <div className="flex items-center gap-2 mt-0.5">
-                  <span
-                    className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
-                      statusColors[table.status]
-                    }`}
-                  >
-                    {t(`waiter.table.${table.status}`).toUpperCase()}
-                  </span>
+              <div className="min-w-0 flex-1 pt-1">
+                <div className="text-[10px] font-extrabold uppercase tracking-[0.18em] text-text-muted mb-1">
+                  {t("common.table")}
                 </div>
+                <h3 className="text-3xl font-extrabold text-text-primary leading-none mb-2">
+                  #{table.id}
+                </h3>
+                <span className={`inline-block px-2.5 py-1 rounded-full text-[10px] font-extrabold uppercase tracking-widest ${statusColors[table.status]}`}>
+                  {t(`waiter.table.${table.status}`)}
+                </span>
               </div>
             </div>
             <button
               onClick={onClose}
-              className="w-10 h-10 rounded-xl bg-sand-200 flex items-center justify-center text-text-secondary hover:bg-sand-300 text-lg font-bold"
+              className="w-11 h-11 rounded-xl bg-sand-200 hover:bg-sand-300 flex items-center justify-center text-text-secondary transition active:scale-95 flex-shrink-0"
+              aria-label="Close"
             >
-              ✕
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
+                <line x1="6" y1="6" x2="18" y2="18" />
+                <line x1="6" y1="18" x2="18" y2="6" />
+              </svg>
             </button>
           </div>
         </div>
 
-        {/* Stats Grid */}
-        <div className="p-4 grid grid-cols-4 gap-3">
-          <div className="text-center p-2 rounded-xl bg-sand-50">
-            <p className="text-lg font-semibold text-text-primary">{table.guestCount}</p>
-            <p className="text-[9px] text-text-secondary font-bold uppercase">{t("waiter.guests")}</p>
+        {/* Stats grid — uppercase labels, larger numbers, more breathing room */}
+        <div className="p-4 grid grid-cols-4 gap-2">
+          <div className="p-3 rounded-xl bg-sand-50 border border-sand-200/60">
+            <div className="text-[9px] text-text-muted font-extrabold uppercase tracking-widest mb-1">
+              {t("waiter.guests")}
+            </div>
+            <div className="text-xl font-extrabold tabular-nums text-text-primary leading-none">
+              {table.guestCount}
+            </div>
           </div>
-          <div className="text-center p-2 rounded-xl bg-sand-50">
-            <p className="text-lg font-semibold text-text-primary">{elapsed}m</p>
-            <p className="text-[9px] text-text-secondary font-bold uppercase">{t("waiter.table.seated")}</p>
+          <div className="p-3 rounded-xl bg-sand-50 border border-sand-200/60">
+            <div className="text-[9px] text-text-muted font-extrabold uppercase tracking-widest mb-1">
+              {t("waiter.table.seated")}
+            </div>
+            <div className="text-xl font-extrabold tabular-nums text-text-primary leading-none">
+              {elapsed}<span className="text-xs text-text-muted ms-0.5 font-bold">m</span>
+            </div>
           </div>
-          <div className="text-center p-2 rounded-xl bg-sand-50">
-            <p className="text-lg font-semibold text-status-good-700">{formatEGP(table.currentOrderValue)}</p>
-            <p className="text-[9px] text-text-secondary font-bold uppercase">{t("waiter.value")}</p>
+          <div className="p-3 rounded-xl bg-sand-50 border border-sand-200/60">
+            <div className="text-[9px] text-text-muted font-extrabold uppercase tracking-widest mb-1">
+              {t("waiter.value")}
+            </div>
+            <div className="text-xl font-extrabold tabular-nums text-status-good-700 leading-none">
+              {formatEGP(table.currentOrderValue)}
+            </div>
           </div>
-          <div className="text-center p-2 rounded-xl bg-sand-50">
-            <p className="text-lg font-semibold text-text-primary">{table.itemsViewed}</p>
-            <p className="text-[9px] text-text-secondary font-bold uppercase">{t("waiter.viewed")}</p>
+          <div className="p-3 rounded-xl bg-sand-50 border border-sand-200/60">
+            <div className="text-[9px] text-text-muted font-extrabold uppercase tracking-widest mb-1">
+              {t("waiter.viewed")}
+            </div>
+            <div className="text-xl font-extrabold tabular-nums text-text-primary leading-none">
+              {table.itemsViewed}
+            </div>
           </div>
         </div>
 
@@ -692,39 +686,46 @@ function TableDetailPanel({
               const cfg = STATUS_CONFIG[order.status];
               const action = ACTION_CONFIG[order.status];
               return (
-                <div key={order.id} className="p-3 rounded-xl bg-sand-50 border border-sand-200 mb-2">
-                  <div className="flex items-center justify-between mb-2">
-                    <span className="font-bold text-sm text-text-primary">#{order.orderNumber}</span>
-                    <span
-                      className="px-2 py-0.5 rounded-full text-[10px] font-bold"
-                      style={{ backgroundColor: cfg?.bg, color: cfg?.textColor }}
+                <div key={order.id} className="rounded-xl bg-sand-50 border border-sand-200 mb-2 overflow-hidden">
+                  {/* Status hero banner */}
+                  {cfg && (
+                    <div
+                      className="flex items-center justify-between px-3 py-1.5"
+                      style={{ backgroundColor: cfg.color }}
                     >
-                      {t(`waiter.status.${({pending:"new",confirmed:"confirmed",preparing:"cooking",ready:"ready",served:"served",paid:"paid"} as Record<string,string>)[order.status] ?? order.status}`)}
-                    </span>
-                  </div>
-                  {order.items.map((item, i) => (
-                    <div key={i} className="flex justify-between text-sm py-0.5">
-                      <span className="text-text-secondary">
-                        <span className="font-bold">{item.quantity}x</span> {item.name}
+                      <span className="text-white text-[11px] font-extrabold uppercase tracking-[0.2em]">
+                        {t(`waiter.status.${({pending:"new",confirmed:"confirmed",preparing:"cooking",ready:"ready",served:"served",paid:"paid"} as Record<string,string>)[order.status] ?? order.status}`)}
                       </span>
-                      <span className="text-text-secondary tabular-nums">{item.price * item.quantity}</span>
+                      <span className="text-white/80 text-[10px] font-extrabold uppercase tracking-wider tabular-nums">
+                        #{order.orderNumber}
+                      </span>
                     </div>
-                  ))}
-                  <div className="flex items-center justify-between mt-2 pt-2 border-t border-sand-200">
-                    <span className="font-semibold text-text-primary">{formatEGP(order.total)} {t("common.egp")}</span>
-                    {action && isMyTable && (
-                      <button
-                        onClick={() => onAdvanceOrder(order.id)}
-                        className={`px-4 py-2 rounded-xl text-white text-sm font-bold ${action.bgColor} active:scale-95 transition-transform`}
-                      >
-                        {action.icon} {t("waiter.markServed")}
-                      </button>
-                    )}
-                    {action && !isMyTable && (
-                      <span className="px-3 py-1.5 rounded-xl bg-sand-100 text-text-muted text-xs font-bold">
-                        {t("waiter.notYourTable")}
-                      </span>
-                    )}
+                  )}
+                  <div className="p-3">
+                    {order.items.map((item, i) => (
+                      <div key={i} className="flex justify-between text-sm py-0.5">
+                        <span className="text-text-secondary">
+                          <span className="font-extrabold text-text-primary tabular-nums">{item.quantity}×</span> {item.name}
+                        </span>
+                        <span className="text-text-secondary tabular-nums">{item.price * item.quantity}</span>
+                      </div>
+                    ))}
+                    <div className="flex items-center justify-between mt-2 pt-2 border-t border-sand-200">
+                      <span className="text-lg font-extrabold text-text-primary tabular-nums tracking-tight">{formatEGP(order.total)} <span className="text-xs">{t("common.egp")}</span></span>
+                      {action && isMyTable && (
+                        <button
+                          onClick={() => onAdvanceOrder(order.id)}
+                          className={`px-4 py-2.5 rounded-xl text-white text-sm font-extrabold uppercase tracking-wider ${action.bgColor} active:scale-95 transition-transform`}
+                        >
+                          {action.icon} {t("waiter.markServed")}
+                        </button>
+                      )}
+                      {action && !isMyTable && (
+                        <span className="px-3 py-1.5 rounded-xl bg-sand-100 text-text-muted text-xs font-extrabold uppercase tracking-wider">
+                          {t("waiter.notYourTable")}
+                        </span>
+                      )}
+                    </div>
                   </div>
                 </div>
               );
@@ -926,10 +927,27 @@ function OrderCard({
       initial={{ opacity: 0, y: 8 }}
       animate={{ opacity: 1, y: 0 }}
       exit={{ opacity: 0, x: -80 }}
-      className={`rounded-2xl border-2 ${isMyTable ? urgStyle.border : "border-sand-200"} ${isMyTable ? urgStyle.bg : "bg-sand-50/50"} overflow-hidden ${
+      style={isMyTable && statusCfg ? { backgroundColor: statusCfg.bg } : undefined}
+      className={`rounded-2xl border-2 ${isMyTable ? urgStyle.border : "border-sand-200"} ${!isMyTable ? "bg-sand-50/50" : ""} overflow-hidden ${
         order.isDelayed ? "border-l-4 !border-l-status-bad-500" : ""
       }${!isMyTable ? " opacity-75" : ""}`}
     >
+      {/* STATUS HERO BANNER — saturated full-width strip so the
+          waiter knows the order's state without parsing a tiny pill. */}
+      {statusCfg && (
+        <div
+          className="flex items-center justify-between px-4 py-2"
+          style={{ backgroundColor: statusCfg.color }}
+        >
+          <span className="text-white text-xs font-extrabold uppercase tracking-[0.2em]">
+            {t(`waiter.status.${({pending:"new",confirmed:"confirmed",preparing:"cooking",ready:"ready",served:"served",paid:"paid"} as Record<string,string>)[order.status] ?? order.status}`)}
+          </span>
+          <span className="text-white/80 text-[10px] font-extrabold uppercase tracking-wider tabular-nums">
+            {waitMin}m
+          </span>
+        </div>
+      )}
+
       <div className="p-4">
         {/* Error Banners (block actions) */}
         {orderErrors.map((err, i) => (
@@ -954,52 +972,40 @@ function OrderCard({
           </div>
         )}
 
-        {/* Header Row */}
-        <div className="flex items-center justify-between mb-3">
-          <div className="flex items-center gap-3">
-            {/* Table / VIP badge */}
-            {order.orderType === "VIP_DINE_IN" ? (
-              <div className="w-12 h-12 rounded-2xl bg-status-wait-600 flex flex-col items-center justify-center font-semibold text-white">
-                <span className="text-[11px] leading-none">{(order.vipGuestName || "VIP").split(" ").map((w) => w[0]).join("").slice(0, 2).toUpperCase()}</span>
-                <span className="text-[7px] leading-none mt-0.5 opacity-80">VIP</span>
-              </div>
-            ) : (
-              <div
-                className="w-12 h-12 rounded-2xl flex flex-col items-center justify-center font-semibold"
-                style={{
-                  backgroundColor: statusCfg?.bg,
-                  color: statusCfg?.textColor,
-                }}
-              >
-                <span className="text-base leading-none">T{order.tableNumber}</span>
-              </div>
-            )}
+        {/* Header Row — table number is the hero */}
+        <div className="flex items-center gap-4 mb-3">
+          {/* Table / VIP block — large, dominant */}
+          {order.orderType === "VIP_DINE_IN" ? (
+            <div className="w-20 h-20 rounded-2xl bg-status-wait-600 flex flex-col items-center justify-center text-white flex-shrink-0">
+              <span className="text-[8px] leading-none font-extrabold uppercase tracking-widest opacity-80">VIP</span>
+              <span className="text-2xl leading-none font-extrabold tracking-tight mt-1">{(order.vipGuestName || "VIP").split(" ").map((w) => w[0]).join("").slice(0, 2).toUpperCase()}</span>
+            </div>
+          ) : (
+            <div
+              className="w-20 h-20 rounded-2xl flex flex-col items-center justify-center flex-shrink-0"
+              style={{
+                backgroundColor: statusCfg?.color,
+                color: "white",
+              }}
+            >
+              <span className="text-[9px] leading-none font-extrabold uppercase tracking-widest opacity-80">Table</span>
+              <span className="text-4xl leading-none font-extrabold tabular-nums tracking-tight mt-1">{order.tableNumber}</span>
+            </div>
+          )}
 
-            <div>
-              <div className="flex items-center gap-2">
-                <span className="font-semibold text-text-primary text-base">
-                  #{order.orderNumber}
-                </span>
-              </div>
-              <div className="flex items-center gap-2 mt-0.5">
-                <span className="text-xs text-text-secondary font-semibold">{waitMin}m ago</span>
-                <span className={`px-1.5 py-0.5 rounded text-[9px] font-bold ${urgStyle.badge}`}>
-                  {urgStyle.text.toUpperCase()}
-                </span>
-              </div>
+          <div className="flex-1 min-w-0">
+            <div className="text-[10px] font-extrabold text-text-muted uppercase tracking-widest">
+              Order
+            </div>
+            <div className="text-2xl font-extrabold text-text-primary tabular-nums tracking-tight leading-none">
+              #{order.orderNumber}
+            </div>
+            <div className="flex items-center gap-2 mt-2">
+              <span className={`px-2 py-0.5 rounded text-[10px] font-extrabold uppercase tracking-wider ${urgStyle.badge}`}>
+                {urgStyle.text.toUpperCase()}
+              </span>
             </div>
           </div>
-
-          {/* Status badge */}
-          <span
-            className="px-3 py-1.5 rounded-xl text-xs font-semibold"
-            style={{
-              backgroundColor: statusCfg?.bg,
-              color: statusCfg?.textColor,
-            }}
-          >
-            {t(`waiter.status.${({pending:"new",confirmed:"confirmed",preparing:"cooking",ready:"ready",served:"served",paid:"paid"} as Record<string,string>)[order.status] ?? order.status}`)}
-          </span>
         </div>
 
         {/* Items */}
@@ -2293,6 +2299,7 @@ function StaffSystem({ loggedInStaff, onLogout }: { loggedInStaff: LoggedInStaff
   const [dismissedAlerts, setDismissedAlerts] = useState<Set<string>>(new Set());
   const [now, setNow] = useState(Date.now());
   const [showSchedule, setShowSchedule] = useState(false);
+  const [showHistory, setShowHistory] = useState(false);
   const [ownerMessages, setOwnerMessages] = useState<OwnerMessage[]>([]);
   const [dismissedMessages, setDismissedMessages] = useState<Set<string>>(new Set());
   const [sessions, setSessions] = useState<SessionInfo[]>([]);
@@ -2625,8 +2632,11 @@ function StaffSystem({ loggedInStaff, onLogout }: { loggedInStaff: LoggedInStaff
             <NotificationBadge staffId={loggedInStaff.id} role="WAITER" />
             <ClockButton staffId={loggedInStaff.id} name={loggedInStaff.name} role={loggedInStaff.role} />
 
-            {/* Desktop: inline schedule + language + logout */}
+            {/* Desktop: inline history + schedule + language + logout */}
             <div className="hidden sm:flex items-center gap-1.5">
+              <button onClick={() => setShowHistory(true)} className="p-2 hover:bg-sand-100 rounded-xl transition" title="Order history">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><polyline points="3 3 3 8 8 8"/><polyline points="12 7 12 12 15 14"/></svg>
+              </button>
               <button onClick={() => setShowSchedule(true)} className="p-2 hover:bg-sand-100 rounded-xl transition" title="My Schedule">
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
               </button>
@@ -2734,6 +2744,7 @@ function StaffSystem({ loggedInStaff, onLogout }: { loggedInStaff: LoggedInStaff
         </div>
       </header>
       {showSchedule && <SchedulePopup staffId={loggedInStaff.id} role={loggedInStaff.role} onClose={() => setShowSchedule(false)} />}
+      {showHistory && <OrderHistoryDrawer orders={orders} role="waiter" onClose={() => setShowHistory(false)} />}
 
       {/* ═══ MAIN LAYOUT ═══ */}
       <main className="max-w-[1600px] mx-auto px-4 pt-4 pb-8">

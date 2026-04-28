@@ -115,21 +115,6 @@ export function generateFloorAlerts(
       }
     }
 
-    if (order.status === "served") {
-      const servedAge = order.servedAt ? now - order.servedAt : age;
-      if (servedAge > 10 * MINUTE) {
-        alerts.push({
-          id: `payment-${order.id}`,
-          type: "payment_pending",
-          severity: "info",
-          tableNumber: order.tableNumber,
-          orderId: order.id,
-          message: `${getOrderLabel(order)} served ${Math.round(servedAge / MINUTE)} min ago — no payment`,
-          since: order.servedAt || order.createdAt,
-          suggestedAction: "Check on table",
-        });
-      }
-    }
   }
 
   // --- Session-level alerts ---

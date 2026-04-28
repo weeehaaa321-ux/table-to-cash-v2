@@ -95,18 +95,29 @@ function KpiCard({
   }, [value, display]);
 
   return (
-    <div className="card-luxury p-4">
-      <div className="flex items-center gap-2 mb-2">
-        <span className="text-lg">{icon}</span>
-        <p className="text-[10px] text-text-muted font-semibold uppercase tracking-widest">{label}</p>
+    <div className="card-luxury p-5 flex flex-col justify-between min-h-[120px]">
+      {/* Header — label dominates, icon recedes as accent */}
+      <div className="flex items-start justify-between gap-3">
+        <p className="text-[10px] text-text-muted font-extrabold uppercase tracking-[0.18em] leading-tight">
+          {label}
+        </p>
+        <span className="text-xl opacity-60 leading-none flex-shrink-0">{icon}</span>
       </div>
-      <div className="flex items-end gap-1.5">
-        <span className={`text-2xl font-semibold tabular-nums tracking-tight ${accent}`}>
-          {placeholder ?? formatEGP(Math.round(display))}
-        </span>
-        {unit && !placeholder && <span className="text-xs text-text-muted mb-0.5 font-medium">{unit}</span>}
+
+      {/* Hero value — owner glances at this from across the cafe */}
+      <div className="mt-3">
+        <div className="flex items-baseline gap-1.5">
+          <span className={`text-4xl font-extrabold tabular-nums tracking-tight leading-none ${accent}`}>
+            {placeholder ?? formatEGP(Math.round(display))}
+          </span>
+          {unit && !placeholder && (
+            <span className="text-sm text-text-muted font-bold leading-none">{unit}</span>
+          )}
+        </div>
+        {sub && (
+          <p className="text-[11px] text-text-muted mt-2 font-medium">{sub}</p>
+        )}
       </div>
-      {sub && <p className="text-[10px] text-text-muted mt-1.5">{sub}</p>}
     </div>
   );
 }
@@ -836,50 +847,55 @@ function LiveOrdersFeed({ orders }: { orders: LiveOrder[] }) {
 
   return (
     <div className="card-luxury p-5">
-      <div className="flex items-center justify-between mb-3">
-        <h3 className="text-text-primary font-bold text-sm flex items-center gap-2">
-          {t("dashboard.liveOrders")}
+      <div className="flex items-center justify-between mb-4">
+        <div className="flex items-center gap-2">
           <span className="w-2 h-2 rounded-full bg-success animate-pulse" />
-        </h3>
-        <div className="flex gap-2">
+          <h3 className="text-text-primary font-extrabold text-[11px] uppercase tracking-[0.2em]">
+            {t("dashboard.liveOrders")}
+          </h3>
+        </div>
+        <div className="flex gap-1.5">
           {orders.filter((o) => o.status === "pending").length > 0 && (
-            <span className="px-2 py-0.5 rounded-full bg-coral-100 text-coral-600 text-[10px] font-bold animate-pulse">
+            <span className="px-2.5 py-1 rounded-full bg-coral-100 text-coral-700 text-[10px] font-extrabold tracking-wider animate-pulse">
               {orders.filter((o) => o.status === "pending").length} NEW
             </span>
           )}
           {orders.filter((o) => o.status === "ready").length > 0 && (
-            <span className="px-2 py-0.5 rounded-full bg-success/10 text-success text-[10px] font-bold">
+            <span className="px-2.5 py-1 rounded-full bg-success/10 text-success text-[10px] font-extrabold tracking-wider">
               {orders.filter((o) => o.status === "ready").length} READY
             </span>
           )}
         </div>
       </div>
-      <div className="space-y-1.5 max-h-[350px] overflow-auto no-scrollbar">
+      <div className="space-y-2 max-h-[400px] overflow-auto no-scrollbar">
         {active.slice(0, 12).map((order) => {
           const st = statusStyle[order.status] || { dot: "bg-sand-300", label: order.status, border: "border-l-sand-300" };
           const waitMin = minsAgo(order.createdAt);
           return (
             <div
               key={order.id}
-              className={`flex items-center gap-3 p-2.5 rounded-xl bg-sand-50 border border-sand-200/60 border-l-[3px] ${st.border} transition-colors`}
+              className={`flex items-center gap-3 p-3 rounded-xl bg-sand-50 border border-sand-200/60 border-l-4 ${st.border} transition-colors`}
             >
-              <div className={`w-2 h-2 rounded-full flex-shrink-0 ${st.dot} ${order.isDelayed ? "animate-pulse" : ""}`} />
-              <div className={`w-7 h-7 rounded-lg flex items-center justify-center text-[10px] font-bold border ${
+              <div className={`w-10 h-10 rounded-lg flex items-center justify-center text-sm font-extrabold border-2 flex-shrink-0 ${
                 order.orderType === "DELIVERY" ? "bg-status-warn-100 text-status-warn-700 border-status-warn-200" :
                 order.orderType === "VIP_DINE_IN" ? "bg-status-wait-100 text-status-wait-700 border-status-wait-200" :
-                "bg-sand-100 text-text-secondary border-sand-200"
+                "bg-white text-text-primary border-sand-200"
               }`}>{order.orderType === "DELIVERY" ? "\u{1F6F5}" : order.orderType === "VIP_DINE_IN" ? "\u{1F451}" : `T${order.tableNumber}`}</div>
               <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-1.5">
-                  <span className="text-xs font-semibold text-text-primary">#{order.orderNumber}</span>
-                  {order.vipGuestName && <span className="text-[9px] font-bold text-ocean-600 truncate max-w-[60px]">{order.vipGuestName}</span>}
-                  <span className="text-[9px] font-bold text-text-muted">{st.label}</span>
-                  {order.orderType === "DELIVERY" && order.deliveryStatus && <span className="text-[8px] font-bold text-status-warn-600">{order.deliveryStatus.replace("_", " ")}</span>}
-                  {order.isDelayed && <span className="text-[8px] text-coral-600 font-bold animate-pulse">DELAYED</span>}
+                <div className="flex items-center gap-2 mb-0.5">
+                  <span className="text-sm font-extrabold text-text-primary tabular-nums">#{order.orderNumber}</span>
+                  <span className={`px-1.5 py-0.5 rounded text-[9px] font-extrabold uppercase tracking-wider ${st.dot.replace("bg-", "bg-").replace("400", "100")} text-text-secondary`}>{st.label}</span>
+                  {order.isDelayed && <span className="text-[9px] text-coral-700 font-extrabold animate-pulse uppercase tracking-wider">DELAYED</span>}
                 </div>
-                <span className="text-[10px] text-text-muted">{waitMin}m · {order.items.length} items</span>
+                <div className="flex items-center gap-2 text-[10px] text-text-muted font-medium">
+                  <span className="tabular-nums">{waitMin}m</span>
+                  <span>·</span>
+                  <span>{order.items.length} items</span>
+                  {order.vipGuestName && <><span>·</span><span className="text-ocean-600 font-bold truncate max-w-[80px]">{order.vipGuestName}</span></>}
+                  {order.orderType === "DELIVERY" && order.deliveryStatus && <><span>·</span><span className="text-status-warn-600 font-bold uppercase">{order.deliveryStatus.replace("_", " ")}</span></>}
+                </div>
               </div>
-              <span className="text-xs font-bold text-text-primary tabular-nums">{formatEGP(order.total)}</span>
+              <span className="text-base font-extrabold text-text-primary tabular-nums tracking-tight">{formatEGP(order.total)}</span>
             </div>
           );
         })}
@@ -920,42 +936,44 @@ function VipDeliveryActivity({ orders, sessions }: { orders: LiveOrder[]; sessio
 
   return (
     <div className="card-luxury p-5">
-      <h3 className="text-text-primary font-bold text-sm flex items-center gap-2 mb-3">
-        {t("dashboard.vipDeliveryTitle")}
+      <div className="flex items-center justify-between mb-4">
+        <h3 className="text-text-primary font-extrabold text-[11px] uppercase tracking-[0.2em]">
+          {t("dashboard.vipDeliveryTitle")}
+        </h3>
         {(vipOrders.length > 0 || vipSessions.length > 0) && (
-          <span className="px-1.5 py-0.5 rounded-full bg-status-warn-100 text-status-warn-700 text-[10px] font-bold">{vipSessions.length} {t("dashboard.active")}</span>
+          <span className="px-2.5 py-1 rounded-full bg-status-warn-100 text-status-warn-700 text-[10px] font-extrabold tracking-wider uppercase">{vipSessions.length} {t("dashboard.active")}</span>
         )}
-      </h3>
+      </div>
       {vipOrders.length === 0 && vipSessions.length === 0 && (
         <p className="text-text-muted text-xs">{t("dashboard.noVipActivity")}</p>
       )}
 
       {/* Quick stats */}
-      <div className="grid grid-cols-3 gap-2 mb-3">
-        <div className="rounded-xl bg-status-wait-50 border border-status-wait-200 p-2.5 text-center">
-          <div className="text-lg font-semibold text-status-wait-700">{vipDineIn.length}</div>
-          <div className="text-[9px] font-bold text-status-wait-500 uppercase">{t("dashboard.dineIn")}</div>
+      <div className="grid grid-cols-3 gap-2 mb-4">
+        <div className="rounded-xl bg-status-wait-50 border border-status-wait-200 p-3 text-center">
+          <div className="text-[9px] font-extrabold text-status-wait-500 uppercase tracking-widest mb-1">{t("dashboard.dineIn")}</div>
+          <div className="text-2xl font-extrabold text-status-wait-700 tabular-nums leading-none">{vipDineIn.length}</div>
         </div>
-        <div className="rounded-xl bg-status-warn-50 border border-status-warn-200 p-2.5 text-center">
-          <div className="text-lg font-semibold text-status-warn-700">{deliveryOrders.length}</div>
-          <div className="text-[9px] font-bold text-status-warn-500 uppercase">{t("dashboard.deliveries")}</div>
+        <div className="rounded-xl bg-status-warn-50 border border-status-warn-200 p-3 text-center">
+          <div className="text-[9px] font-extrabold text-status-warn-500 uppercase tracking-widest mb-1">{t("dashboard.deliveries")}</div>
+          <div className="text-2xl font-extrabold text-status-warn-700 tabular-nums leading-none">{deliveryOrders.length}</div>
         </div>
-        <div className="rounded-xl bg-status-good-50 border border-status-good-200 p-2.5 text-center">
-          <div className="text-lg font-semibold text-status-good-700">{formatEGP(vipOrders.reduce((s, o) => s + o.total, 0))}</div>
-          <div className="text-[9px] font-bold text-status-good-500 uppercase">{t("dashboard.vipRevenue")}</div>
+        <div className="rounded-xl bg-status-good-50 border border-status-good-200 p-3 text-center">
+          <div className="text-[9px] font-extrabold text-status-good-500 uppercase tracking-widest mb-1">{t("dashboard.vipRevenue")}</div>
+          <div className="text-xl font-extrabold text-status-good-700 tabular-nums leading-none tracking-tight">{formatEGP(vipOrders.reduce((s, o) => s + o.total, 0))}</div>
         </div>
       </div>
 
       {/* Delivery pipeline */}
       {deliveryOrders.length > 0 && (
-        <div className="mb-3">
-          <p className="text-[10px] font-bold text-text-muted uppercase mb-1.5">{t("dashboard.deliveryPipeline")}</p>
-          <div className="flex gap-1 flex-wrap">
+        <div className="mb-4">
+          <p className="text-[10px] font-extrabold text-text-muted uppercase tracking-widest mb-2">{t("dashboard.deliveryPipeline")}</p>
+          <div className="flex gap-1.5 flex-wrap">
             {pipelineSteps.map((step) => {
               const count = deliveryByStatus[step.key]?.length || 0;
               if (count === 0) return null;
               return (
-                <span key={step.key} className={`px-2 py-1 rounded-lg text-white text-[10px] font-bold ${step.color}`}>
+                <span key={step.key} className={`px-2.5 py-1 rounded-lg text-white text-[10px] font-extrabold uppercase tracking-wider ${step.color}`}>
                   {count} {t(step.labelKey)}
                 </span>
               );
@@ -965,23 +983,23 @@ function VipDeliveryActivity({ orders, sessions }: { orders: LiveOrder[]; sessio
       )}
 
       {/* Active VIP sessions list */}
-      <div className="space-y-1.5 max-h-[200px] overflow-auto no-scrollbar">
+      <div className="space-y-2 max-h-[220px] overflow-auto no-scrollbar">
         {vipSessions.map((s) => {
           const isDelivery = s.orderType === "DELIVERY";
           const sessionOrders = orders.filter((o) => (o.orderType === s.orderType) && o.vipGuestName === s.vipGuestName && o.status !== "paid" && o.status !== "cancelled");
           const latestStatus = sessionOrders[0]?.status || "—";
           const deliverySt = sessionOrders[0]?.deliveryStatus;
           return (
-            <div key={s.id} className={`flex items-center gap-2.5 p-2 rounded-xl border ${isDelivery ? "bg-status-warn-50/50 border-status-warn-200" : "bg-status-wait-50/50 border-status-wait-200"}`}>
-              <div className={`w-7 h-7 rounded-lg flex items-center justify-center text-xs font-bold text-white ${isDelivery ? "bg-status-warn-500" : "bg-status-wait-600"}`}>
+            <div key={s.id} className={`flex items-center gap-3 p-3 rounded-xl border-2 ${isDelivery ? "bg-status-warn-50/50 border-status-warn-200" : "bg-status-wait-50/50 border-status-wait-200"}`}>
+              <div className={`w-10 h-10 rounded-lg flex items-center justify-center text-base text-white flex-shrink-0 ${isDelivery ? "bg-status-warn-500" : "bg-status-wait-600"}`}>
                 {isDelivery ? "\u{1F6F5}" : "\u{1F451}"}
               </div>
               <div className="flex-1 min-w-0">
-                <span className="text-xs font-bold text-text-primary truncate block">{s.vipGuestName || "VIP Guest"}</span>
-                <span className="text-[10px] text-text-muted">{isDelivery ? "Delivery" : "Dine-in"} · {deliverySt ? deliverySt.replace("_", " ") : latestStatus}{s.waiterName ? ` · ${s.waiterName}` : ""}</span>
+                <span className="text-sm font-extrabold text-text-primary truncate block">{s.vipGuestName || "VIP Guest"}</span>
+                <span className="text-[10px] text-text-muted font-medium">{isDelivery ? "Delivery" : "Dine-in"} · {deliverySt ? deliverySt.replace("_", " ") : latestStatus}{s.waiterName ? ` · ${s.waiterName}` : ""}</span>
               </div>
               {s.orderTotal != null && s.orderTotal > 0 && (
-                <span className="text-xs font-bold text-text-primary tabular-nums">{formatEGP(s.orderTotal)} {t("common.egp")}</span>
+                <span className="text-base font-extrabold text-text-primary tabular-nums tracking-tight">{formatEGP(s.orderTotal)}</span>
               )}
             </div>
           );
@@ -1045,36 +1063,40 @@ function AIBrain({
 
   return (
     <div className="card-luxury p-5">
-      <div className="flex items-center justify-between mb-4">
-        <div>
-          <h3 className="text-text-primary font-bold text-sm flex items-center gap-2">
-            {t("dashboard.aiBrainTitle")}
-            <span className="px-2 py-0.5 rounded-full bg-status-wait-100 text-status-wait-700 text-[9px] font-bold">{t("dashboard.live")}</span>
-            {totalImpact > 0 && (
-              <span className="px-2 py-0.5 rounded-full bg-success/10 text-success text-[9px] font-bold">
-                {positiveImpact}/{totalImpact} {t("dashboard.improved")}
-              </span>
-            )}
-          </h3>
-          <p className="text-text-muted text-[11px] mt-0.5">
-            {visibleInsights.length} {t("dashboard.recommendations")} · {activeDecisions.length} {t("dashboard.active")}
-          </p>
+      {/* Header — title hierarchy makes the live indicator + impact stats glanceable */}
+      <div className="mb-5">
+        <div className="flex items-center gap-2 flex-wrap mb-1">
+          <span className="inline-flex items-center gap-1.5 text-[10px] font-extrabold uppercase tracking-[0.18em] text-status-wait-700">
+            <span className="w-1.5 h-1.5 rounded-full bg-status-wait-500 animate-pulse" />
+            {t("dashboard.live")}
+          </span>
+          {totalImpact > 0 && (
+            <span className="inline-flex items-center gap-1 text-[10px] font-extrabold uppercase tracking-[0.18em] text-success">
+              <span>↑</span> {positiveImpact}/{totalImpact} {t("dashboard.improved")}
+            </span>
+          )}
         </div>
+        <h3 className="text-text-primary font-extrabold text-2xl leading-tight">
+          {t("dashboard.aiBrainTitle")}
+        </h3>
+        <p className="text-text-muted text-xs mt-1.5">
+          {visibleInsights.length} {t("dashboard.recommendations")} · {activeDecisions.length} {t("dashboard.active")}
+        </p>
       </div>
 
-      {/* System State */}
-      <div className="grid grid-cols-3 gap-2 mb-4">
-        <div className="bg-sand-50 rounded-lg p-2.5 text-center border border-sand-200/60">
-          <div className={`text-xs font-bold uppercase ${stateColors.traffic[sys.trafficLevel]}`}>{sys.trafficLevel}</div>
-          <div className="text-[9px] text-text-muted mt-0.5">{t("dashboard.traffic")}</div>
+      {/* System state — three big chips that summarize the cafe in one glance */}
+      <div className="grid grid-cols-3 gap-2 mb-5">
+        <div className="bg-sand-50 rounded-xl px-3 py-3 border border-sand-200/60">
+          <div className="text-[9px] text-text-muted font-extrabold uppercase tracking-widest mb-1">{t("dashboard.traffic")}</div>
+          <div className={`text-base font-extrabold uppercase tracking-tight leading-none ${stateColors.traffic[sys.trafficLevel]}`}>{sys.trafficLevel}</div>
         </div>
-        <div className="bg-sand-50 rounded-lg p-2.5 text-center border border-sand-200/60">
-          <div className={`text-xs font-bold uppercase ${stateColors.kitchen[sys.kitchenLoad]}`}>{sys.kitchenLoad}</div>
-          <div className="text-[9px] text-text-muted mt-0.5">{t("dashboard.header.kitchen")}</div>
+        <div className="bg-sand-50 rounded-xl px-3 py-3 border border-sand-200/60">
+          <div className="text-[9px] text-text-muted font-extrabold uppercase tracking-widest mb-1">{t("dashboard.header.kitchen")}</div>
+          <div className={`text-base font-extrabold uppercase tracking-tight leading-none ${stateColors.kitchen[sys.kitchenLoad]}`}>{sys.kitchenLoad}</div>
         </div>
-        <div className="bg-sand-50 rounded-lg p-2.5 text-center border border-sand-200/60">
-          <div className={`text-xs font-bold uppercase ${stateColors.behavior[sys.customerBehavior]}`}>{sys.customerBehavior}</div>
-          <div className="text-[9px] text-text-muted mt-0.5">{t("dashboard.customers")}</div>
+        <div className="bg-sand-50 rounded-xl px-3 py-3 border border-sand-200/60">
+          <div className="text-[9px] text-text-muted font-extrabold uppercase tracking-widest mb-1">{t("dashboard.customers")}</div>
+          <div className={`text-base font-extrabold uppercase tracking-tight leading-none ${stateColors.behavior[sys.customerBehavior]}`}>{sys.customerBehavior}</div>
         </div>
       </div>
 
@@ -1277,14 +1299,14 @@ function QuickControls({
 
   return (
     <div className="card-luxury p-5">
-      <div className="flex items-center justify-between mb-3">
+      <div className="flex items-start justify-between mb-4">
         <div>
-          <h3 className="text-text-primary font-bold text-sm">{t("dashboard.quickControls")}</h3>
-          <p className="text-text-muted text-[11px] mt-0.5">{t("dashboard.instantActions")}</p>
+          <h3 className="text-text-primary font-extrabold text-[11px] uppercase tracking-[0.2em]">{t("dashboard.quickControls")}</h3>
+          <p className="text-text-muted text-[11px] mt-1 font-medium">{t("dashboard.instantActions")}</p>
         </div>
         {activePromotions.filter((p) => p.active).length > 0 && (
-          <span className="px-2 py-0.5 rounded-full bg-success/10 text-success text-[10px] font-bold">
-            {activePromotions.filter((p) => p.active).length} LIVE
+          <span className="px-2.5 py-1 rounded-full bg-success/10 text-success text-[10px] font-extrabold tracking-wider uppercase">
+            {activePromotions.filter((p) => p.active).length} Live
           </span>
         )}
       </div>
@@ -1294,12 +1316,12 @@ function QuickControls({
           <motion.button
             key={a.id}
             onClick={a.action}
-            className={`relative p-3 rounded-xl ${a.bg} border ${a.border} text-left transition-all`}
+            className={`relative p-3 rounded-xl ${a.bg} border-2 ${a.border} text-left transition-all min-h-[88px]`}
             whileTap={{ scale: 0.96 }}
           >
-            <span className="text-base block mb-0.5">{a.icon}</span>
-            <span className="text-[10px] font-bold text-text-secondary block">{a.label}</span>
-            <span className="text-[9px] text-text-muted block">{a.desc}</span>
+            <span className="text-2xl block mb-1.5">{a.icon}</span>
+            <span className="text-[11px] font-extrabold text-text-primary block leading-tight">{a.label}</span>
+            <span className="text-[9px] text-text-muted block leading-tight mt-0.5">{a.desc}</span>
             <AnimatePresence>
               {flashId === a.id && (
                 <motion.div className="absolute top-2 right-2 w-5 h-5 rounded-full bg-success flex items-center justify-center" initial={{ scale: 0 }} animate={{ scale: 1 }} exit={{ scale: 0 }}>
@@ -1314,12 +1336,12 @@ function QuickControls({
       {activePromotions.filter((p) => p.active).length > 0 && (
         <div className="space-y-1.5">
           {activePromotions.filter((p) => p.active).map((promo) => (
-            <div key={promo.id} className="flex items-center justify-between p-2.5 rounded-lg bg-success/5 border border-success/20">
-              <div className="flex items-center gap-2">
-                <span className="text-xs text-text-secondary">{promo.badge}</span>
-                <span className="text-xs text-text-muted">{promo.title}</span>
+            <div key={promo.id} className="flex items-center justify-between p-3 rounded-xl bg-success/5 border-2 border-success/20">
+              <div className="flex items-center gap-2 min-w-0">
+                <span className="text-xs font-extrabold text-text-secondary uppercase tracking-wider truncate">{promo.badge}</span>
+                <span className="text-xs text-text-muted truncate">{promo.title}</span>
               </div>
-              <span className="px-1.5 py-0.5 rounded bg-success/10 text-success text-[9px] font-bold">LIVE</span>
+              <span className="px-2 py-0.5 rounded bg-success/10 text-success text-[10px] font-extrabold tracking-wider uppercase flex-shrink-0">Live</span>
             </div>
           ))}
         </div>
@@ -1357,19 +1379,20 @@ function MenuPerformance({
 
   return (
     <div className="card-luxury p-5">
-      <div className="flex items-center justify-between mb-3">
+      <div className="flex items-start justify-between mb-4">
         <div>
-          <h3 className="text-text-primary font-bold text-sm">{t("dashboard.menuPerformanceTitle")}</h3>
-          <p className="text-text-muted text-[11px] mt-0.5">{t("dashboard.menuPerformanceDesc")}</p>
+          <h3 className="text-text-primary font-extrabold text-[11px] uppercase tracking-[0.2em]">{t("dashboard.menuPerformanceTitle")}</h3>
+          <p className="text-text-muted text-[11px] mt-1 font-medium">{t("dashboard.menuPerformanceDesc")}</p>
         </div>
         {estimatedLoss > 0 && (
-          <span className="px-2.5 py-1 rounded-lg bg-coral-50 border border-coral-200 text-coral-600 text-xs font-bold tabular-nums">
-            ~{formatEGP(estimatedLoss)} {t("common.egp")} {t("dashboard.leaking")}
-          </span>
+          <div className="text-right flex-shrink-0">
+            <div className="text-[9px] font-extrabold text-coral-600 uppercase tracking-widest">{t("dashboard.leaking")}</div>
+            <div className="text-xl font-extrabold text-coral-600 tabular-nums tracking-tight leading-none mt-0.5">~{formatEGP(estimatedLoss)}</div>
+          </div>
         )}
       </div>
 
-      <div className="space-y-1.5 max-h-[400px] overflow-y-auto no-scrollbar">
+      <div className="space-y-2 max-h-[400px] overflow-y-auto no-scrollbar">
         {perf.slice(0, 10).map((item) => {
           const menuItem = useMenu.getState().allItems.find((i) => i.id === item.itemId);
           const isLeak = item.trend === "leaking";
@@ -1378,27 +1401,27 @@ function MenuPerformance({
           return (
             <div
               key={item.itemId}
-              className={`flex items-center gap-3 p-2.5 rounded-xl border ${
+              className={`flex items-center gap-3 p-3 rounded-xl border-2 ${
                 isLeak ? "bg-coral-50/50 border-coral-200" : isHot ? "bg-success/5 border-success/20" : "bg-sand-50 border-sand-200/60"
               }`}
             >
-              <div className="w-9 h-9 rounded-lg overflow-hidden flex-shrink-0 bg-sand-100 border border-sand-200">
+              <div className="w-12 h-12 rounded-lg overflow-hidden flex-shrink-0 bg-sand-100 border border-sand-200">
                 <div className="w-full h-full bg-cover bg-center" style={{ backgroundImage: `url(${resolveImage(menuItem?.image)})` }} />
               </div>
               <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-1.5">
-                  <p className="text-xs font-semibold text-text-primary truncate">{item.name}</p>
-                  {isLeak && <span className="px-1.5 py-0.5 rounded bg-coral-100 text-coral-600 text-[7px] font-semibold flex-shrink-0">LEAK</span>}
-                  {isHot && <span className="px-1.5 py-0.5 rounded bg-success/10 text-success text-[7px] font-semibold flex-shrink-0">HOT</span>}
+                <div className="flex items-center gap-2 mb-0.5">
+                  <p className="text-sm font-extrabold text-text-primary truncate">{item.name}</p>
+                  {isLeak && <span className="px-1.5 py-0.5 rounded bg-coral-100 text-coral-700 text-[9px] font-extrabold tracking-wider flex-shrink-0">LEAK</span>}
+                  {isHot && <span className="px-1.5 py-0.5 rounded bg-success/10 text-success text-[9px] font-extrabold tracking-wider flex-shrink-0">HOT</span>}
                 </div>
-                <p className="text-[10px] text-text-muted">
-                  {item.views}v → {item.orders}o · <span className={isLeak ? "text-coral-600 font-bold" : ""}>{(item.conversionRate * 100).toFixed(0)}%</span>
+                <p className="text-[11px] text-text-muted font-medium tabular-nums">
+                  {item.views}v → {item.orders}o · <span className={`font-extrabold ${isLeak ? "text-coral-600" : "text-text-secondary"}`}>{(item.conversionRate * 100).toFixed(0)}%</span>
                 </p>
               </div>
               <div className="flex gap-1 flex-shrink-0">
-                <button onClick={() => onBoost(item.itemId)} className="px-2 py-1 rounded-lg bg-ocean-50 border border-ocean-200 text-ocean-700 text-[9px] font-bold hover:bg-ocean-100 transition">{t("dashboard.boost")}</button>
-                <button onClick={() => onDiscount(item.itemId)} className="px-2 py-1 rounded-lg bg-sunset-400/10 border border-sunset-400/20 text-sand-800 text-[9px] font-bold hover:bg-sunset-400/20 transition">{t("dashboard.deal")}</button>
-                <button onClick={() => onHide(item.itemId)} className="px-2 py-1 rounded-lg bg-sand-100 border border-sand-200 text-text-muted text-[9px] font-bold hover:text-text-secondary transition">{t("dashboard.hide")}</button>
+                <button onClick={() => onBoost(item.itemId)} className="px-2.5 py-1.5 rounded-lg bg-ocean-50 border border-ocean-200 text-ocean-700 text-[10px] font-extrabold uppercase tracking-wider hover:bg-ocean-100 transition active:scale-95">{t("dashboard.boost")}</button>
+                <button onClick={() => onDiscount(item.itemId)} className="px-2.5 py-1.5 rounded-lg bg-sunset-400/10 border border-sunset-400/20 text-sand-800 text-[10px] font-extrabold uppercase tracking-wider hover:bg-sunset-400/20 transition active:scale-95">{t("dashboard.deal")}</button>
+                <button onClick={() => onHide(item.itemId)} className="px-2.5 py-1.5 rounded-lg bg-sand-100 border border-sand-200 text-text-muted text-[10px] font-extrabold uppercase tracking-wider hover:text-text-secondary transition active:scale-95">{t("dashboard.hide")}</button>
               </div>
             </div>
           );
@@ -1842,25 +1865,25 @@ function StaffPanel({ staff, onRefresh, restaurantId, restaurantSlug, ownerId }:
           return (
             <div key={g.role} className="space-y-2.5">
               <div className="flex items-center justify-between px-1">
-                <h4 className={`text-[11px] font-semibold uppercase tracking-[0.15em] ${rc.text}`}>
+                <h4 className={`text-[11px] font-extrabold uppercase tracking-[0.2em] ${rc.text}`}>
                   {t(g.labelKey)}
                 </h4>
                 <div className="flex items-center gap-3">
                   {g.role === "WAITER" && (
                     <div className="flex items-center gap-1.5">
-                      <span className="text-[10px] text-text-muted font-semibold">Load cap:</span>
+                      <span className="text-[10px] text-text-muted font-extrabold uppercase tracking-wider">Load cap</span>
                       <button
                         onClick={() => updateWaiterCapacity(waiterCapacity - 1)}
-                        className="w-5 h-5 rounded bg-sand-100 text-text-muted text-xs font-bold flex items-center justify-center hover:bg-sand-200"
+                        className="w-7 h-7 rounded-lg bg-sand-100 text-text-secondary text-base font-extrabold flex items-center justify-center hover:bg-sand-200 active:scale-95 transition"
                       >−</button>
-                      <span className="text-[11px] text-text-primary font-bold tabular-nums w-5 text-center">{waiterCapacity}</span>
+                      <span className="text-sm text-text-primary font-extrabold tabular-nums w-6 text-center">{waiterCapacity}</span>
                       <button
                         onClick={() => updateWaiterCapacity(waiterCapacity + 1)}
-                        className="w-5 h-5 rounded bg-sand-100 text-text-muted text-xs font-bold flex items-center justify-center hover:bg-sand-200"
+                        className="w-7 h-7 rounded-lg bg-sand-100 text-text-secondary text-base font-extrabold flex items-center justify-center hover:bg-sand-200 active:scale-95 transition"
                       >+</button>
                     </div>
                   )}
-                  <span className="text-[10px] text-text-muted font-semibold">
+                  <span className="text-[10px] text-text-muted font-extrabold uppercase tracking-wider">
                     {members.filter((m) => m.active).length} active
                     {members.length !== members.filter((m) => m.active).length && ` · ${members.length} total`}
                   </span>
@@ -1880,20 +1903,20 @@ function StaffPanel({ staff, onRefresh, restaurantId, restaurantSlug, ownerId }:
                     return (
                       <motion.div key={member.id} layout className={`card-luxury p-4 ${!member.active ? "opacity-50" : ""}`}>
                         <div className="flex items-center gap-3 min-w-0 mb-3">
-                          <div className={`w-10 h-10 rounded-xl ${mrc.bg} border ${mrc.border} flex items-center justify-center flex-shrink-0`}>
-                            <span className={`font-semibold text-sm ${mrc.text}`}>{member.name.charAt(0).toUpperCase()}</span>
+                          <div className={`w-12 h-12 rounded-xl ${mrc.bg} border-2 ${mrc.border} flex items-center justify-center flex-shrink-0`}>
+                            <span className={`font-extrabold text-lg ${mrc.text}`}>{member.name.charAt(0).toUpperCase()}</span>
                           </div>
                           <div className="min-w-0 flex-1">
                             <div className="flex items-baseline gap-2 flex-wrap">
-                              <p className="text-text-primary font-bold text-sm break-words">{member.name}</p>
+                              <p className="text-text-primary font-extrabold text-base break-words">{member.name}</p>
                               {member.code && (
-                                <span className="text-[10px] font-mono font-bold text-text-secondary bg-sand-100 border border-sand-200 rounded px-1.5 py-0.5">
+                                <span className="text-[10px] font-mono font-extrabold text-text-secondary bg-sand-100 border border-sand-200 rounded px-1.5 py-0.5">
                                   {member.code}
                                 </span>
                               )}
                             </div>
-                            <div className="flex items-center gap-2 mt-0.5">
-                              <span className={`text-[9px] font-bold uppercase ${mrc.text}`}>{member.role === "FLOOR_MANAGER" ? "FLOOR MGR" : member.role}</span>
+                            <div className="flex items-center gap-2 mt-1">
+                              <span className={`text-[10px] font-extrabold uppercase tracking-wider ${mrc.text}`}>{member.role === "FLOOR_MANAGER" ? "FLOOR MGR" : member.role}</span>
                               <span className="text-sand-300">·</span>
                               <span className="text-[10px] text-text-muted font-mono">
                                 PIN: ••••
@@ -2096,12 +2119,12 @@ function ShiftOverview({ staff, restaurantSlug }: { staff: StaffMember[]; restau
     const clockedIn = clockedInIds.has(member.id);
     return (
       <div className="flex items-center gap-3 p-3 rounded-xl bg-sand-50 border border-sand-200">
-        <div className={`w-9 h-9 rounded-xl ${sc.bg} border ${sc.border} flex items-center justify-center`}>
-          <span className={`font-semibold text-sm ${sc.text}`}>{member.name.charAt(0)}</span>
+        <div className={`w-11 h-11 rounded-xl ${sc.bg} border-2 ${sc.border} flex items-center justify-center flex-shrink-0`}>
+          <span className={`font-extrabold text-base ${sc.text}`}>{member.name.charAt(0)}</span>
         </div>
         <div className="flex-1 min-w-0">
-          <p className="text-sm font-bold text-text-primary truncate">{member.name}</p>
-          <p className={`text-[10px] font-bold ${rb.color}`}>{rb.label} · {getShiftLabel(member.shift, member.role)}</p>
+          <p className="text-sm font-extrabold text-text-primary truncate">{member.name}</p>
+          <p className={`text-[10px] font-extrabold uppercase tracking-wider ${rb.color} mt-0.5`}>{rb.label} · {getShiftLabel(member.shift, member.role)}</p>
         </div>
         <span
           title={clockedIn ? t("dashboard.shift.clockedIn") : t("dashboard.shift.notClockedIn")}
@@ -2119,27 +2142,32 @@ function ShiftOverview({ staff, restaurantSlug }: { staff: StaffMember[]; restau
   return (
     <div className="space-y-4">
       <div className={`card-luxury p-5 border-2 ${sc.border}`}>
-        <div className="flex items-center justify-between mb-3">
+        <div className="flex items-center justify-between mb-4">
           <div className="flex items-center gap-2">
             <span className={`w-3 h-3 rounded-full ${sc.dot} animate-pulse`} />
-            <h3 className={`font-bold text-lg ${sc.text}`}>{shiftLabels[currentShift] || "Loading..."}</h3>
+            <div>
+              <div className="text-[10px] font-extrabold text-text-muted uppercase tracking-[0.2em]">{t("dashboard.cairoTime")}</div>
+              <h3 className={`font-extrabold text-2xl ${sc.text} leading-none mt-0.5`}>{shiftLabels[currentShift] || "Loading..."}</h3>
+            </div>
           </div>
-          <span className="text-xs text-text-muted font-bold">{t("dashboard.cairoTime")}</span>
+          <div className="text-right">
+            <div className="text-[10px] font-extrabold text-text-muted uppercase tracking-widest">Progress</div>
+            <div className={`text-2xl font-extrabold tabular-nums tracking-tight leading-none ${sc.text}`}>{shiftProgress}%</div>
+          </div>
         </div>
-        <div className="w-full h-2 bg-sand-200 rounded-full overflow-hidden mb-2">
+        <div className="w-full h-2.5 bg-sand-200 rounded-full overflow-hidden mb-2">
           <div className={`h-full ${sc.dot} rounded-full transition-all duration-1000`} style={{ width: `${shiftProgress}%` }} />
         </div>
-        <div className="flex justify-between text-[10px] text-text-muted font-semibold">
-          <span>{shiftProgress}% complete</span>
+        <div className="flex justify-end text-[10px] text-text-muted font-bold tabular-nums">
           <span>{Math.round((100 - shiftProgress) * 4.8)}m remaining</span>
         </div>
       </div>
 
       <div className="card-luxury p-5">
-        <div className="flex items-center gap-2 mb-3">
+        <div className="flex items-center gap-2 mb-4">
           <span className={`w-2.5 h-2.5 rounded-full ${sc.dot}`} />
-          <h3 className={`font-bold text-sm ${sc.text}`}>{t("dashboard.shift.onNow")}</h3>
-          <span className="ml-auto text-xs text-text-muted font-bold">{onNow.length} {t("dashboard.staffCount")}</span>
+          <h3 className={`font-extrabold text-[11px] uppercase tracking-[0.2em] ${sc.text}`}>{t("dashboard.shift.onNow")}</h3>
+          <span className="ml-auto text-[10px] text-text-muted font-extrabold uppercase tracking-wider">{onNow.length} {t("dashboard.staffCount")}</span>
         </div>
         {onNow.length > 0 ? (
           <div className="space-y-2">
@@ -2151,21 +2179,21 @@ function ShiftOverview({ staff, restaurantSlug }: { staff: StaffMember[]; restau
       </div>
 
       <div className={`card-luxury p-5 border ${nc.border}`}>
-        <div className="flex items-center gap-2 mb-3">
+        <div className="flex items-center gap-2 mb-4">
           <span className={`w-2.5 h-2.5 rounded-full ${nc.dot} opacity-60`} />
-          <h3 className={`font-bold text-sm ${nc.text}`}>{t("dashboard.shift.upNext")} · {shiftLabels[nextShift]}</h3>
-          <span className="ml-auto text-xs text-text-muted font-bold">{upNext.length} {t("dashboard.staffCount")}</span>
+          <h3 className={`font-extrabold text-[11px] uppercase tracking-[0.2em] ${nc.text}`}>{t("dashboard.shift.upNext")} · {shiftLabels[nextShift]}</h3>
+          <span className="ml-auto text-[10px] text-text-muted font-extrabold uppercase tracking-wider">{upNext.length} {t("dashboard.staffCount")}</span>
         </div>
         {upNext.length > 0 ? (
           <div className="space-y-2">
             {upNext.map((s) => (
               <div key={s.id} className="flex items-center gap-3 p-3 rounded-xl bg-sand-50/60 border border-sand-200/60">
-                <div className={`w-9 h-9 rounded-xl ${nc.bg} border ${nc.border} flex items-center justify-center`}>
-                  <span className={`font-semibold text-sm ${nc.text}`}>{s.name.charAt(0)}</span>
+                <div className={`w-11 h-11 rounded-xl ${nc.bg} border-2 ${nc.border} flex items-center justify-center flex-shrink-0`}>
+                  <span className={`font-extrabold text-base ${nc.text}`}>{s.name.charAt(0)}</span>
                 </div>
                 <div className="flex-1 min-w-0">
-                  <p className="text-sm font-bold text-text-primary truncate">{s.name}</p>
-                  <p className={`text-[10px] font-bold ${roleBadge[s.role]?.color || "text-text-muted"}`}>{roleBadge[s.role]?.label || s.role} · {getShiftLabel(s.shift, s.role)}</p>
+                  <p className="text-sm font-extrabold text-text-primary truncate">{s.name}</p>
+                  <p className={`text-[10px] font-extrabold uppercase tracking-wider ${roleBadge[s.role]?.color || "text-text-muted"} mt-0.5`}>{roleBadge[s.role]?.label || s.role} · {getShiftLabel(s.shift, s.role)}</p>
                 </div>
               </div>
             ))}
@@ -2177,15 +2205,15 @@ function ShiftOverview({ staff, restaurantSlug }: { staff: StaffMember[]; restau
 
       {unassigned.length > 0 && (
         <div className="card-luxury p-5 border border-sand-200">
-          <div className="flex items-center gap-2 mb-3">
+          <div className="flex items-center gap-2 mb-4">
             <span className="w-2.5 h-2.5 rounded-full bg-sand-400" />
-            <h3 className="font-bold text-sm text-text-muted">{t("dashboard.shift.unassigned")}</h3>
-            <span className="ml-auto text-xs text-text-muted font-bold">{unassigned.length}</span>
+            <h3 className="font-extrabold text-[11px] uppercase tracking-[0.2em] text-text-muted">{t("dashboard.shift.unassigned")}</h3>
+            <span className="ml-auto text-[10px] text-text-muted font-extrabold uppercase tracking-wider">{unassigned.length}</span>
           </div>
           <div className="flex flex-wrap gap-2">
             {unassigned.map((s) => (
-              <span key={s.id} className="px-3 py-1.5 rounded-lg bg-sand-50 border border-sand-200 text-xs font-semibold text-text-secondary">
-                {s.name} <span className="text-text-muted">· {roleBadge[s.role]?.label || s.role}</span>
+              <span key={s.id} className="px-3 py-1.5 rounded-lg bg-sand-50 border border-sand-200 text-xs font-extrabold text-text-secondary">
+                {s.name} <span className="text-text-muted font-medium">· {roleBadge[s.role]?.label || s.role}</span>
               </span>
             ))}
           </div>
@@ -2252,10 +2280,10 @@ function KitchenConfigPanel({ restaurantSlug, ownerId }: { restaurantSlug: strin
 
   return (
     <div className="card-luxury p-5">
-      <div className="flex items-center justify-between mb-3">
-        <h3 className="text-text-primary font-bold text-sm">{t("dashboard.kitchenCapacity")}</h3>
+      <div className="flex items-center justify-between mb-4">
+        <h3 className="text-text-primary font-extrabold text-[11px] uppercase tracking-[0.2em]">{t("dashboard.kitchenCapacity")}</h3>
         {savedAt && Date.now() - savedAt < 3000 && (
-          <span className="text-[10px] font-bold text-success">Saved</span>
+          <span className="text-[10px] font-extrabold uppercase tracking-wider text-success px-2 py-1 rounded-full bg-success/10">Saved</span>
         )}
       </div>
 
@@ -2369,41 +2397,43 @@ function PaymentBreakdown({ orders }: { orders: LiveOrder[] }) {
 
   return (
     <div className="card-luxury p-5">
-      <h3 className="text-text-primary font-bold text-sm mb-3 flex items-center gap-2">
-        {t("dashboard.revenueBreakdownTitle")}
-        {cashTotal > 0 && <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-status-good-100 text-status-good-700">{t("dashboard.cashToCollectBadge")}</span>}
-      </h3>
+      <div className="flex items-center justify-between mb-4">
+        <h3 className="text-text-primary font-extrabold text-[11px] uppercase tracking-[0.2em]">
+          {t("dashboard.revenueBreakdownTitle")}
+        </h3>
+        {cashTotal > 0 && <span className="text-[10px] font-extrabold uppercase tracking-wider px-2.5 py-1 rounded-full bg-status-good-100 text-status-good-700">{t("dashboard.cashToCollectBadge")}</span>}
+      </div>
 
-      <div className="grid grid-cols-3 gap-3 mb-4">
-        <div className="text-center p-3 rounded-xl bg-status-good-50 border border-status-good-200">
-          <p className="text-xl font-semibold text-status-good-700">{formatEGP(cashTotal)}</p>
-          <p className="text-[9px] text-status-good-600 font-bold uppercase">Cash ({cashCount})</p>
+      <div className="grid grid-cols-3 gap-2 mb-4">
+        <div className="p-3 rounded-xl bg-status-good-50 border border-status-good-200 text-center">
+          <p className="text-[9px] text-status-good-600 font-extrabold uppercase tracking-widest mb-1">Cash · {cashCount}</p>
+          <p className="text-2xl font-extrabold text-status-good-700 tabular-nums leading-none tracking-tight">{formatEGP(cashTotal)}</p>
         </div>
-        <div className="text-center p-3 rounded-xl bg-status-info-50 border border-status-info-200">
-          <p className="text-xl font-semibold text-status-info-700">{formatEGP(cardTotal)}</p>
-          <p className="text-[9px] text-status-info-600 font-bold uppercase">Card ({cardCount})</p>
+        <div className="p-3 rounded-xl bg-status-info-50 border border-status-info-200 text-center">
+          <p className="text-[9px] text-status-info-600 font-extrabold uppercase tracking-widest mb-1">Card · {cardCount}</p>
+          <p className="text-2xl font-extrabold text-status-info-700 tabular-nums leading-none tracking-tight">{formatEGP(cardTotal)}</p>
         </div>
-        <div className="text-center p-3 rounded-xl bg-status-wait-50 border border-status-wait-200">
-          <p className="text-xl font-semibold text-status-wait-700">{formatEGP(instapayTotal)}</p>
-          <p className="text-[9px] text-status-wait-600 font-bold uppercase">InstaPay ({instapayCount})</p>
+        <div className="p-3 rounded-xl bg-status-wait-50 border border-status-wait-200 text-center">
+          <p className="text-[9px] text-status-wait-600 font-extrabold uppercase tracking-widest mb-1">InstaPay · {instapayCount}</p>
+          <p className="text-2xl font-extrabold text-status-wait-700 tabular-nums leading-none tracking-tight">{formatEGP(instapayTotal)}</p>
         </div>
       </div>
 
       <div className="space-y-2">
-        <div className="flex justify-between text-sm">
-          <span className="text-text-secondary font-semibold">{t("dashboard.totalCollected")}</span>
-          <span className="text-text-primary font-semibold">{formatEGP(grandTotal)} {t("common.egp")}</span>
+        <div className="flex justify-between items-baseline border-t-2 border-sand-200 pt-3">
+          <span className="text-[10px] text-text-secondary font-extrabold uppercase tracking-widest">{t("dashboard.totalCollected")}</span>
+          <span className="text-2xl font-extrabold text-text-primary tabular-nums tracking-tight leading-none">{formatEGP(grandTotal)}</span>
         </div>
         {cashTotal > 0 && (
-          <div className="flex justify-between text-sm p-2.5 rounded-xl bg-status-warn-50 border border-status-warn-200">
-            <span className="text-status-warn-800 font-bold">{t("dashboard.cashToReconcile")}</span>
-            <span className="text-status-warn-900 font-semibold">{formatEGP(cashTotal)} {t("common.egp")}</span>
+          <div className="flex justify-between items-baseline p-3 rounded-xl bg-status-warn-50 border border-status-warn-200">
+            <span className="text-[10px] text-status-warn-800 font-extrabold uppercase tracking-widest">{t("dashboard.cashToReconcile")}</span>
+            <span className="text-lg font-extrabold text-status-warn-900 tabular-nums tracking-tight leading-none">{formatEGP(cashTotal)}</span>
           </div>
         )}
         {unpaidTotal > 0 && (
-          <div className="flex justify-between text-sm">
-            <span className="text-text-muted font-semibold">{t("dashboard.outstandingUnpaid")}</span>
-            <span className="text-coral-600 font-bold">{formatEGP(unpaidTotal)} {t("common.egp")}</span>
+          <div className="flex justify-between items-baseline">
+            <span className="text-[10px] text-text-muted font-extrabold uppercase tracking-widest">{t("dashboard.outstandingUnpaid")}</span>
+            <span className="text-lg font-extrabold text-coral-600 tabular-nums tracking-tight leading-none">{formatEGP(unpaidTotal)}</span>
           </div>
         )}
       </div>
@@ -2434,25 +2464,27 @@ function ProductionCard({ label, metrics }: { label: string; metrics: Production
 
   return (
     <div className="card-luxury p-5">
-      <h3 className="text-text-primary font-bold text-sm mb-3 flex items-center gap-2">
-        {label}
-        {kitchen.capacity > 80 && <span className="w-2 h-2 rounded-full bg-coral-500 animate-pulse" />}
-      </h3>
+      <div className="flex items-center justify-between mb-4">
+        <h3 className="text-text-primary font-extrabold text-[11px] uppercase tracking-[0.2em] flex items-center gap-2">
+          {kitchen.capacity > 80 && <span className="w-2 h-2 rounded-full bg-coral-500 animate-pulse" />}
+          {label}
+        </h3>
+      </div>
       <div className="grid grid-cols-3 gap-3 mb-3">
         <div className="text-center">
-          <p className={`text-xl font-semibold ${capacityColor}`}>{kitchen.activeOrders}</p>
-          <p className="text-[9px] text-text-muted font-bold">ACTIVE</p>
+          <p className="text-[9px] text-text-muted font-extrabold uppercase tracking-widest mb-1">Active</p>
+          <p className={`text-3xl font-extrabold tabular-nums tracking-tight leading-none ${capacityColor}`}>{kitchen.activeOrders}</p>
         </div>
         <div className="text-center">
-          <p className="text-xl font-semibold text-text-primary">{kitchen.avgPrepTime > 0 ? `${kitchen.avgPrepTime}m` : "—"}</p>
-          <p className="text-[9px] text-text-muted font-bold">AVG PREP</p>
+          <p className="text-[9px] text-text-muted font-extrabold uppercase tracking-widest mb-1">Avg Prep</p>
+          <p className="text-3xl font-extrabold text-text-primary tabular-nums tracking-tight leading-none">{kitchen.avgPrepTime > 0 ? `${kitchen.avgPrepTime}m` : "—"}</p>
         </div>
         <div className="text-center">
-          <p className={`text-xl font-semibold ${capacityColor}`}>{kitchen.capacity}%</p>
-          <p className="text-[9px] text-text-muted font-bold">CAPACITY</p>
+          <p className="text-[9px] text-text-muted font-extrabold uppercase tracking-widest mb-1">Capacity</p>
+          <p className={`text-3xl font-extrabold tabular-nums tracking-tight leading-none ${capacityColor}`}>{kitchen.capacity}%</p>
         </div>
       </div>
-      <div className="w-full h-1.5 bg-sand-200 rounded-full overflow-hidden">
+      <div className="w-full h-2 bg-sand-200 rounded-full overflow-hidden">
         <div className={`h-full ${capacityBg} rounded-full transition-all duration-500`} style={{ width: `${Math.min(100, kitchen.capacity)}%` }} />
       </div>
       {kitchen.stuckOrders.length > 0 && (
@@ -2625,36 +2657,36 @@ function DangerZone({ restaurantId, ownerId }: { restaurantId: string; ownerId: 
   return (
     <div className="mt-6 space-y-4">
       {/* Owner Profile */}
-      <div className="bg-white rounded-2xl border border-sand-200 p-4">
-        <h3 className="text-sm font-semibold text-text-secondary uppercase tracking-wide mb-3">{t("dashboard.ownerProfile.title")}</h3>
+      <div className="bg-white rounded-2xl border border-sand-200 p-5">
+        <h3 className="text-[11px] font-extrabold text-text-secondary uppercase tracking-[0.2em] mb-4">{t("dashboard.ownerProfile.title")}</h3>
         <div className="space-y-3">
           <div>
-            <label className="text-xs font-semibold text-text-secondary mb-1 block">{t("dashboard.ownerProfile.name")}</label>
-            <input value={ownerName} onChange={(e) => setOwnerName(e.target.value)} className="w-full px-3 py-2 rounded-lg border border-sand-200 text-sm" />
+            <label className="text-[10px] font-extrabold text-text-muted uppercase tracking-widest mb-1.5 block">{t("dashboard.ownerProfile.name")}</label>
+            <input value={ownerName} onChange={(e) => setOwnerName(e.target.value)} className="w-full px-3 py-2.5 rounded-lg border-2 border-sand-200 text-sm font-semibold focus:border-sand-400 focus:outline-none transition" />
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="text-xs font-semibold text-text-secondary mb-1 block">{t("dashboard.ownerProfile.currentPin")}</label>
-              <input type="password" inputMode="numeric" maxLength={6} value={currentPin} onChange={(e) => setCurrentPin(e.target.value.replace(/\D/g, ""))} placeholder="••••" className="w-full px-3 py-2 rounded-lg border border-sand-200 text-sm" />
+              <label className="text-[10px] font-extrabold text-text-muted uppercase tracking-widest mb-1.5 block">{t("dashboard.ownerProfile.currentPin")}</label>
+              <input type="password" inputMode="numeric" maxLength={6} value={currentPin} onChange={(e) => setCurrentPin(e.target.value.replace(/\D/g, ""))} placeholder="••••" className="w-full px-3 py-2.5 rounded-lg border-2 border-sand-200 text-sm font-semibold tabular-nums tracking-widest focus:border-sand-400 focus:outline-none transition" />
             </div>
             <div>
-              <label className="text-xs font-semibold text-text-secondary mb-1 block">{t("dashboard.ownerProfile.newPin")}</label>
-              <input type="password" inputMode="numeric" maxLength={6} value={newPin} onChange={(e) => setNewPin(e.target.value.replace(/\D/g, ""))} placeholder="••••" className="w-full px-3 py-2 rounded-lg border border-sand-200 text-sm" />
+              <label className="text-[10px] font-extrabold text-text-muted uppercase tracking-widest mb-1.5 block">{t("dashboard.ownerProfile.newPin")}</label>
+              <input type="password" inputMode="numeric" maxLength={6} value={newPin} onChange={(e) => setNewPin(e.target.value.replace(/\D/g, ""))} placeholder="••••" className="w-full px-3 py-2.5 rounded-lg border-2 border-sand-200 text-sm font-semibold tabular-nums tracking-widest focus:border-sand-400 focus:outline-none transition" />
             </div>
           </div>
-          {profileMsg && <p className={`text-xs font-semibold ${profileMsg.ok ? "text-status-good-600" : "text-status-bad-600"}`}>{profileMsg.text}</p>}
-          <button onClick={handleProfileSave} disabled={profileSaving || (!ownerName.trim() && !newPin)} className="w-full py-2.5 rounded-xl bg-sand-800 text-white font-bold text-sm hover:bg-sand-900 disabled:opacity-50 transition-all active:scale-[0.98]">
+          {profileMsg && <p className={`text-xs font-extrabold ${profileMsg.ok ? "text-status-good-600" : "text-status-bad-600"}`}>{profileMsg.text}</p>}
+          <button onClick={handleProfileSave} disabled={profileSaving || (!ownerName.trim() && !newPin)} className="w-full py-3 rounded-xl bg-sand-800 text-white font-extrabold text-sm uppercase tracking-wider hover:bg-sand-900 disabled:opacity-50 transition-all active:scale-[0.98]">
             {profileSaving ? t("common.loading") : t("dashboard.ownerProfile.save")}
           </button>
         </div>
       </div>
 
       {/* Go Live */}
-      <div className="bg-white rounded-2xl border-2 border-status-good-300 p-4">
-        <h3 className="text-sm font-semibold text-status-good-700 uppercase tracking-wide mb-2">🚀 {t("dashboard.goLive.title")}</h3>
-        <p className="text-xs text-text-secondary mb-3">{t("dashboard.goLive.description")}</p>
+      <div className="bg-white rounded-2xl border-2 border-status-good-300 p-5">
+        <h3 className="text-[11px] font-extrabold text-status-good-700 uppercase tracking-[0.2em] mb-2 flex items-center gap-2">🚀 {t("dashboard.goLive.title")}</h3>
+        <p className="text-xs text-text-secondary mb-4 leading-snug">{t("dashboard.goLive.description")}</p>
         {goLiveStep === 0 && (
-          <button onClick={() => setGoLiveStep(1)} className="w-full py-3 rounded-xl bg-status-good-600 text-white font-bold text-sm hover:bg-status-good-700 transition-all active:scale-[0.98]">
+          <button onClick={() => setGoLiveStep(1)} className="w-full py-3.5 rounded-xl bg-status-good-600 text-white font-extrabold text-sm uppercase tracking-wider hover:bg-status-good-700 transition-all active:scale-[0.98]">
             {t("dashboard.goLive.button")}
           </button>
         )}
@@ -2712,10 +2744,13 @@ function DangerZone({ restaurantId, ownerId }: { restaurantId: string; ownerId: 
       </div>
 
       {/* Regular reset */}
-      <div className="bg-white rounded-2xl border border-status-bad-200 p-4">
-        <h3 className="text-sm font-semibold text-status-bad-700 uppercase tracking-wide mb-2">{t("dashboard.dangerZone")}</h3>
-        <p className="text-xs text-text-secondary mb-3">{t("dashboard.dangerZone.description")}</p>
-        <button onClick={handleClearAll} disabled={clearing} className="w-full py-3 rounded-xl bg-status-bad-600 text-white font-bold text-sm hover:bg-status-bad-700 disabled:opacity-50 transition-all active:scale-[0.98]">
+      <div className="bg-white rounded-2xl border-2 border-status-bad-200 p-5">
+        <h3 className="text-[11px] font-extrabold text-status-bad-700 uppercase tracking-[0.2em] mb-2 flex items-center gap-2">
+          <span className="w-2 h-2 rounded-full bg-status-bad-500 animate-pulse" />
+          {t("dashboard.dangerZone")}
+        </h3>
+        <p className="text-xs text-text-secondary mb-4 leading-snug">{t("dashboard.dangerZone.description")}</p>
+        <button onClick={handleClearAll} disabled={clearing} className="w-full py-3.5 rounded-xl bg-status-bad-600 text-white font-extrabold text-sm uppercase tracking-wider hover:bg-status-bad-700 disabled:opacity-50 transition-all active:scale-[0.98]">
           {clearing ? t("dashboard.resetting") : t("dashboard.resetAllData")}
         </button>
       </div>

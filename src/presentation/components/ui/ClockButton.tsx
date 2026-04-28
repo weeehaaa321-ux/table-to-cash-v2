@@ -1,6 +1,9 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { createPortal } from "react-dom";
+import { useLanguage } from "@/lib/use-language";
+import { RESTAURANT_TZ } from "@/lib/restaurant-config";
 
 // Clock-in / clock-out control for staff role pages.
 //
@@ -22,14 +25,23 @@ export function ClockButton({
   name?: string;
   role?: string;
 }) {
+  const { t, lang, dir } = useLanguage();
   const [state, setState] = useState<"loading" | "in" | "out">("loading");
   const [since, setSince] = useState<Date | null>(null);
   const [busy, setBusy] = useState(false);
   const [now, setNow] = useState(Date.now());
   const [error, setError] = useState<string | null>(null);
+  const [mounted, setMounted] = useState(false);
 
+  // Portal target only resolves after mount (document is undefined on
+  // SSR). Without this guard, the gate flashes inline for one paint
+  // before portaling on hydration.
+  useEffect(() => { setMounted(true); }, []);
+
+  // Tick every 30s — enough resolution for the elapsed pill and live
+  // wall-clock on the gate without burning render budget.
   useEffect(() => {
-    const tick = setInterval(() => setNow(Date.now()), 60000);
+    const tick = setInterval(() => setNow(Date.now()), 30_000);
     return () => clearInterval(tick);
   }, []);
 
@@ -66,43 +78,88 @@ export function ClockButton({
       if (res.ok) {
         await refresh();
       } else {
-        setError("Try again");
+        setError(t("clock.tryAgain"));
       }
     } catch {
-      setError("Network error");
+      setError(t("clock.networkError"));
     }
     setBusy(false);
   };
 
-  if (state === "loading") {
-    return <span className="text-[10px] text-text-muted">…</span>;
-  }
+  // Don't render an inline placeholder while loading — the gate slams
+  // in from nowhere if we render a tiny "…" first. Render nothing,
+  // wait for the fetch.
+  if (state === "loading") return null;
 
   // ── Gate mode: staff is not clocked in ─────────────────────
   if (state === "out") {
+    // Don't render the gate until we're past hydration. ClockButton is
+    // mounted inside a header that has `backdrop-filter: blur` on it,
+    // and `backdrop-filter` on a parent makes that parent the
+    // containing block for any `position: fixed` descendant. The gate
+    // would only cover the header's box, leaving the rest of the page
+    // interactive underneath. Portaling to <body> escapes the
+    // containing block so `inset-0` is finally relative to the
+    // viewport.
+    if (!mounted) return null;
+
     const firstName = name ? name.split(" ")[0] : "";
-    const roleLabel = role ? role.replace(/_/g, " ").toLowerCase() : "";
-    return (
+    const roleKey = role ? roleI18nKey(role) : null;
+    const roleLabel = roleKey ? t(roleKey) : "";
+    const wallClock = formatWallClock(now, lang);
+
+    const gate = (
       <div
-        className="fixed inset-0 z-[100] flex items-center justify-center px-6 animate-fade-in"
+        dir={dir}
+        className="z-[2147483647] flex items-center justify-center px-6 animate-fade-in"
         style={{
-          backdropFilter: "blur(24px) saturate(1.4)",
-          WebkitBackdropFilter: "blur(24px) saturate(1.4)",
+          // Explicit dimensions + top/left instead of inset-0. Some
+          // mobile browsers (and Safari with quirky ancestors) handle
+          // inset-0 inconsistently when fixed positioning involves
+          // dvh / safe-area math. width:100vw + height:100dvh is
+          // unambiguous.
+          position: "fixed",
+          top: 0,
+          left: 0,
+          width: "100vw",
+          height: "100dvh",
+          // Opaque-enough fallback in case backdrop-filter is throttled
+          // or unsupported (older WebViews). The gradient is solid;
+          // backdrop-filter just sweetens it on capable browsers.
           background:
-            "linear-gradient(135deg, rgba(255,245,235,0.55) 0%, rgba(224,242,254,0.55) 100%)",
+            "linear-gradient(135deg, rgba(255,245,235,0.92) 0%, rgba(224,242,254,0.92) 100%)",
+          backdropFilter: "blur(28px) saturate(1.4)",
+          WebkitBackdropFilter: "blur(28px) saturate(1.4)",
         }}
       >
-        <div className="w-full max-w-sm text-center">
-          <div className="mb-2 text-[11px] font-bold uppercase tracking-[0.2em] text-text-secondary">
-            {firstName ? `Welcome, ${firstName}` : "Welcome"}
+        <div className="w-full max-w-md text-center">
+          {/* Live wall-clock — anchors the screen and confirms the device clock matches the restaurant tz */}
+          <div className="text-[10px] font-extrabold uppercase tracking-[0.25em] text-text-muted mb-1.5">
+            {t("clock.now")}
+          </div>
+          <div className="text-5xl font-extrabold text-text-primary tabular-nums tracking-tight leading-none mb-8">
+            {wallClock}
+          </div>
+
+          {/* Welcome name — the actual greeting */}
+          <div className="mb-1 text-xs font-extrabold uppercase tracking-[0.2em] text-text-secondary">
+            {t("clock.welcome")}
+          </div>
+          <div className="text-3xl font-extrabold text-text-primary tracking-tight leading-tight mb-2">
+            {firstName || t("clock.welcomeNoName")}
           </div>
           {roleLabel && (
-            <div className="mb-8 text-xs text-text-muted capitalize">{roleLabel}</div>
+            <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-sand-100 border border-sand-200 text-text-secondary text-[11px] font-extrabold uppercase tracking-widest mb-10">
+              {roleLabel}
+            </div>
           )}
+
+          {!roleLabel && <div className="mb-10" />}
+
           <button
             onClick={toggle}
             disabled={busy}
-            className={`group relative w-48 h-48 rounded-full flex flex-col items-center justify-center mx-auto mb-6 bg-status-good-500 shadow-[0_20px_60px_rgba(16,185,129,0.35)] transition-all active:scale-95 ${
+            className={`group relative w-52 h-52 rounded-full flex flex-col items-center justify-center mx-auto mb-6 bg-status-good-500 shadow-[0_20px_60px_rgba(16,185,129,0.35)] transition-all active:scale-95 ${
               busy ? "opacity-75" : "hover:bg-status-good-600 hover:shadow-[0_25px_70px_rgba(16,185,129,0.45)]"
             }`}
           >
@@ -119,19 +176,21 @@ export function ClockButton({
               <circle cx="12" cy="12" r="10" />
               <polyline points="12 6 12 12 16 14" />
             </svg>
-            <span className="text-white font-semibold text-xl tracking-wide uppercase">
-              {busy ? "…" : "Clock In"}
+            <span className="text-white font-extrabold text-xl tracking-wider uppercase">
+              {busy ? t("clock.starting") : t("clock.clockIn")}
             </span>
           </button>
-          <p className="text-xs text-text-secondary leading-relaxed">
-            Start your shift timer to unlock your {roleLabel || "staff"} view.
+          <p className="text-xs text-text-secondary leading-relaxed max-w-[18rem] mx-auto">
+            {t("clock.unlockMessage")}
           </p>
           {error && (
-            <p className="mt-3 text-xs font-semibold text-status-bad-600">{error}</p>
+            <p className="mt-3 text-xs font-extrabold text-status-bad-600">{error}</p>
           )}
         </div>
       </div>
     );
+
+    return createPortal(gate, document.body);
   }
 
   // ── Pill mode: clocked in, show elapsed time + clock-out ───
@@ -144,13 +203,42 @@ export function ClockButton({
     <button
       onClick={toggle}
       disabled={busy}
-      title="Clock out"
-      className={`inline-flex items-center gap-1.5 px-3 h-8 rounded-xl text-[11px] font-bold uppercase tracking-wider transition active:scale-95 bg-status-good-100 text-status-good-700 hover:bg-status-good-200 ${
+      title={t("clock.clockOut")}
+      className={`inline-flex items-center gap-1.5 px-3 h-8 rounded-xl text-[11px] font-extrabold uppercase tracking-wider transition active:scale-95 bg-status-good-100 text-status-good-700 hover:bg-status-good-200 ${
         busy ? "opacity-50" : ""
       }`}
     >
       <span className="w-1.5 h-1.5 rounded-full bg-status-good-500 animate-pulse" />
-      On · {elapsedLabel}
+      {t("clock.on")} · <span className="tabular-nums">{elapsedLabel}</span>
     </button>
   );
+}
+
+// Map raw role enum to the existing dashboard.role.* i18n key surface.
+function roleI18nKey(role: string): string | null {
+  const r = role.toUpperCase();
+  if (r === "WAITER") return "dashboard.role.waiter";
+  if (r === "KITCHEN") return "dashboard.role.kitchen";
+  if (r === "BAR") return "dashboard.role.bar";
+  if (r === "CASHIER") return "dashboard.role.cashier";
+  if (r === "FLOOR_MANAGER") return "dashboard.role.floorMgr";
+  if (r === "DELIVERY") return "dashboard.role.driver";
+  return null;
+}
+
+// Wall-clock formatter — uses the restaurant's tz so a clerk on a phone
+// set to a different timezone still sees the restaurant's local time
+// when they walk in to clock on.
+function formatWallClock(epochMs: number, lang: string): string {
+  try {
+    return new Intl.DateTimeFormat(lang === "ar" ? "ar-EG" : "en-GB", {
+      timeZone: RESTAURANT_TZ,
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: false,
+    }).format(epochMs);
+  } catch {
+    const d = new Date(epochMs);
+    return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+  }
 }

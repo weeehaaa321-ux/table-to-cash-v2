@@ -5,6 +5,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { ClockButton } from "@/presentation/components/ui/ClockButton";
 import LogoutButton from "@/presentation/components/ui/LogoutButton";
 import SchedulePopup from "@/presentation/components/ui/SchedulePopup";
+import { OrderHistoryDrawer } from "@/presentation/components/ui/OrderHistoryDrawer";
 import { LanguageToggle } from "@/presentation/components/ui/LanguageToggle";
 import { getOrderTag } from "@/lib/order-label";
 import { useLanguage } from "@/lib/use-language";
@@ -53,6 +54,7 @@ export function FloorManagerView({ staff }: { staff: LoggedInStaff }) {
   const [showSchedule, setShowSchedule] = useState(false);
   const [showSnapshot, setShowSnapshot] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
+  const [showOrderHistory, setShowOrderHistory] = useState(false);
   const [showIssueForm, setShowIssueForm] = useState(false);
   const commsInputRef = useRef<HTMLInputElement | null>(null);
 
@@ -89,6 +91,7 @@ export function FloorManagerView({ staff }: { staff: LoggedInStaff }) {
         actionHistoryCount={d.actionHistory.length}
         onOpenIssue={() => setShowIssueForm(true)}
         onOpenHistory={() => setShowHistory(true)}
+        onOpenOrderHistory={() => setShowOrderHistory(true)}
         onOpenSnapshot={() => setShowSnapshot(true)}
         onOpenSchedule={() => setShowSchedule(true)}
       />
@@ -359,6 +362,14 @@ export function FloorManagerView({ staff }: { staff: LoggedInStaff }) {
             onClose={() => setShowHistory(false)}
           />
         )}
+        {showOrderHistory && (
+          <OrderHistoryDrawer
+            key="order-history"
+            orders={d.orders}
+            role="floor"
+            onClose={() => setShowOrderHistory(false)}
+          />
+        )}
       </AnimatePresence>
     </div>
   );
@@ -370,7 +381,7 @@ export function FloorManagerView({ staff }: { staff: LoggedInStaff }) {
 
 function HeaderBar({
   staff, shiftLabel, shiftProgressPct, criticalCount, warningCount,
-  actionHistoryCount, onOpenIssue, onOpenHistory, onOpenSnapshot, onOpenSchedule,
+  actionHistoryCount, onOpenIssue, onOpenHistory, onOpenOrderHistory, onOpenSnapshot, onOpenSchedule,
 }: {
   staff: LoggedInStaff;
   shiftLabel: string;
@@ -380,6 +391,7 @@ function HeaderBar({
   actionHistoryCount: number;
   onOpenIssue: () => void;
   onOpenHistory: () => void;
+  onOpenOrderHistory: () => void;
   onOpenSnapshot: () => void;
   onOpenSchedule: () => void;
 }) {
@@ -452,6 +464,9 @@ function HeaderBar({
           <HeaderIconButton title={t("floor.actionHistory")} onClick={onOpenHistory} badge={actionHistoryCount}>
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 12a9 9 0 1 0 9-9 9.74 9.74 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/><path d="M12 7v5l4 2"/></svg>
           </HeaderIconButton>
+          <HeaderIconButton title="Order history" onClick={onOpenOrderHistory}>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
+          </HeaderIconButton>
           <HeaderIconButton title={t("floor.shiftSnapshot")} onClick={onOpenSnapshot}>
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="9" y1="3" x2="9" y2="21"/></svg>
           </HeaderIconButton>
@@ -471,6 +486,9 @@ function HeaderBar({
             <div className="absolute end-0 top-10 z-50 w-56 rounded-xl border border-sand-200 bg-white shadow-lg py-1">
               <MenuRow label={t("floor.actionHistory")} badge={actionHistoryCount} onClick={() => { setMenuOpen(false); onOpenHistory(); }}>
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 12a9 9 0 1 0 9-9 9.74 9.74 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/><path d="M12 7v5l4 2"/></svg>
+              </MenuRow>
+              <MenuRow label="Order history" onClick={() => { setMenuOpen(false); onOpenOrderHistory(); }}>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
               </MenuRow>
               <MenuRow label={t("floor.shiftSnapshot")} onClick={() => { setMenuOpen(false); onOpenSnapshot(); }}>
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="9" y1="3" x2="9" y2="21"/></svg>
@@ -715,27 +733,27 @@ function AttentionAlertCard({ alert, now, onAction, onDismiss }: {
       exit={{ opacity: 0, x: 8 }}
       className="px-4 py-3"
     >
-      <div className="flex items-center gap-2 mb-1">
-        <span className={`w-1.5 h-1.5 rounded-full ${toneMap.badge} ${toneMap.pulse}`} />
-        <span className="text-[9px] font-semibold uppercase tracking-widest text-text-muted">{age}{t("common.minutes")}</span>
-        <span className={`ml-auto text-[9px] font-semibold uppercase tracking-widest ${toneMap.text}`}>{alert.severity}</span>
+      <div className="flex items-center gap-2 mb-2">
+        <span className={`w-2 h-2 rounded-full ${toneMap.badge} ${toneMap.pulse}`} />
+        <span className="text-[10px] font-extrabold tabular-nums uppercase tracking-widest text-text-muted">{age}{t("common.minutes")}</span>
+        <span className={`ml-auto text-[10px] font-extrabold uppercase tracking-widest ${toneMap.text}`}>{alert.severity}</span>
       </div>
-      <div className="flex items-start gap-2">
-        <div className={`flex-shrink-0 w-9 h-9 rounded-lg ${toneMap.badge} ${toneMap.pulse} text-white flex items-center justify-center text-xs font-semibold`}>
+      <div className="flex items-start gap-2.5">
+        <div className={`flex-shrink-0 w-11 h-11 rounded-lg ${toneMap.badge} ${toneMap.pulse} text-white flex items-center justify-center text-sm font-extrabold`}>
           {alert.tableNumber || ALERT_ICONS[alert.type] || "!"}
         </div>
         <div className="flex-1 min-w-0">
-          <p className="text-[12px] font-bold text-text-primary leading-tight">{alert.message}</p>
-          <p className="text-[10px] text-text-secondary mt-0.5">{alert.suggestedAction}</p>
+          <p className="text-sm font-extrabold text-text-primary leading-tight">{alert.message}</p>
+          <p className="text-[11px] text-text-secondary mt-1 leading-snug">{alert.suggestedAction}</p>
         </div>
       </div>
-      <div className="flex items-center gap-1.5 mt-2">
+      <div className="flex items-center gap-1.5 mt-2.5">
         <button onClick={() => onAction(alert)}
-          className={`flex-1 h-7 rounded-lg text-[10px] font-semibold uppercase tracking-wider text-white ${toneMap.badge} active:scale-95 transition`}>
+          className={`flex-1 h-9 rounded-lg text-[11px] font-extrabold uppercase tracking-wider text-white ${toneMap.badge} active:scale-95 transition`}>
           {t("floor.fix")}
         </button>
         <button onClick={() => onDismiss(alert.id)}
-          className="w-7 h-7 rounded-lg text-text-muted hover:bg-sand-100 text-sm">×</button>
+          className="w-9 h-9 rounded-lg text-text-muted hover:bg-sand-100 text-base font-bold">×</button>
       </div>
     </motion.div>
   );
@@ -760,23 +778,23 @@ function AttentionOrderCard({ order, session, now, onClick }: {
   return (
     <button onClick={onClick}
       className="w-full text-left px-4 py-3 hover:bg-sand-50 transition">
-      <div className="flex items-center gap-2 mb-1">
-        <span className={`w-1.5 h-1.5 rounded-full ${toneMap.badge}`} />
-        <span className="text-[9px] font-semibold uppercase tracking-widest text-text-muted">{waitMin}{t("common.minutes")}</span>
-        <span className={`ml-auto text-[9px] font-semibold uppercase tracking-widest ${toneMap.text}`}>
+      <div className="flex items-center gap-2 mb-2">
+        <span className={`w-2 h-2 rounded-full ${toneMap.badge}`} />
+        <span className="text-[10px] font-extrabold tabular-nums uppercase tracking-widest text-text-muted">{waitMin}{t("common.minutes")}</span>
+        <span className={`ml-auto text-[10px] font-extrabold uppercase tracking-widest ${toneMap.text}`}>
           {isStuck ? t("floor.stuck") : isReady ? t("floor.readyToServe") : t("floor.preparing")}
         </span>
       </div>
-      <div className="flex items-start gap-2">
-        <div className={`flex-shrink-0 w-9 h-9 rounded-lg ${toneMap.badge} text-white flex items-center justify-center text-[10px] font-semibold`}>
+      <div className="flex items-start gap-2.5">
+        <div className={`flex-shrink-0 w-11 h-11 rounded-lg ${toneMap.badge} text-white flex items-center justify-center text-xs font-extrabold`}>
           {order.tableNumber ? `T${order.tableNumber}` : getOrderTag(order)}
         </div>
         <div className="flex-1 min-w-0">
-          <p className="text-[12px] font-bold text-text-primary leading-tight">
+          <p className="text-sm font-extrabold text-text-primary leading-tight">
             #{order.orderNumber}
-            {order.items.length > 0 && <span className="font-normal text-text-secondary"> — {order.items.slice(0, 2).map((i) => i.name).join(", ")}</span>}
+            {order.items.length > 0 && <span className="font-medium text-text-secondary"> — {order.items.slice(0, 2).map((i) => i.name).join(", ")}</span>}
           </p>
-          <p className="text-[10px] text-text-muted mt-0.5">
+          <p className="text-[11px] text-text-muted mt-1 font-medium">
             {session?.waiterName || t("floor.noWaiter")}
           </p>
         </div>
@@ -803,11 +821,33 @@ function FloorMap({
   onSelect: (tb: TableState) => void;
 }) {
   const { t } = useLanguage();
+  // Mobile collapse — the grid eats most of the viewport on small
+  // phones, pushing attention queue and staff radar below the fold.
+  // Default collapsed on mobile, expanded on desktop. Persists across
+  // refreshes per device so the FM doesn't have to retoggle every shift.
+  const [collapsed, setCollapsed] = useState<boolean>(() => {
+    if (typeof window === "undefined") return false;
+    const saved = window.localStorage.getItem("floor.mapCollapsed");
+    if (saved === "1") return true;
+    if (saved === "0") return false;
+    // First visit: collapsed on mobile widths, expanded on tablet/desktop.
+    return window.matchMedia("(max-width: 767px)").matches;
+  });
+  const toggle = () => {
+    setCollapsed((prev) => {
+      const next = !prev;
+      try { window.localStorage.setItem("floor.mapCollapsed", next ? "1" : "0"); } catch {}
+      return next;
+    });
+  };
   const waiterColorIndex = useMemo(() => {
     const m = new Map<string, number>();
     allStaff.filter((s) => s.role === "WAITER").forEach((s, i) => m.set(s.id, i % WAITER_PALETTE.length));
     return m;
   }, [allStaff]);
+
+  const occupied = tables.filter((tb) => tb.status !== "empty").length;
+  const alertCount = alerts.length;
 
   return (
     <div className="rounded-2xl bg-white border border-sand-200 p-3">
@@ -815,11 +855,31 @@ function FloorMap({
           inline on md+. Mode pills become a scrollable segmented control so
           they never overflow regardless of viewport width. */}
       <div className="mb-2.5 flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
-        <div>
-          <p className="text-[10px] font-semibold uppercase tracking-widest text-text-muted">{t("floor.floor")}</p>
-          <p className="text-sm font-semibold text-text-primary tabular-nums">{tables.filter((t) => t.status !== "empty").length}/{tables.length} {t("floor.tables").toLowerCase()}</p>
-        </div>
-        <div className="flex items-center gap-0.5 p-0.5 rounded-lg bg-sand-100 overflow-x-auto no-scrollbar self-stretch md:self-auto">
+        <button
+          onClick={toggle}
+          aria-expanded={!collapsed}
+          aria-label={collapsed ? "Expand tables" : "Collapse tables"}
+          className="flex items-center gap-3 text-left active:opacity-70 transition"
+        >
+          <span className="w-7 h-7 rounded-lg bg-sand-100 flex items-center justify-center flex-shrink-0">
+            <svg
+              className={`w-4 h-4 text-text-secondary transition-transform ${collapsed ? "" : "rotate-90"}`}
+              viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"
+            >
+              <polyline points="9 18 15 12 9 6" />
+            </svg>
+          </span>
+          <div>
+            <p className="text-[10px] font-extrabold uppercase tracking-[0.2em] text-text-muted">{t("floor.floor")}</p>
+            <p className="text-sm font-extrabold text-text-primary tabular-nums">
+              {occupied}/{tables.length} {t("floor.tables").toLowerCase()}
+              {collapsed && alertCount > 0 && (
+                <span className="ml-2 text-status-bad-600">· {alertCount} alert{alertCount === 1 ? "" : "s"}</span>
+              )}
+            </p>
+          </div>
+        </button>
+        <div className={`flex items-center gap-0.5 p-0.5 rounded-lg bg-sand-100 overflow-x-auto no-scrollbar self-stretch md:self-auto ${collapsed ? "hidden md:flex" : ""}`}>
           {(["status", "age", "revenue", "waiter"] as FloorMode[]).map((m) => (
             <button key={m} onClick={() => onChangeMode(m)}
               className={`flex-1 md:flex-initial px-2.5 h-7 rounded-md text-[10px] font-semibold uppercase tracking-wider transition whitespace-nowrap ${
@@ -831,8 +891,11 @@ function FloorMap({
         </div>
       </div>
 
-      {/* Table grid — 3 columns on small phones, then scales up */}
-      <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-[repeat(auto-fill,minmax(110px,1fr))] gap-2">
+      {/* Table grid — denser than the waiter's so the FM gets a
+          floor-wide read in one glance. 4 cols on phones, 5 on small
+          tablets, auto-fill at 95px on bigger screens. Tile typography
+          dials back inside TableCard so the table number still reads. */}
+      <div className={`grid grid-cols-4 sm:grid-cols-5 md:grid-cols-[repeat(auto-fill,minmax(95px,1fr))] gap-1.5 sm:gap-2 ${collapsed ? "hidden" : ""}`}>
         {tables.map((table) => {
           const session = sessions.find((s) => s.tableNumber === table.id && s.status === "OPEN");
           const order = orders.find((o) => o.tableNumber === table.id && !["paid", "cancelled", "served"].includes(o.status));
@@ -937,23 +1000,26 @@ function TableCard({
       whileTap={{ scale: 0.96 }}
       className={`relative aspect-square rounded-xl border-2 ${bgClass} overflow-hidden flex flex-col transition-all hover:shadow-md ${hasAlert ? "ring-2 ring-status-bad-400 ring-offset-2 ring-offset-white" : ""}`}
     >
-      {/* Top row — number + waiter initial */}
+      {/* Top row — table number is the hero. Eyebrow + giant number.
+          Typography tightens on dense layouts (mobile/tablet) and
+          opens up on desktop where tiles are larger. */}
       <div className="flex-1 flex flex-col items-center justify-center leading-none gap-0.5">
-        <span className="text-xl font-semibold text-text-primary tabular-nums">{table.id}</span>
+        <span className="text-[7px] sm:text-[8px] font-extrabold text-text-muted uppercase tracking-[0.2em]">T</span>
+        <span className="text-3xl md:text-4xl font-extrabold text-text-primary tabular-nums tracking-tight leading-none">{table.id}</span>
         {session?.waiterName && mode !== "waiter" && (
-          <span className="text-[9px] font-semibold text-ocean-600">{initials(session.waiterName)}</span>
+          <span className="text-[9px] md:text-[10px] font-extrabold text-ocean-600 tracking-wider mt-0.5">{initials(session.waiterName)}</span>
         )}
         {mode === "age" && table.status !== "empty" && (
-          <span className="text-[10px] font-semibold tabular-nums text-text-secondary">{seatedMin}m</span>
+          <span className="text-[10px] md:text-[11px] font-extrabold tabular-nums text-text-secondary mt-0.5">{seatedMin}m</span>
         )}
         {mode === "revenue" && unpaid > 0 && (
-          <span className="text-[10px] font-semibold tabular-nums text-status-good-700">{unpaid}</span>
+          <span className="text-[10px] md:text-[11px] font-extrabold tabular-nums text-status-good-700 mt-0.5">{unpaid}</span>
         )}
       </div>
 
       {/* Bottom metadata strip */}
       {table.status !== "empty" && (
-        <div className="px-1 py-0.5 flex items-center justify-between text-[8px] text-text-secondary font-bold">
+        <div className="px-1.5 py-0.5 flex items-center justify-between text-[9px] text-text-secondary font-extrabold">
           <span className="tabular-nums">{table.guestCount}g</span>
           {mode !== "age" && <span className="tabular-nums">{seatedMin}m</span>}
           {unpaid > 0 && mode !== "revenue" && <span className="tabular-nums text-status-good-600">{unpaid}</span>}
@@ -1100,15 +1166,36 @@ function StaffLivePanel({
   onSelectWaiterTable: (s: SessionInfo) => void;
 }) {
   const { t } = useLanguage();
-  const [expanded, setExpanded] = useState<string | null>(null);
-  // Show ALL active waiters — on-shift first, off-shift below but still
-  // visible. The floor manager was missing people who were clocked in
-  // but scheduled off, or vice versa.
-  const onShiftWaiters = waiterMetrics.filter((w) => w.onShift);
-  const offShiftWaiters = waiterMetrics.filter((w) => !w.onShift);
+  const [openStation, setOpenStation] = useState<string | null>(null);
+
+  // Order waiters: overloaded first (need rebalancing), then heavy,
+  // then busy, then idle (have capacity). Off-shift go to the bottom.
+  const loadRank: Record<string, number> = { overloaded: 0, heavy: 1, busy: 2, idle: 3 };
+  const sortedWaiters = useMemo(
+    () =>
+      [...waiterMetrics].sort((a, b) => {
+        if (a.onShift !== b.onShift) return a.onShift ? -1 : 1;
+        return (loadRank[a.load] ?? 4) - (loadRank[b.load] ?? 4);
+      }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [waiterMetrics],
+  );
+
   const clockedInCount = waiterMetrics.filter((w) => w.isClockedIn).length;
-  // Group other roles so the cashiers/kitchen/bar/delivery presence is
-  // visible without leaving this panel.
+
+  // Anomaly callouts — names + counts so the FM acts on a person, not
+  // a number. Computed once per render.
+  const overloaded = waiterMetrics.filter((w) => w.load === "overloaded");
+  const idle = waiterMetrics.filter((w) => w.load === "idle" && w.onShift && w.isClockedIn);
+  const late = waiterMetrics.filter((w) => w.onShift && !w.isClockedIn);
+  const overtime = waiterMetrics.filter((w) => !w.onShift && w.isClockedIn);
+  const hasAnomalies =
+    overloaded.length > 0 ||
+    late.length > 0 ||
+    overtime.length > 0 ||
+    unassignedSessions.length > 0;
+
+  // Group other roles for the stations grid at the bottom.
   const grouped: Record<string, import("./types").StaffPresence[]> = {};
   for (const p of staffPresence) {
     (grouped[p.role] = grouped[p.role] || []).push(p);
@@ -1123,196 +1210,351 @@ function StaffLivePanel({
   };
 
   return (
-    <div className="rounded-2xl bg-white border border-sand-200">
-      <div className="px-4 py-3 border-b border-sand-100 flex items-center justify-between">
-        <div>
-          <p className="text-[10px] font-semibold uppercase tracking-widest text-text-muted">{t("floor.staffRadar")}</p>
-          <p className="text-[10px] text-text-secondary tabular-nums mt-0.5">
+    <div className="rounded-2xl bg-white border border-sand-200 overflow-hidden">
+      {/* Header — title + at-a-glance counts */}
+      <div className="px-4 py-3 border-b border-sand-100 flex items-center justify-between gap-3">
+        <div className="min-w-0">
+          <p className="text-[11px] font-extrabold uppercase tracking-[0.2em] text-text-primary">{t("floor.staffRadar")}</p>
+          <p className="text-[10px] text-text-secondary tabular-nums mt-1 font-bold">
             {waiterMetrics.length > 0
-              ? `${waiterMetrics.length} ${t("floor.waiters").toLowerCase()} · ${clockedInCount} ${t("floor.clockedInShort")}`
+              ? `${clockedInCount}/${waiterMetrics.length} ${t("floor.waiters").toLowerCase()} ${t("floor.clockedInShort")}`
               : t("floor.noStaff")
             }
           </p>
         </div>
-        {loadSummary.overloaded > 0 && (
-          <span className="text-[9px] font-semibold px-1.5 py-0.5 rounded bg-status-bad-100 text-status-bad-700 uppercase">
-            {loadSummary.overloaded} {t("floor.overloaded")}
-          </span>
+        {/* Quick load summary — color dots, not text */}
+        {waiterMetrics.length > 0 && (
+          <div className="flex items-center gap-1.5 flex-shrink-0">
+            {loadSummary.idle > 0 && (
+              <span className="inline-flex items-center gap-1 text-[10px] font-extrabold tabular-nums text-text-secondary">
+                <span className="w-2 h-2 rounded-full bg-sand-300" />{loadSummary.idle}
+              </span>
+            )}
+            {loadSummary.busy > 0 && (
+              <span className="inline-flex items-center gap-1 text-[10px] font-extrabold tabular-nums text-status-good-700">
+                <span className="w-2 h-2 rounded-full bg-status-good-500" />{loadSummary.busy}
+              </span>
+            )}
+            {loadSummary.heavy > 0 && (
+              <span className="inline-flex items-center gap-1 text-[10px] font-extrabold tabular-nums text-status-warn-700">
+                <span className="w-2 h-2 rounded-full bg-status-warn-500" />{loadSummary.heavy}
+              </span>
+            )}
+            {loadSummary.overloaded > 0 && (
+              <span className="inline-flex items-center gap-1 text-[10px] font-extrabold tabular-nums text-status-bad-700">
+                <span className="w-2 h-2 rounded-full bg-status-bad-500 animate-pulse" />{loadSummary.overloaded}
+              </span>
+            )}
+          </div>
         )}
       </div>
 
-      {unassignedSessions.length > 0 && (
-        <div className="px-4 py-2 bg-status-warn-50 border-b border-status-warn-100">
-          <p className="text-[9px] font-semibold uppercase tracking-wide text-status-warn-700 mb-1.5">
-            {t("floor.unassignedSessions")} ({unassignedSessions.length})
+      {/* ── Anomaly callouts ─────────────────────────────────────
+          Surfaces names (not counts) so the FM acts on a specific
+          person. Only renders if something's wrong. */}
+      {hasAnomalies && (
+        <div className="px-4 py-2.5 border-b border-sand-100 bg-sand-50/60 space-y-1.5">
+          {unassignedSessions.length > 0 && (
+            <AnomalyRow
+              tone="warn"
+              label={`${unassignedSessions.length} ${t("floor.unassignedSessions").toLowerCase()}`}
+            >
+              <div className="flex flex-wrap gap-1">
+                {unassignedSessions.slice(0, 6).map((s) => (
+                  <button
+                    key={s.id}
+                    onClick={() => onSelectWaiterTable(s)}
+                    className="px-2 py-0.5 rounded-md bg-white border border-status-warn-300 text-[11px] font-extrabold text-status-warn-700 hover:bg-status-warn-100 transition tabular-nums"
+                  >
+                    T{s.tableNumber}
+                  </button>
+                ))}
+                {unassignedSessions.length > 6 && (
+                  <span className="px-1.5 py-0.5 text-[10px] font-extrabold text-status-warn-700">
+                    +{unassignedSessions.length - 6}
+                  </span>
+                )}
+              </div>
+            </AnomalyRow>
+          )}
+          {overloaded.length > 0 && (
+            <AnomalyRow tone="bad" label={`${overloaded.length} ${t("floor.overloaded").toLowerCase()}`}>
+              <span className="text-[11px] font-extrabold text-status-bad-700">
+                {overloaded.map((w) => w.name.split(" ")[0]).join(", ")}
+              </span>
+            </AnomalyRow>
+          )}
+          {late.length > 0 && (
+            <AnomalyRow tone="warn" label={t("floor.notClockedInLabel")}>
+              <span className="text-[11px] font-extrabold text-status-warn-700">
+                {late.map((w) => w.name.split(" ")[0]).join(", ")}
+              </span>
+            </AnomalyRow>
+          )}
+          {overtime.length > 0 && (
+            <AnomalyRow tone="info" label={t("floor.pastShiftLabel")}>
+              <span className="text-[11px] font-extrabold text-status-info-700">
+                {overtime.map((w) => w.name.split(" ")[0]).join(", ")}
+              </span>
+            </AnomalyRow>
+          )}
+        </div>
+      )}
+
+      {/* ── Waiters list ───────────────────────────────────────── */}
+      {sortedWaiters.length === 0 ? (
+        <div className="p-6 text-center text-[11px] text-text-muted">{t("floor.noStaff")}</div>
+      ) : (
+        <div className="divide-y divide-sand-100">
+          {sortedWaiters.map((w) => (
+            <WaiterRow
+              key={w.id}
+              w={w}
+              unassignedSessions={unassignedSessions}
+              onReassign={onReassign}
+              onClockOut={onClockOut}
+              onMessage={onMessage}
+            />
+          ))}
+        </div>
+      )}
+
+      {/* ── Stations health grid ───────────────────────────────── */}
+      {Object.keys(grouped).length > 0 && (
+        <div className="border-t border-sand-100 p-3 bg-sand-50/40">
+          <p className="text-[10px] font-extrabold uppercase tracking-[0.2em] text-text-muted mb-2">
+            {t("floor.otherRoles")}
           </p>
-          <div className="flex flex-wrap gap-1">
-            {unassignedSessions.slice(0, 6).map((s) => (
-              <button key={s.id}
-                onClick={() => onSelectWaiterTable(s)}
-                className="px-2 py-1 rounded-md bg-white border border-status-warn-200 text-[10px] font-semibold text-status-warn-700 hover:bg-status-warn-100 transition">
-                T{s.tableNumber}
-              </button>
-            ))}
+          <div className="grid grid-cols-2 gap-2">
+            {roleOrder.filter((r) => grouped[r]?.length).map((role) => {
+              const members = grouped[role];
+              const onShiftClocked = members.filter((p) => p.onShift && p.isClockedIn).length;
+              const onShiftTotal = members.filter((p) => p.onShift).length;
+              const offShiftClocked = members.filter((p) => !p.onShift && p.isClockedIn).length;
+              // Coverage health: green if all on-shift staff are clocked in, amber if some, red if none.
+              const tone =
+                onShiftTotal === 0 ? "muted"
+                : onShiftClocked === 0 ? "bad"
+                : onShiftClocked < onShiftTotal ? "warn"
+                : "good";
+              const toneCls = {
+                good: "bg-status-good-50 border-status-good-200 text-status-good-700",
+                warn: "bg-status-warn-50 border-status-warn-200 text-status-warn-700",
+                bad: "bg-status-bad-50 border-status-bad-200 text-status-bad-700",
+                muted: "bg-sand-50 border-sand-200 text-text-secondary",
+              }[tone];
+              const dotCls = {
+                good: "bg-status-good-500",
+                warn: "bg-status-warn-500",
+                bad: "bg-status-bad-500 animate-pulse",
+                muted: "bg-sand-400",
+              }[tone];
+              const isOpen = openStation === role;
+              return (
+                <button
+                  key={role}
+                  onClick={() => setOpenStation(isOpen ? null : role)}
+                  className={`text-left p-2.5 rounded-xl border-2 transition active:scale-95 ${toneCls}`}
+                >
+                  <div className="flex items-center gap-1.5 mb-1">
+                    <span className={`w-2 h-2 rounded-full flex-shrink-0 ${dotCls}`} />
+                    <span className="text-[10px] font-extrabold uppercase tracking-wider truncate">
+                      {roleLabels[role] || role}
+                    </span>
+                  </div>
+                  <div className="text-base font-extrabold tabular-nums leading-none">
+                    {onShiftClocked}<span className="text-text-muted">/{onShiftTotal || members.length}</span>
+                  </div>
+                  {offShiftClocked > 0 && !isOpen && (
+                    <div className="text-[9px] text-text-muted font-bold mt-1 truncate">
+                      +{offShiftClocked} {t("floor.off").toLowerCase()}
+                    </div>
+                  )}
+                  {isOpen && (
+                    <div className="mt-2 pt-2 border-t border-current/20 space-y-0.5">
+                      {members.map((p) => (
+                        <div key={p.id} className="flex items-center gap-1.5 text-[10px] font-bold">
+                          <ClockBulb on={p.isClockedIn} />
+                          <span className="truncate flex-1">{p.name}</span>
+                          {!p.onShift && <span className="text-[8px] opacity-60 uppercase">{t("floor.off")}</span>}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </button>
+              );
+            })}
           </div>
         </div>
       )}
 
-      {/* Waiters — on-shift with full load detail */}
-      {onShiftWaiters.length === 0 && offShiftWaiters.length === 0 ? (
-        <div className="p-6 text-center text-[11px] text-text-muted">{t("floor.noStaff")}</div>
-      ) : (
-        <>
-          {onShiftWaiters.length > 0 && (
-            <div className="divide-y divide-sand-100">
-              {onShiftWaiters.map((w) => (
-                <WaiterRow
-                  key={w.id}
-                  w={w}
-                  isExpanded={expanded === w.id}
-                  onToggle={() => setExpanded(expanded === w.id ? null : w.id)}
-                  unassignedSessions={unassignedSessions}
-                  onReassign={onReassign}
-                  onClockOut={onClockOut}
-                  onMessage={onMessage}
-                />
-              ))}
-            </div>
-          )}
-
-          {/* Off-shift waiters — present but muted. Still show clock state
-              so the floor mgr can spot an off-shift waiter who's still
-              clocked in (or an on-shift one who hasn't clocked in yet). */}
-          {offShiftWaiters.length > 0 && (
-            <div className="border-t border-sand-100 bg-sand-50/60">
-              <p className="px-4 pt-2 pb-1 text-[9px] font-semibold uppercase tracking-widest text-text-muted">
-                {t("floor.offShift")} ({offShiftWaiters.length})
-              </p>
-              <div className="px-3 pb-2 flex flex-wrap gap-1.5">
-                {offShiftWaiters.map((w) => (
-                  <span key={w.id} className="inline-flex items-center gap-1.5 px-2 py-1 rounded-md bg-white border border-sand-200 text-[10px] text-text-secondary">
-                    <ClockBulb on={w.isClockedIn} />
-                    <span className="font-bold">{w.name}</span>
-                  </span>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {/* Other roles — presence + clock state by group */}
-          {Object.keys(grouped).length > 0 && (
-            <div className="border-t border-sand-100 px-3 py-2 space-y-2">
-              <p className="text-[9px] font-semibold uppercase tracking-widest text-text-muted">{t("floor.otherRoles")}</p>
-              {roleOrder.filter((r) => grouped[r]?.length).map((role) => (
-                <div key={role}>
-                  <p className="text-[9px] font-bold uppercase text-text-muted mb-1">{roleLabels[role] || role}</p>
-                  <div className="flex flex-wrap gap-1.5">
-                    {grouped[role].map((p) => (
-                      <span key={p.id}
-                        className={`inline-flex items-center gap-1.5 px-2 py-1 rounded-md border text-[10px] ${
-                          p.onShift ? "bg-white border-sand-200 text-text-secondary" : "bg-sand-100 border-sand-200 text-text-secondary"
-                        }`}>
-                        <ClockBulb on={p.isClockedIn} />
-                        <span className="font-bold truncate max-w-[7rem]">{p.name}</span>
-                        {!p.onShift && <span className="text-[8px] opacity-60 uppercase">{t("floor.off")}</span>}
-                      </span>
-                    ))}
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </>
+      {/* Hint — only when everyone idle and FM might think it's broken */}
+      {!hasAnomalies && idle.length > 0 && idle.length === waiterMetrics.filter((w) => w.onShift).length && (
+        <div className="px-4 py-2 border-t border-sand-100 bg-status-good-50 text-[10px] font-extrabold text-status-good-700 uppercase tracking-wider text-center">
+          {t("floor.allClear")}
+        </div>
       )}
     </div>
   );
 }
 
+function AnomalyRow({
+  tone, label, children,
+}: {
+  tone: "bad" | "warn" | "info";
+  label: string;
+  children: React.ReactNode;
+}) {
+  const dotCls = {
+    bad: "bg-status-bad-500 animate-pulse",
+    warn: "bg-status-warn-500",
+    info: "bg-status-info-500",
+  }[tone];
+  const labelCls = {
+    bad: "text-status-bad-700",
+    warn: "text-status-warn-700",
+    info: "text-status-info-700",
+  }[tone];
+  return (
+    <div className="flex items-start gap-2">
+      <span className={`w-1.5 h-1.5 rounded-full mt-1.5 flex-shrink-0 ${dotCls}`} />
+      <div className="flex-1 min-w-0">
+        <span className={`text-[9px] font-extrabold uppercase tracking-widest ${labelCls}`}>{label}</span>
+        <div className="mt-0.5">{children}</div>
+      </div>
+    </div>
+  );
+}
+
 function WaiterRow({
-  w, isExpanded, onToggle, unassignedSessions, onReassign, onClockOut, onMessage,
+  w, unassignedSessions, onReassign, onClockOut, onMessage,
 }: {
   w: WaiterMetric;
-  isExpanded: boolean;
-  onToggle: () => void;
   unassignedSessions: SessionInfo[];
   onReassign: (sessionId: string, waiterId: string) => void;
   onClockOut: (staffId: string) => void;
   onMessage: (staffId: string) => void;
 }) {
   const { t } = useLanguage();
+
+  // Capacity assumption: 5 tables = 100% load. Overloaded > 100%.
   const loadPct = Math.min(100, (w.tables / 5) * 100);
+
   const loadBg = w.load === "overloaded" ? "bg-status-bad-500"
     : w.load === "heavy" ? "bg-status-warn-500"
     : w.load === "busy" ? "bg-status-good-500"
     : "bg-sand-300";
-  const loadBadge = w.load === "overloaded" ? "bg-status-bad-100 text-status-bad-700"
-    : w.load === "heavy" ? "bg-status-warn-100 text-status-warn-700"
-    : w.load === "busy" ? "bg-status-good-100 text-status-good-700"
-    : "bg-sand-100 text-text-secondary";
-  const idleWithUnassigned = w.load === "idle" && unassignedSessions.length > 0;
+  const avatarBg = w.load === "overloaded" ? "bg-status-bad-500"
+    : w.load === "heavy" ? "bg-status-warn-500"
+    : w.load === "busy" ? "bg-status-good-500"
+    : "bg-sand-400";
+
+  // Anomaly framing for the row itself.
+  const isOverloaded = w.load === "overloaded";
+  const isLate = w.onShift && !w.isClockedIn;
+  const isOvertime = !w.onShift && w.isClockedIn;
+  const isOff = !w.onShift && !w.isClockedIn;
+
+  const idleWithUnassigned = w.load === "idle" && w.onShift && w.isClockedIn && unassignedSessions.length > 0;
 
   return (
-    <div className={w.load === "overloaded" ? "bg-status-bad-50/30" : ""}>
-      <button onClick={onToggle} className="w-full p-3 text-left hover:bg-sand-50 transition">
-        <div className="flex items-center gap-2.5">
-          <div className="w-9 h-9 rounded-lg bg-ocean-500 flex items-center justify-center text-[11px] font-semibold text-white flex-shrink-0">
-            {initials(w.name)}
-          </div>
-          <div className="flex-1 min-w-0">
-            <div className="flex items-center gap-1.5 flex-wrap">
-              <span className="text-xs font-semibold text-text-primary truncate">{w.name}</span>
-              <ClockBulb on={w.isClockedIn} />
-              <span className={`text-[9px] font-semibold px-1.5 py-0.5 rounded uppercase ${loadBadge}`}>{t(`floor.load.${w.load}`)}</span>
-            </div>
-            <div className="flex items-center gap-1.5 text-[10px] text-text-secondary tabular-nums mt-0.5">
-              <span><b className="text-text-primary">{w.tables}</b> {t("floor.tables").toLowerCase()}</span>
-              <span>· <b className="text-text-primary">{w.activeOrders}</b> {t("floor.activeOrdersShort")}</span>
-              {w.openRevenue > 0 && <span>· <b className="text-status-good-600">{Math.round(w.openRevenue).toLocaleString()}</b></span>}
-            </div>
-          </div>
-          <span className="text-text-muted text-xs">{isExpanded ? "▾" : "▸"}</span>
+    <div className={`p-3 ${isOverloaded ? "bg-status-bad-50/30" : isOff ? "opacity-60" : ""}`}>
+      <div className="flex items-center gap-2.5">
+        {/* Avatar — color encodes load level so you read it without parsing text */}
+        <div className={`relative w-12 h-12 rounded-xl flex items-center justify-center text-base font-extrabold text-white flex-shrink-0 ${avatarBg}`}>
+          {initials(w.name)}
+          {/* Clock-state corner dot — only render when there's an anomaly worth noticing */}
+          {(isLate || isOvertime) && (
+            <span
+              className={`absolute -bottom-0.5 -right-0.5 w-3.5 h-3.5 rounded-full border-2 border-white ${
+                isLate ? "bg-status-warn-500 animate-pulse" : "bg-status-info-500"
+              }`}
+              title={isLate ? t("floor.notClockedInLabel") : t("floor.pastShiftLabel")}
+            />
+          )}
         </div>
-        <div className="mt-2 h-1 rounded-full bg-sand-100 overflow-hidden relative">
+
+        {/* Name + stats */}
+        <div className="flex-1 min-w-0">
+          <div className="flex items-baseline gap-1.5">
+            <span className="text-sm font-extrabold text-text-primary truncate">{w.name}</span>
+            {isLate && (
+              <span className="text-[9px] font-extrabold uppercase tracking-wider text-status-warn-700 flex-shrink-0">
+                {t("floor.late")}
+              </span>
+            )}
+            {isOvertime && (
+              <span className="text-[9px] font-extrabold uppercase tracking-wider text-status-info-700 flex-shrink-0">
+                {t("floor.overtime")}
+              </span>
+            )}
+          </div>
+          <div className="flex items-center gap-2 text-[11px] text-text-secondary tabular-nums mt-0.5">
+            <span><span className="font-extrabold text-text-primary">{w.tables}</span> {t("floor.tables").toLowerCase()}</span>
+            <span className="text-sand-300">·</span>
+            <span><span className="font-extrabold text-text-primary">{w.activeOrders}</span> {t("floor.activeOrdersShort")}</span>
+            {w.openRevenue > 0 && (
+              <>
+                <span className="text-sand-300">·</span>
+                <span className="font-extrabold text-status-good-600">{Math.round(w.openRevenue).toLocaleString()}</span>
+              </>
+            )}
+          </div>
+        </div>
+
+        {/* Inline action icons — always visible, no expand */}
+        <div className="flex items-center gap-1 flex-shrink-0">
+          <button
+            onClick={() => onMessage(w.id)}
+            title={t("floor.msg")}
+            aria-label={t("floor.msg")}
+            className="w-9 h-9 rounded-lg bg-ocean-50 hover:bg-ocean-100 text-ocean-700 flex items-center justify-center active:scale-95 transition"
+          >
+            <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+            </svg>
+          </button>
+          <button
+            onClick={() => { if (confirm(`${t("floor.confirmClockOut")} ${w.name}?`)) onClockOut(w.id); }}
+            disabled={!w.isClockedIn}
+            title={t("floor.clockOut")}
+            aria-label={t("floor.clockOut")}
+            className="w-9 h-9 rounded-lg bg-status-bad-50 hover:bg-status-bad-100 text-status-bad-600 flex items-center justify-center disabled:opacity-30 disabled:cursor-not-allowed active:scale-95 transition"
+          >
+            <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
+              <polyline points="16 17 21 12 16 7" />
+              <line x1="21" y1="12" x2="9" y2="12" />
+            </svg>
+          </button>
+        </div>
+      </div>
+
+      {/* Always-visible load bar with capacity tick marks */}
+      {w.onShift && w.isClockedIn && (
+        <div className="mt-2.5 h-2 rounded-full bg-sand-100 overflow-hidden relative">
           <div className={`h-full rounded-full ${loadBg} transition-all`} style={{ width: `${loadPct}%` }} />
-          <div className="absolute top-0 bottom-0 w-px bg-white/60" style={{ left: "40%" }} />
-          <div className="absolute top-0 bottom-0 w-px bg-white/60" style={{ left: "80%" }} />
+          <div className="absolute top-0 bottom-0 w-px bg-white/70" style={{ left: "40%" }} />
+          <div className="absolute top-0 bottom-0 w-px bg-white/70" style={{ left: "80%" }} />
         </div>
-        {w.lastActivityMins != null && (
-          <p className="text-[9px] text-text-muted tabular-nums mt-1">
-            {t("floor.lastOrder")} {w.lastActivityMins}{t("common.minutes")} {t("floor.ago")}
-          </p>
-        )}
-      </button>
-      <AnimatePresence>
-        {isExpanded && (
-          <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: "auto", opacity: 1 }} exit={{ height: 0, opacity: 0 }}
-            className="overflow-hidden bg-sand-50">
-            <div className="px-3 py-2.5 space-y-2">
-              {idleWithUnassigned && unassignedSessions[0] && (
-                <button onClick={(e) => { e.stopPropagation(); onReassign(unassignedSessions[0].id, w.id); }}
-                  className="w-full h-11 rounded-lg bg-status-good-500 text-white text-[12px] font-semibold uppercase active:scale-95 transition">
-                  {t("floor.assignTable")} T{unassignedSessions[0].tableNumber} → {w.name}
-                </button>
-              )}
-              <div className="grid grid-cols-2 gap-2">
-                <button onClick={(e) => { e.stopPropagation(); onMessage(w.id); }}
-                  className="h-11 rounded-lg bg-ocean-50 border border-ocean-200 text-ocean-700 text-[12px] font-semibold uppercase active:scale-95 transition">
-                  {t("floor.msg")}
-                </button>
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    if (confirm(`${t("floor.confirmClockOut")} ${w.name}?`)) onClockOut(w.id);
-                  }}
-                  disabled={!w.isClockedIn}
-                  className="h-11 rounded-lg bg-status-bad-50 border border-status-bad-200 text-status-bad-700 text-[12px] font-semibold uppercase disabled:opacity-40 disabled:cursor-not-allowed active:scale-95 transition">
-                  {t("floor.clockOut")}
-                </button>
-              </div>
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
+      )}
+
+      {/* Last activity hint — quiet timestamp */}
+      {w.lastActivityMins != null && w.onShift && (
+        <p className="text-[10px] text-text-muted tabular-nums mt-1.5 font-medium">
+          {t("floor.lastOrder")} {w.lastActivityMins}{t("common.minutes")} {t("floor.ago")}
+        </p>
+      )}
+
+      {/* One-tap rebalance — only when this idle waiter could take a real unassigned table */}
+      {idleWithUnassigned && unassignedSessions[0] && (
+        <button
+          onClick={() => onReassign(unassignedSessions[0].id, w.id)}
+          className="mt-2.5 w-full h-10 rounded-lg bg-status-good-500 hover:bg-status-good-600 text-white text-[11px] font-extrabold uppercase tracking-wider active:scale-95 transition"
+        >
+          {t("floor.assignTable")} T{unassignedSessions[0].tableNumber} → {w.name.split(" ")[0]}
+        </button>
+      )}
     </div>
   );
 }
@@ -1344,48 +1586,48 @@ function StationPanel({
 
   return (
     <div className="rounded-2xl bg-white border border-sand-200 p-3">
-      <div className="flex items-center gap-2 mb-2">
-        <span className={`w-2 h-2 rounded-full ${toneMap.dot}`} />
-        <p className="text-[10px] font-semibold uppercase tracking-widest text-text-muted flex-1">{label}</p>
-        <span className={`text-sm font-semibold tabular-nums ${toneMap.text}`}>{Math.round(capacity)}%</span>
+      <div className="flex items-center gap-2 mb-3">
+        <span className={`w-2.5 h-2.5 rounded-full ${toneMap.dot}`} />
+        <p className="text-[11px] font-extrabold uppercase tracking-[0.2em] text-text-primary flex-1">{label}</p>
+        <span className={`text-lg font-extrabold tabular-nums tracking-tight ${toneMap.text}`}>{Math.round(capacity)}%</span>
       </div>
-      <div className="h-1 rounded-full bg-sand-100 overflow-hidden mb-2.5">
+      <div className="h-1.5 rounded-full bg-sand-100 overflow-hidden mb-3">
         <div className={`h-full rounded-full ${toneMap.bg} transition-all duration-500`} style={{ width: `${Math.min(100, capacity)}%` }} />
       </div>
       <div className="grid grid-cols-3 gap-2 text-center">
         <div>
-          <p className="text-[8px] font-semibold uppercase tracking-wider text-text-muted">{t("floor.active")}</p>
-          <p className="text-sm font-semibold tabular-nums text-text-primary">{activeCount}</p>
+          <p className="text-[9px] font-extrabold uppercase tracking-widest text-text-muted mb-1">{t("floor.active")}</p>
+          <p className="text-xl font-extrabold tabular-nums text-text-primary leading-none">{activeCount}</p>
         </div>
         <div>
-          <p className="text-[8px] font-semibold uppercase tracking-wider text-text-muted">{t("floor.avgPrep")}</p>
-          <p className="text-sm font-semibold tabular-nums text-text-primary">{Math.round(avgPrep)}{t("common.minutes")}</p>
+          <p className="text-[9px] font-extrabold uppercase tracking-widest text-text-muted mb-1">{t("floor.avgPrep")}</p>
+          <p className="text-xl font-extrabold tabular-nums text-text-primary leading-none">{Math.round(avgPrep)}{t("common.minutes")}</p>
         </div>
         <div>
-          <p className="text-[8px] font-semibold uppercase tracking-wider text-text-muted">{t("floor.stuck")}</p>
-          <p className={`text-sm font-semibold tabular-nums ${stuckCount > 0 ? "text-status-bad-600" : "text-text-primary"}`}>{stuckCount}</p>
+          <p className="text-[9px] font-extrabold uppercase tracking-widest text-text-muted mb-1">{t("floor.stuck")}</p>
+          <p className={`text-xl font-extrabold tabular-nums leading-none ${stuckCount > 0 ? "text-status-bad-600" : "text-text-primary"}`}>{stuckCount}</p>
         </div>
       </div>
 
       {/* Oldest ticket — inline action */}
       {oldest && onPrioritizeOldest && onOpenOrder && (
-        <div className="mt-2.5 pt-2.5 border-t border-sand-100">
-          <p className="text-[8px] font-semibold uppercase tracking-wider text-text-muted mb-1">{t("floor.oldestTicket")}</p>
+        <div className="mt-3 pt-3 border-t border-sand-100">
+          <p className="text-[9px] font-extrabold uppercase tracking-widest text-text-muted mb-1.5">{t("floor.oldestTicket")}</p>
           <button onClick={() => onOpenOrder(oldest)}
-            className="w-full text-left rounded-lg bg-sand-50 p-2 hover:bg-sand-100 transition">
+            className="w-full text-left rounded-lg bg-sand-50 p-2.5 hover:bg-sand-100 transition">
             <div className="flex items-center gap-2">
-              <span className="text-[11px] font-semibold text-text-primary">#{oldest.orderNumber}</span>
-              {oldest.tableNumber && <span className="text-[10px] text-text-secondary">T{oldest.tableNumber}</span>}
-              <span className="ml-auto text-[10px] font-semibold text-status-bad-600 tabular-nums">
+              <span className="text-sm font-extrabold text-text-primary">#{oldest.orderNumber}</span>
+              {oldest.tableNumber && <span className="text-[11px] text-text-secondary font-bold">T{oldest.tableNumber}</span>}
+              <span className="ml-auto text-xs font-extrabold text-status-bad-600 tabular-nums">
                 {Math.max(0, Math.round((now - oldest.createdAt) / 60000))}{t("common.minutes")}
               </span>
             </div>
-            <p className="text-[10px] text-text-secondary truncate mt-0.5">
+            <p className="text-[11px] text-text-secondary truncate mt-0.5 font-medium">
               {oldest.items.slice(0, 2).map((i) => i.name).join(", ")}
             </p>
           </button>
           <button onClick={() => onPrioritizeOldest(oldest)}
-            className="mt-1.5 w-full py-1 rounded-lg bg-status-warn-500 text-white text-[10px] font-semibold uppercase tracking-wider active:scale-95 transition">
+            className="mt-2 w-full py-2 rounded-lg bg-status-warn-500 text-white text-[11px] font-extrabold uppercase tracking-wider active:scale-95 transition">
             {t("floor.prioritize")}
           </button>
         </div>
@@ -1416,10 +1658,10 @@ function DeliveryLivePanel({
     <div className="rounded-2xl bg-white border border-sand-200">
       <div className="px-4 py-3 border-b border-sand-100 flex items-center justify-between">
         <div>
-          <p className="text-[10px] font-semibold uppercase tracking-widest text-text-muted">{t("floor.delivery")}</p>
-          <p className="text-[10px] text-text-secondary tabular-nums mt-0.5">
+          <p className="text-[11px] font-extrabold uppercase tracking-[0.2em] text-text-primary">{t("floor.delivery")}</p>
+          <p className="text-[10px] text-text-secondary tabular-nums mt-1 font-medium">
             {onlineDrivers} {onlineDrivers === 1 ? t("floor.driverShort") : t("floor.driversShort")} · {active.length} {t("floor.active").toLowerCase()}
-            {unassignedCount > 0 && <span className="text-status-bad-600 font-semibold"> · {unassignedCount} {t("floor.unassigned")}</span>}
+            {unassignedCount > 0 && <span className="text-status-bad-600 font-extrabold"> · {unassignedCount} {t("floor.unassigned")}</span>}
           </p>
         </div>
       </div>
@@ -1465,8 +1707,8 @@ function PaymentQueuePanel({
     <div className="rounded-2xl bg-white border border-sand-200">
       <div className="px-4 py-3 border-b border-sand-100 flex items-center justify-between">
         <div>
-          <p className="text-[10px] font-semibold uppercase tracking-widest text-text-muted">{t("floor.paymentQueue")}</p>
-          <p className="text-[10px] text-text-secondary tabular-nums mt-0.5">
+          <p className="text-[11px] font-extrabold uppercase tracking-[0.2em] text-text-primary">{t("floor.paymentQueue")}</p>
+          <p className="text-[10px] text-text-secondary tabular-nums mt-1 font-medium">
             {queue.length === 0
               ? t("floor.noTablesAwaiting")
               : `${queue.length} ${queue.length === 1 ? t("floor.tableShort") : t("floor.tablesShort")} · ${Math.round(unpaidTotal).toLocaleString()} ${t("common.egp")}`}
@@ -1476,28 +1718,28 @@ function PaymentQueuePanel({
       {queue.length === 0 ? (
         <div className="p-4 text-center text-[11px] text-text-muted">{t("floor.allPaid")}</div>
       ) : (
-        <div className="p-3 space-y-1.5">
+        <div className="p-3 space-y-2">
           {queue.map(({ s, tb }) => {
             const isPaying = tb.status === "paying";
             return (
               <button key={s.id} onClick={() => onSelect(tb)}
-                className={`w-full flex items-center gap-2 px-2.5 py-2 rounded-lg text-left transition border ${
+                className={`w-full flex items-center gap-2.5 px-3 py-2.5 rounded-lg text-left transition border-2 ${
                   isPaying ? "bg-status-bad-50 border-status-bad-200 hover:bg-status-bad-100" : "bg-status-wait-50 border-status-wait-200 hover:bg-status-wait-100"
                 }`}>
-                <span className={`w-8 h-8 rounded-lg flex items-center justify-center text-[11px] font-semibold text-white ${isPaying ? "bg-status-bad-500" : "bg-status-wait-500"}`}>
+                <span className={`w-10 h-10 rounded-lg flex items-center justify-center text-sm font-extrabold text-white flex-shrink-0 ${isPaying ? "bg-status-bad-500" : "bg-status-wait-500"}`}>
                   T{tb.id}
                 </span>
                 <div className="flex-1 min-w-0">
-                  <p className="text-[11px] font-semibold text-text-primary truncate">
+                  <p className="text-sm font-extrabold text-text-primary truncate">
                     {s.waiterName || t("floor.noWaiter")}
-                    <span className="font-normal text-text-secondary ml-1">· {s.guestCount}{t("floor.guestAbbrev")}</span>
+                    <span className="font-medium text-text-secondary ml-1">· {s.guestCount}{t("floor.guestAbbrev")}</span>
                   </p>
-                  <p className={`text-[9px] font-bold uppercase ${isPaying ? "text-status-bad-600" : "text-status-wait-600"}`}>
+                  <p className={`text-[10px] font-extrabold uppercase tracking-wider mt-0.5 ${isPaying ? "text-status-bad-600" : "text-status-wait-600"}`}>
                     {isPaying ? t("floor.paying") : t("floor.billRequested")}
                   </p>
                 </div>
                 {(s.unpaidTotal ?? 0) > 0 && (
-                  <span className="text-xs font-semibold tabular-nums text-status-good-600">
+                  <span className="text-base font-extrabold tabular-nums text-status-good-600 tracking-tight">
                     {Math.round(s.unpaidTotal || 0).toLocaleString()}
                   </span>
                 )}

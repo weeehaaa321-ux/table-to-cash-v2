@@ -60,7 +60,11 @@ export async function PATCH(
       if (existing?.paymentMethod) effectiveStatus = "PAID";
     }
 
-    const order = await useCases.orders.updateStatus(orderId, effectiveStatus, restaurantId, notes);
+    // Use the authenticated staff's restaurantId (a CUID) for the
+    // scoped update — not the body's restaurantId, which different
+    // callers send as either CUID or slug. The auth header already
+    // pins the scope; body restaurantId is redundant.
+    const order = await useCases.orders.updateStatus(orderId, effectiveStatus, authed.restaurantId, notes);
 
     // Auto-close session when order is paid
     if (effectiveStatus === "PAID") {
