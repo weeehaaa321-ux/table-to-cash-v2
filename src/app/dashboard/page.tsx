@@ -5123,66 +5123,18 @@ function Sidebar({ active, onChange }: { active: NavTab; onChange: (tab: NavTab)
 
 function MobileNav({ active, onChange }: { active: NavTab; onChange: (tab: NavTab) => void }) {
   const { t } = useLanguage();
-  // Middle tab is the visual hero — raised, circular, accent-coloured.
-  // The middle index is computed so we don't have to remember to update
-  // it if the nav list ever changes shape.
-  const middleIdx = Math.floor(NAV_ITEMS_FLAT.length / 2);
 
   return (
     <nav className="lg:hidden fixed bottom-0 left-0 right-0 z-40 glass-strong border-t border-sand-200/60 safe-bottom">
-      {/* Top notch behind the middle tab so the lifted button reads as
-          part of the bar, not floating disconnected. */}
-      <span
-        aria-hidden
-        className="absolute top-0 -translate-x-1/2 -translate-y-1/2 w-16 h-16 rounded-full bg-sand-50/80 border border-sand-200/60 backdrop-blur-md"
-        style={{ left: `${(middleIdx + 0.5) * (100 / NAV_ITEMS_FLAT.length)}%` }}
-      />
       <div className="relative flex">
-        {NAV_ITEMS_FLAT.map((item, i) => {
+        {NAV_ITEMS_FLAT.map((item) => {
           const isActive = active === item.id;
-          const isMiddle = i === middleIdx;
-
-          if (isMiddle) {
-            return (
-              <button
-                key={item.id}
-                onClick={() => onChange(item.id)}
-                className="flex-1 flex flex-col items-center justify-end pb-1.5 pt-2 relative"
-              >
-                <motion.span
-                  whileTap={{ scale: 0.9 }}
-                  animate={{
-                    y: isActive ? -4 : 0,
-                    boxShadow: isActive
-                      ? "0 12px 28px -8px rgba(37, 99, 235, 0.45)"
-                      : "0 4px 14px -4px rgba(15, 23, 42, 0.18)",
-                  }}
-                  transition={{ type: "spring", stiffness: 400, damping: 22 }}
-                  className={`-mt-7 w-14 h-14 rounded-full flex items-center justify-center text-2xl transition-colors ${
-                    isActive
-                      ? "bg-gradient-to-br from-ocean-500 to-ocean-700 text-white"
-                      : "bg-white border-2 border-ocean-200 text-ocean-600"
-                  }`}
-                >
-                  {item.icon}
-                </motion.span>
-                <span
-                  className={`text-[9px] font-extrabold uppercase tracking-wider mt-1 transition-colors ${
-                    isActive ? "text-ocean-700" : "text-text-secondary"
-                  }`}
-                >
-                  {t(item.labelKey)}
-                </span>
-              </button>
-            );
-          }
-
           return (
             <motion.button
               key={item.id}
               whileTap={{ scale: 0.92 }}
               onClick={() => onChange(item.id)}
-              className={`flex-1 py-2.5 flex flex-col items-center gap-0.5 transition-colors ${
+              className={`flex-1 py-2.5 flex flex-col items-center gap-0.5 relative transition-colors ${
                 isActive ? "text-ocean-600" : "text-text-muted"
               }`}
             >
@@ -5630,10 +5582,8 @@ function OwnerControlSystem({ verifiedOwnerId }: { verifiedOwnerId: string }) {
         </main>
       </div>
 
-      {/* Floating voice note bubble — visible on overview tab */}
-      {activeTab === "overview" && (
-        <VoiceNoteBubble staff={staff} restaurantSlug={restaurantSlug} ownerId={ownerId} />
-      )}
+      {/* Floating voice note bubble — owner can broadcast from any tab */}
+      <VoiceNoteBubble staff={staff} restaurantSlug={restaurantSlug} ownerId={ownerId} />
 
       <MobileNav active={activeTab} onChange={setActiveTab} />
 
