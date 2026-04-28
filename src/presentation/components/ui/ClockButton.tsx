@@ -113,39 +113,26 @@ export function ClockButton({
         dir={dir}
         className="z-[2147483647] animate-fade-in"
         style={{
-          // The gate is a full-viewport painted backdrop. We do NOT
-          // centre via flex on this container — flex centering on a
-          // fixed full-viewport element drifted the inner content
-          // toward the lower-right on tablet / laptop widths
-          // (suspected interaction with the page's body layout when
-          // the portaled gate sits alongside other body children).
-          // Instead we paint the backdrop here and absolutely
-          // position the inner stack in the middle below.
+          // `inset: 0` (not 100vw / 100dvh) so the gate fills its
+          // containing block exactly. globals.css applies a CSS `zoom`
+          // factor to <html> at >=1280px (1.12x), >=1600px (1.2x), and
+          // >=1920px (1.3x). With zoom on, viewport units and CSS
+          // transforms compute in the un-zoomed coordinate system and
+          // then get re-scaled — the math doesn't recombine cleanly,
+          // so a translate(-50%, -50%) child drifts toward the
+          // lower-right. inset:0 + grid place-items center is
+          // computed on actual rendered geometry and is zoom-immune.
           position: "fixed",
-          top: 0,
-          left: 0,
-          width: "100vw",
-          height: "100dvh",
+          inset: 0,
+          display: "grid",
+          placeItems: "center",
           background:
             "linear-gradient(135deg, rgba(255,245,235,0.92) 0%, rgba(224,242,254,0.92) 100%)",
           backdropFilter: "blur(28px) saturate(1.4)",
           WebkitBackdropFilter: "blur(28px) saturate(1.4)",
         }}
       >
-        {/* Inner stack: absolute-centred via top/left 50% + translate.
-            This is the most predictable centring pattern in CSS — it
-            doesn't depend on flex/grid algorithms or scrollbar gutter
-            math, and works identically across mobile, tablet, laptop,
-            and desktop. */}
-        <div
-          className="flex flex-col items-center w-[calc(100%-3rem)] max-w-md text-center"
-          style={{
-            position: "absolute",
-            top: "50%",
-            left: "50%",
-            transform: "translate(-50%, -50%)",
-          }}
-        >
+        <div className="flex flex-col items-center w-full max-w-md px-6 text-center">
           {/* Live wall-clock — anchors the screen and confirms the device clock matches the restaurant tz */}
           <div className="text-[10px] font-extrabold uppercase tracking-[0.25em] text-text-muted mb-1.5">
             {t("clock.now")}
