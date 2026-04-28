@@ -5069,39 +5069,138 @@ const NAV_ITEMS_FLAT = NAV_GROUPS.flatMap((g) => g.items);
 function Sidebar({ active, onChange }: { active: NavTab; onChange: (tab: NavTab) => void }) {
   const { t } = useLanguage();
   return (
-    <aside className="hidden lg:flex flex-col w-16 glass-strong border-r border-sand-200/60 items-center py-6 gap-1.5 sticky top-16 self-start h-[calc(100dvh-4rem)] overflow-y-auto no-scrollbar">
-      {NAV_ITEMS_FLAT.map((item) => (
-        <button
-          key={item.id}
-          onClick={() => onChange(item.id)}
-          className={`w-12 h-12 rounded-xl flex flex-col items-center justify-center gap-0.5 transition-all ${
-            active === item.id
-              ? "bg-ocean-50 text-ocean-600 border border-ocean-200 shadow-sm"
-              : "text-text-muted hover:text-text-secondary hover:bg-sand-100"
-          }`}
-        >
-          <span className="text-sm">{item.icon}</span>
-          <span className="text-[8px] font-bold uppercase tracking-wider">{t(item.labelKey)}</span>
-        </button>
-      ))}
+    <aside className="hidden lg:flex flex-col w-20 glass-strong border-r border-sand-200/60 items-center py-6 gap-1 sticky top-16 self-start h-[calc(100dvh-4rem)] overflow-y-auto no-scrollbar">
+      {NAV_ITEMS_FLAT.map((item) => {
+        const isActive = active === item.id;
+        return (
+          <button
+            key={item.id}
+            onClick={() => onChange(item.id)}
+            className="relative w-14 h-14 rounded-xl flex flex-col items-center justify-center gap-0.5 group transition-colors"
+          >
+            {/* Active background — animated between selections via layoutId */}
+            {isActive && (
+              <motion.span
+                layoutId="dashboard-nav-active-bg"
+                className="absolute inset-0 rounded-xl bg-gradient-to-br from-ocean-50 to-ocean-100 border border-ocean-200 shadow-sm"
+                transition={{ type: "spring", stiffness: 500, damping: 35 }}
+              />
+            )}
+            {/* Hover overlay — fades in on hover for non-active tabs */}
+            {!isActive && (
+              <span className="absolute inset-0 rounded-xl bg-sand-100 opacity-0 group-hover:opacity-100 transition-opacity duration-200" />
+            )}
+            <motion.span
+              whileTap={{ scale: 0.88 }}
+              transition={{ type: "spring", stiffness: 600, damping: 25 }}
+              className={`relative z-10 text-base transition-transform duration-200 group-hover:scale-110 ${
+                isActive ? "text-ocean-700" : "text-text-muted group-hover:text-text-secondary"
+              }`}
+            >
+              {item.icon}
+            </motion.span>
+            <span
+              className={`relative z-10 text-[8px] font-extrabold uppercase tracking-[0.15em] transition-colors duration-200 ${
+                isActive ? "text-ocean-700" : "text-text-muted group-hover:text-text-secondary"
+              }`}
+            >
+              {t(item.labelKey)}
+            </span>
+            {/* Active right-edge indicator pip */}
+            {isActive && (
+              <motion.span
+                layoutId="dashboard-nav-active-pip"
+                className="absolute -right-3 top-1/2 -translate-y-1/2 w-1.5 h-7 rounded-l-full bg-ocean-500"
+                transition={{ type: "spring", stiffness: 500, damping: 35 }}
+              />
+            )}
+          </button>
+        );
+      })}
     </aside>
   );
 }
 
 function MobileNav({ active, onChange }: { active: NavTab; onChange: (tab: NavTab) => void }) {
   const { t } = useLanguage();
+  // Middle tab is the visual hero — raised, circular, accent-coloured.
+  // The middle index is computed so we don't have to remember to update
+  // it if the nav list ever changes shape.
+  const middleIdx = Math.floor(NAV_ITEMS_FLAT.length / 2);
+
   return (
-    <nav className="lg:hidden fixed bottom-0 left-0 right-0 z-40 glass-strong border-t border-sand-200/60 flex safe-bottom">
-      {NAV_ITEMS_FLAT.map((item) => (
-        <button
-          key={item.id}
-          onClick={() => onChange(item.id)}
-          className={`flex-1 py-3 flex flex-col items-center gap-0.5 transition-all ${active === item.id ? "text-ocean-600" : "text-text-muted"}`}
-        >
-          <span className="text-base">{item.icon}</span>
-          <span className="text-[9px] font-bold uppercase tracking-wider">{t(item.labelKey)}</span>
-        </button>
-      ))}
+    <nav className="lg:hidden fixed bottom-0 left-0 right-0 z-40 glass-strong border-t border-sand-200/60 safe-bottom">
+      {/* Top notch behind the middle tab so the lifted button reads as
+          part of the bar, not floating disconnected. */}
+      <span
+        aria-hidden
+        className="absolute top-0 -translate-x-1/2 -translate-y-1/2 w-16 h-16 rounded-full bg-sand-50/80 border border-sand-200/60 backdrop-blur-md"
+        style={{ left: `${(middleIdx + 0.5) * (100 / NAV_ITEMS_FLAT.length)}%` }}
+      />
+      <div className="relative flex">
+        {NAV_ITEMS_FLAT.map((item, i) => {
+          const isActive = active === item.id;
+          const isMiddle = i === middleIdx;
+
+          if (isMiddle) {
+            return (
+              <button
+                key={item.id}
+                onClick={() => onChange(item.id)}
+                className="flex-1 flex flex-col items-center justify-end pb-1.5 pt-2 relative"
+              >
+                <motion.span
+                  whileTap={{ scale: 0.9 }}
+                  animate={{
+                    y: isActive ? -4 : 0,
+                    boxShadow: isActive
+                      ? "0 12px 28px -8px rgba(37, 99, 235, 0.45)"
+                      : "0 4px 14px -4px rgba(15, 23, 42, 0.18)",
+                  }}
+                  transition={{ type: "spring", stiffness: 400, damping: 22 }}
+                  className={`-mt-7 w-14 h-14 rounded-full flex items-center justify-center text-2xl transition-colors ${
+                    isActive
+                      ? "bg-gradient-to-br from-ocean-500 to-ocean-700 text-white"
+                      : "bg-white border-2 border-ocean-200 text-ocean-600"
+                  }`}
+                >
+                  {item.icon}
+                </motion.span>
+                <span
+                  className={`text-[9px] font-extrabold uppercase tracking-wider mt-1 transition-colors ${
+                    isActive ? "text-ocean-700" : "text-text-secondary"
+                  }`}
+                >
+                  {t(item.labelKey)}
+                </span>
+              </button>
+            );
+          }
+
+          return (
+            <motion.button
+              key={item.id}
+              whileTap={{ scale: 0.92 }}
+              onClick={() => onChange(item.id)}
+              className={`flex-1 py-2.5 flex flex-col items-center gap-0.5 transition-colors ${
+                isActive ? "text-ocean-600" : "text-text-muted"
+              }`}
+            >
+              <span className={`text-base transition-transform duration-200 ${isActive ? "scale-110" : ""}`}>
+                {item.icon}
+              </span>
+              <span className="text-[9px] font-extrabold uppercase tracking-wider">{t(item.labelKey)}</span>
+              {isActive && (
+                <motion.span
+                  layoutId="dashboard-mobile-nav-underline"
+                  className="absolute bottom-0 w-8 h-[3px] rounded-t-full bg-ocean-500"
+                  transition={{ type: "spring", stiffness: 500, damping: 35 }}
+                />
+              )}
+            </motion.button>
+          );
+        })}
+      </div>
     </nav>
   );
 }
