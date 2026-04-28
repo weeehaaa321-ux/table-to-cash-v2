@@ -111,7 +111,7 @@ export function ClockButton({
     const gate = (
       <div
         dir={dir}
-        className="z-[2147483647] flex items-center justify-center px-6 animate-fade-in"
+        className="z-[2147483647] animate-fade-in"
         style={{
           // Explicit dimensions + top/left instead of inset-0. Some
           // mobile browsers (and Safari with quirky ancestors) handle
@@ -123,6 +123,14 @@ export function ClockButton({
           left: 0,
           width: "100vw",
           height: "100dvh",
+          // Center using flex on the gate itself rather than nested
+          // text-center + mx-auto on each child — that pattern was
+          // shifting visually on tablet portrait widths because the
+          // role pill (inline-flex) and the 192px button were being
+          // centered by different mechanisms.
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
           // Opaque-enough fallback in case backdrop-filter is throttled
           // or unsupported (older WebViews). The gradient is solid;
           // backdrop-filter just sweetens it on capable browsers.
@@ -132,7 +140,10 @@ export function ClockButton({
           WebkitBackdropFilter: "blur(28px) saturate(1.4)",
         }}
       >
-        <div className="w-full max-w-md text-center">
+        {/* Inner stack: flex-col + items-center centres every direct
+            child along the cross axis regardless of width / inline-block
+            quirks. text-center remains for inline text within blocks. */}
+        <div className="flex flex-col items-center w-full max-w-md px-6 text-center">
           {/* Live wall-clock — anchors the screen and confirms the device clock matches the restaurant tz */}
           <div className="text-[10px] font-extrabold uppercase tracking-[0.25em] text-text-muted mb-1.5">
             {t("clock.now")}
@@ -148,18 +159,18 @@ export function ClockButton({
           <div className="text-3xl font-extrabold text-text-primary tracking-tight leading-tight mb-2">
             {firstName || t("clock.welcomeNoName")}
           </div>
-          {roleLabel && (
+          {roleLabel ? (
             <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-sand-100 border border-sand-200 text-text-secondary text-[11px] font-extrabold uppercase tracking-widest mb-10">
               {roleLabel}
             </div>
+          ) : (
+            <div className="mb-10" />
           )}
-
-          {!roleLabel && <div className="mb-10" />}
 
           <button
             onClick={toggle}
             disabled={busy}
-            className={`group relative w-52 h-52 rounded-full flex flex-col items-center justify-center mx-auto mb-6 bg-status-good-500 shadow-[0_20px_60px_rgba(16,185,129,0.35)] transition-all active:scale-95 ${
+            className={`group relative w-52 h-52 rounded-full flex flex-col items-center justify-center mb-6 bg-status-good-500 shadow-[0_20px_60px_rgba(16,185,129,0.35)] transition-all active:scale-95 ${
               busy ? "opacity-75" : "hover:bg-status-good-600 hover:shadow-[0_25px_70px_rgba(16,185,129,0.45)]"
             }`}
           >
@@ -180,7 +191,7 @@ export function ClockButton({
               {busy ? t("clock.starting") : t("clock.clockIn")}
             </span>
           </button>
-          <p className="text-xs text-text-secondary leading-relaxed max-w-[18rem] mx-auto">
+          <p className="text-xs text-text-secondary leading-relaxed max-w-[18rem]">
             {t("clock.unlockMessage")}
           </p>
           {error && (
