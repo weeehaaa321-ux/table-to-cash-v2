@@ -113,37 +113,39 @@ export function ClockButton({
         dir={dir}
         className="z-[2147483647] animate-fade-in"
         style={{
-          // Explicit dimensions + top/left instead of inset-0. Some
-          // mobile browsers (and Safari with quirky ancestors) handle
-          // inset-0 inconsistently when fixed positioning involves
-          // dvh / safe-area math. width:100vw + height:100dvh is
-          // unambiguous.
+          // The gate is a full-viewport painted backdrop. We do NOT
+          // centre via flex on this container — flex centering on a
+          // fixed full-viewport element drifted the inner content
+          // toward the lower-right on tablet / laptop widths
+          // (suspected interaction with the page's body layout when
+          // the portaled gate sits alongside other body children).
+          // Instead we paint the backdrop here and absolutely
+          // position the inner stack in the middle below.
           position: "fixed",
           top: 0,
           left: 0,
           width: "100vw",
           height: "100dvh",
-          // Center using flex on the gate itself rather than nested
-          // text-center + mx-auto on each child — that pattern was
-          // shifting visually on tablet portrait widths because the
-          // role pill (inline-flex) and the 192px button were being
-          // centered by different mechanisms.
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          // Opaque-enough fallback in case backdrop-filter is throttled
-          // or unsupported (older WebViews). The gradient is solid;
-          // backdrop-filter just sweetens it on capable browsers.
           background:
             "linear-gradient(135deg, rgba(255,245,235,0.92) 0%, rgba(224,242,254,0.92) 100%)",
           backdropFilter: "blur(28px) saturate(1.4)",
           WebkitBackdropFilter: "blur(28px) saturate(1.4)",
         }}
       >
-        {/* Inner stack: flex-col + items-center centres every direct
-            child along the cross axis regardless of width / inline-block
-            quirks. text-center remains for inline text within blocks. */}
-        <div className="flex flex-col items-center w-full max-w-md px-6 text-center">
+        {/* Inner stack: absolute-centred via top/left 50% + translate.
+            This is the most predictable centring pattern in CSS — it
+            doesn't depend on flex/grid algorithms or scrollbar gutter
+            math, and works identically across mobile, tablet, laptop,
+            and desktop. */}
+        <div
+          className="flex flex-col items-center w-[calc(100%-3rem)] max-w-md text-center"
+          style={{
+            position: "absolute",
+            top: "50%",
+            left: "50%",
+            transform: "translate(-50%, -50%)",
+          }}
+        >
           {/* Live wall-clock — anchors the screen and confirms the device clock matches the restaurant tz */}
           <div className="text-[10px] font-extrabold uppercase tracking-[0.25em] text-text-muted mb-1.5">
             {t("clock.now")}
