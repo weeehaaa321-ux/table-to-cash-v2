@@ -18,6 +18,7 @@ import { StaffHeaderMenu } from "@/presentation/components/ui/StaffHeaderMenu";
 import { translateToArabic } from "@/lib/translate-notes";
 import { getOrderTag } from "@/lib/order-label";
 import { staffFetch } from "@/lib/staff-fetch";
+import { startPoll } from "@/lib/polling";
 
 type StaffInfo = { id: string; name: string; role: string; shift: number };
 
@@ -679,7 +680,7 @@ function KitchenSystem({ staff }: { staff: StaffInfo }) {
   // Poll for owner messages to kitchen
   useEffect(() => {
     const restaurantSlug = process.env.NEXT_PUBLIC_RESTAURANT_SLUG || "neom-dahab";
-    const poll = setInterval(() => {
+    return startPoll(() => {
       fetch(`/api/messages?since=${lastMsgPoll.current}&to=kitchen&restaurantId=${restaurantSlug}`)
         .then((res) => res.json())
         .then((msgs: { id: string; type: string; text?: string; audio?: string; createdAt: number }[]) => {
@@ -702,7 +703,6 @@ function KitchenSystem({ staff }: { staff: StaffInfo }) {
         })
         .catch(() => {});
     }, 4000);
-    return () => clearInterval(poll);
   }, []);
 
   const visibleOwnerMessages = ownerMessages.filter((m) => !dismissedMessages.has(m.id));

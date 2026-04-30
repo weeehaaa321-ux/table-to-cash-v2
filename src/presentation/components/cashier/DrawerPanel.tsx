@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { staffFetch } from "@/lib/staff-fetch";
+import { startPoll } from "@/lib/polling";
 
 // ═══════════════════════════════════════════════════════
 // DRAWER PANEL — Cashier opens/closes the cash drawer.
@@ -46,8 +47,7 @@ export function DrawerPanel({ restaurantId, cashierId }: { restaurantId: string;
 
   useEffect(() => {
     load();
-    const t = setInterval(load, 15000);
-    return () => clearInterval(t);
+    return startPoll(load, 15000);
   }, [load]);
 
   const handleOpen = async () => {

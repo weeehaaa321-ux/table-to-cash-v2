@@ -442,11 +442,16 @@ export function useLiveData(staffId?: string) {
       sessions?: { tableNumber: number; guestCount: number; openedAt: string; menuOpenedAt?: string | null; status: string }[];
       tables?: { number: number }[];
       tipsToday?: number;
+      openStaffIds?: string[];
     };
 
     const applySnapshot = (snap: SnapshotResp, initial: boolean) => {
       // Sessions first — updateTablesFromOrders depends on _activeSessions
       if (snap.sessions) setActiveSessions(snap.sessions);
+
+      if (Array.isArray(snap.openStaffIds)) {
+        usePerception.setState({ openStaffIds: new Set(snap.openStaffIds) });
+      }
 
       if (snap.tables && snap.tables.length > 0) {
         const tableNumbers = snap.tables.map((t) => t.number);

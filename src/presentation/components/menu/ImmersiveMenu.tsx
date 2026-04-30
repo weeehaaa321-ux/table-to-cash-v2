@@ -15,6 +15,7 @@ import Link from "next/link";
 import { ChangeTableButton } from "@/presentation/components/ui/ChangeTableModal";
 import { GuestBadge } from "@/presentation/components/ui/GuestBadge";
 import { isSelfInitiatedMove } from "@/lib/self-move";
+import { startPoll } from "@/lib/polling";
 
 // ═══════════════════════════════════════════════
 // ITEM DETAIL SHEET — Bottom sheet with full info
@@ -392,8 +393,7 @@ export function ImmersiveMenu({ tableNumber, restaurantSlug, sessionId }: { tabl
       for (const ci of stale) cart.removeItem(ci.menuItem.id);
     };
     refreshMenu().then(purgeStale);
-    const id = setInterval(() => { refreshMenu().then(purgeStale); }, 60_000);
-    return () => clearInterval(id);
+    return startPoll(() => { refreshMenu().then(purgeStale); }, 60_000);
   }, [menuLoaded, refreshMenu]);
 
   // Auto-switch to available tab when a station is off
@@ -469,8 +469,7 @@ export function ImmersiveMenu({ tableNumber, restaurantSlug, sessionId }: { tabl
       } catch {}
     }
     checkSession();
-    const interval = setInterval(checkSession, 30000);
-    return () => clearInterval(interval);
+    return startPoll(checkSession, 30000);
   }, [sessionId, tableNumber, restaurantSlug]);
 
   // Filter categories by super-category (Food = KITCHEN, Drinks = BAR)

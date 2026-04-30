@@ -3,6 +3,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { useCases } from "@/infrastructure/composition";
 
+// Restaurant config rarely changes — name, logo, currency, capacity.
+// Letting the browser/CDN serve it for 60s with SWR cuts thousands of
+// duplicate hits per day from the role pages on first paint.
+const SWR_CONFIG = {
+  "Cache-Control": "public, max-age=60, stale-while-revalidate=300",
+} as const;
+
 export async function GET(request: NextRequest) {
   const url = new URL(request.url);
   const slug = url.searchParams.get("slug");
@@ -12,17 +19,20 @@ export async function GET(request: NextRequest) {
     if (!restaurant) {
       return NextResponse.json({ error: "Restaurant not found" }, { status: 404 });
     }
-    return NextResponse.json({
-      id: restaurant.id,
-      name: restaurant.name,
-      slug: restaurant.slug,
-      logo: restaurant.logo,
-      currency: restaurant.currency,
-      timezone: restaurant.timezone,
-      waiterCapacity: restaurant.waiterCapacity,
-      kitchenConfig: restaurant.kitchenConfig,
-      createdAt: restaurant.createdAt,
-    });
+    return NextResponse.json(
+      {
+        id: restaurant.id,
+        name: restaurant.name,
+        slug: restaurant.slug,
+        logo: restaurant.logo,
+        currency: restaurant.currency,
+        timezone: restaurant.timezone,
+        waiterCapacity: restaurant.waiterCapacity,
+        kitchenConfig: restaurant.kitchenConfig,
+        createdAt: restaurant.createdAt,
+      },
+      { headers: SWR_CONFIG },
+    );
   } catch (err) {
     console.error("Restaurant lookup failed:", err);
     return NextResponse.json({ error: "Failed to load restaurant" }, { status: 500 });

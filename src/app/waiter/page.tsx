@@ -24,6 +24,7 @@ import {
   notifyVoiceNote,
 } from "@/lib/notifications";
 import { staffFetch } from "@/lib/staff-fetch";
+import { startPoll } from "@/lib/polling";
 
 // ═══════════════════════════════════════════════
 // CONSTANTS + HELPERS
@@ -1329,9 +1330,8 @@ function Leaderboard({ staffId }: { staffId: string }) {
       } catch { /* silent */ }
     }
     load();
-    const interval = setInterval(load, 30000);
-    return () => clearInterval(interval);
-  }, [period, restaurantSlug]);
+    return startPoll(load, 30000);
+  }, [period, restaurantSlug, staffId]);
 
   const medals = ["🥇", "🥈", "🥉"];
 
@@ -2361,7 +2361,7 @@ function StaffSystem({ loggedInStaff, onLogout }: { loggedInStaff: LoggedInStaff
   useEffect(() => {
     const restaurantSlug = process.env.NEXT_PUBLIC_RESTAURANT_SLUG || "neom-dahab";
     const staffId = loggedInStaff.id;
-    const poll = setInterval(() => {
+    return startPoll(() => {
       fetch(`/api/messages?since=${lastPollRef.current}&to=${staffId}&restaurantId=${restaurantSlug}`)
         .then((res) => res.json())
         .then((msgs: OwnerMessage[]) => {
@@ -2376,7 +2376,6 @@ function StaffSystem({ loggedInStaff, onLogout }: { loggedInStaff: LoggedInStaff
         })
         .catch(() => {});
     }, 4000);
-    return () => clearInterval(poll);
   }, [loggedInStaff.id]);
 
   // Poll for sessions (batch endpoint — single request instead of 14)
@@ -2392,8 +2391,7 @@ function StaffSystem({ loggedInStaff, onLogout }: { loggedInStaff: LoggedInStaff
       } catch { /* silent */ }
     }
     fetchSessions();
-    const interval = setInterval(fetchSessions, 10000);
-    return () => clearInterval(interval);
+    return startPoll(fetchSessions, 10000);
   }, [loggedInStaff.id]);
 
   const visibleOwnerMessages = ownerMessages.filter((m) => !dismissedMessages.has(m.id));

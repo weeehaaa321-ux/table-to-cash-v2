@@ -47,7 +47,9 @@ export function ClockButton({
 
   const refresh = async () => {
     try {
-      const res = await fetch(`/api/clock?staffId=${staffId}`);
+      // no-store: the gate must reflect the live DB state, not whatever
+      // the browser cached on the previous mount.
+      const res = await fetch(`/api/clock?staffId=${staffId}`, { cache: "no-store" });
       if (!res.ok) { setState("out"); return; }
       const data = await res.json();
       if (data.open) {

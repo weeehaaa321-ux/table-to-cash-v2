@@ -82,6 +82,10 @@ export type PerceptionState = {
   bar: KitchenState;
   orders: LiveOrder[];
   revenueSegment: RevenueSegment;
+  // Staff IDs currently clocked in. Refreshed by /api/live-snapshot
+  // alongside orders/sessions so the dashboard's "On Shift Now" bulbs
+  // don't need a second dedicated poll.
+  openStaffIds: ReadonlySet<string>;
 
   metrics: {
     revenueToday: number;
@@ -133,6 +137,7 @@ export const usePerception = create<PerceptionState>((set, get) => ({
     walkin: { revenue: 0, orders: 0, avgValue: 0 },
     room: { revenue: 0, orders: 0, avgValue: 0 },
   },
+  openStaffIds: new Set<string>(),
   metrics: {
     revenueToday: 0,
     ordersToday: 0,

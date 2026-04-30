@@ -16,6 +16,7 @@ import {
   type ItemPerformance,
 } from "@/lib/engine/intelligence";
 import { useLiveData } from "@/lib/use-live-data";
+import { startPoll } from "@/lib/polling";
 import { useSystemState, type DecisionRecord } from "@/lib/engine/orchestrator";
 import { useMenu } from "@/store/menu";
 import { resolveImage } from "@/lib/placeholders";
@@ -2029,11 +2030,14 @@ function StaffPanel({ staff, onRefresh, restaurantId, restaurantSlug, ownerId }:
 // SHIFT OVERVIEW (read-only — scheduling via Schedule tab)
 // ═════════════════════════════════════════════════
 
-function ShiftOverview({ staff, restaurantSlug }: { staff: StaffMember[]; restaurantSlug: string }) {
+function ShiftOverview({ staff, restaurantSlug: _restaurantSlug }: { staff: StaffMember[]; restaurantSlug: string }) {
   const { t } = useLanguage();
   const [currentShift, setCurrentShift] = useState(0);
   const [shiftProgress, setShiftProgress] = useState(0);
-  const [clockedInIds, setClockedInIds] = useState<Set<string>>(new Set());
+  // Clocked-in IDs piggyback on the live-snapshot poll (~30s, paused
+  // when the tab is hidden). No dedicated /api/clock poll for this any
+  // more — the snapshot already returns openStaffIds.
+  const clockedInIds = usePerception((s) => s.openStaffIds);
 
   useEffect(() => {
     async function fetchShift() {
@@ -2047,28 +2051,8 @@ function ShiftOverview({ staff, restaurantSlug }: { staff: StaffMember[]; restau
       } catch { /* silent */ }
     }
     fetchShift();
-    const interval = setInterval(fetchShift, 60000);
-    return () => clearInterval(interval);
+    return startPoll(fetchShift, 60000);
   }, []);
-
-  // Poll the clock feed so the "On Shift Now" bulbs reflect real
-  // clock-in state (green = clocked in, red = scheduled but not clocked
-  // in). 30s cadence is plenty; this is a glanceable indicator, not a
-  // live race condition.
-  useEffect(() => {
-    async function fetchOpen() {
-      try {
-        const res = await fetch(`/api/clock?restaurantId=${encodeURIComponent(restaurantSlug)}`);
-        if (res.ok) {
-          const data = await res.json();
-          setClockedInIds(new Set<string>(data.openStaffIds || []));
-        }
-      } catch { /* silent */ }
-    }
-    fetchOpen();
-    const interval = setInterval(fetchOpen, 30000);
-    return () => clearInterval(interval);
-  }, [restaurantSlug]);
 
   const activeStaff = staff.filter((s) => s.active && s.role !== "OWNER");
   const nextShift = (currentShift % 3) + 1;
@@ -5324,7 +5308,9 @@ function OwnerControlSystem({ verifiedOwnerId }: { verifiedOwnerId: string }) {
     }).then(() => fetchStaff()).catch(() => {});
   }, [ownerId, restaurantSlug, fetchStaff]);
 
-  // Poll sessions for assign-table feature
+  // Poll sessions for assign-table feature. 20s + visibility-pause:
+  // sessions don't churn fast enough to need 10s, and a backgrounded
+  // tab shouldn't keep hitting the API.
   useEffect(() => {
     async function fetchSessions() {
       try {
@@ -5336,8 +5322,7 @@ function OwnerControlSystem({ verifiedOwnerId }: { verifiedOwnerId: string }) {
       } catch { /* silent */ }
     }
     fetchSessions();
-    const interval = setInterval(fetchSessions, 10000);
-    return () => clearInterval(interval);
+    return startPoll(fetchSessions, 20000);
   }, [restaurantSlug, ownerId]);
 
   const { metrics, tableStates, kitchen, bar, orders } = perception;

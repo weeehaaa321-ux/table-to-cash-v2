@@ -6,7 +6,7 @@
     },
     {
       "path": "/api/cron/table-check",
-      "schedule": "* * * * *"
+      "schedule": "*/5 * * * *"
     },
     {
       "path": "/api/cron/daily-close",

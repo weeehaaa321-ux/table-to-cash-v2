@@ -5,6 +5,11 @@ import { NextRequest, NextResponse } from "next/server";
 import { useCases } from "@/infrastructure/composition";
 import { makeId } from "@/domain/shared/Identifier";
 
+// Live clock-state polls — never cache. Stale responses make the
+// dashboard's "clocked-in" bulbs lag behind reality (the symptom
+// previously fixed only by a hard page refresh).
+const NO_STORE = { "Cache-Control": "no-store, must-revalidate" } as const;
+
 // GET ?staffId= → { open: { id, clockIn } | null }
 // GET ?restaurantId= → { openStaffIds: [...] }
 export async function GET(request: NextRequest) {
@@ -14,15 +19,18 @@ export async function GET(request: NextRequest) {
 
   if (staffId) {
     const open = await useCases.clockInOut.getOpenForStaff(makeId<"Staff">(staffId));
-    return NextResponse.json({
-      open: open ? { id: open.id, clockIn: open.clockIn.toISOString() } : null,
-    });
+    return NextResponse.json(
+      {
+        open: open ? { id: open.id, clockIn: open.clockIn.toISOString() } : null,
+      },
+      { headers: NO_STORE },
+    );
   }
   if (restaurantId) {
     const openStaffIds = await useCases.clockInOut.listOpenStaffIds();
-    return NextResponse.json({ openStaffIds });
+    return NextResponse.json({ openStaffIds }, { headers: NO_STORE });
   }
-  return NextResponse.json({ open: null });
+  return NextResponse.json({ open: null }, { headers: NO_STORE });
 }
 
 // POST { staffId, action: "in" | "out" }

@@ -145,10 +145,14 @@ export async function GET(request: NextRequest) {
     }
 
     const sessionData = await loadSessions(restaurantId);
-    const [orders, tables, tipsToday] = await Promise.all([
+    const [orders, tables, tipsToday, openStaffIds] = await Promise.all([
       getOrdersForRestaurant(restaurantId),
       useCases.livePoll.listTables(restaurantId),
       sumTipsToday(restaurantId),
+      // Folded in so the dashboard doesn't need a separate /api/clock
+      // poll for the "On Shift Now" bulbs — the use case already
+      // filters out stale shifts.
+      useCases.clockInOut.listOpenStaffIds(),
     ]);
 
     return NextResponse.json({
@@ -158,6 +162,7 @@ export async function GET(request: NextRequest) {
       shiftStart: sessionData.shiftStart,
       tables,
       tipsToday,
+      openStaffIds,
     });
   } catch (err) {
     const e = err as Error;

@@ -7,6 +7,7 @@ import { generateFloorAlerts, type FloorAlert } from "@/lib/floor-alerts";
 import { getShiftTimer } from "@/lib/shifts";
 import { RESTAURANT_SLUG } from "@/lib/restaurant-config";
 import { staffFetch } from "@/lib/staff-fetch";
+import { startPoll } from "@/lib/polling";
 import { minsAgo } from "./constants";
 import type {
   ActionLogEntry,
@@ -51,6 +52,10 @@ export function useFloorData(loggedInStaff: LoggedInStaff) {
   }, []);
 
   // ─── Polls ─────────────────────────────────────────
+  // All polls use startPoll: ticks pause when the tab is hidden, and a
+  // single fresh fetch fires when it becomes visible again. Floor
+  // tablets live in standby a lot — this is where most of the cost
+  // savings come from.
   useEffect(() => {
     let cancelled = false;
     async function fetchSessions() {
@@ -60,8 +65,8 @@ export function useFloorData(loggedInStaff: LoggedInStaff) {
       } catch {}
     }
     fetchSessions();
-    const interval = setInterval(fetchSessions, 20000);
-    return () => { cancelled = true; clearInterval(interval); };
+    const stop = startPoll(fetchSessions, 20000);
+    return () => { cancelled = true; stop(); };
   }, [loggedInStaff.id]);
 
   useEffect(() => {
@@ -76,8 +81,8 @@ export function useFloorData(loggedInStaff: LoggedInStaff) {
       } catch {}
     }
     fetchStaff();
-    const interval = setInterval(fetchStaff, 30000);
-    return () => { cancelled = true; clearInterval(interval); };
+    const stop = startPoll(fetchStaff, 30000);
+    return () => { cancelled = true; stop(); };
   }, []);
 
   useEffect(() => {
@@ -89,17 +94,18 @@ export function useFloorData(loggedInStaff: LoggedInStaff) {
       } catch {}
     }
     fetchDeliveries();
-    const interval = setInterval(fetchDeliveries, 20000);
-    return () => { cancelled = true; clearInterval(interval); };
+    const stop = startPoll(fetchDeliveries, 20000);
+    return () => { cancelled = true; stop(); };
   }, []);
 
   // Clocked-in staff IDs — feeds the green/red bulb on every staff row
-  // in the Staff panel. Polled every 30s; clock state doesn't churn fast.
+  // in the Staff panel. cache:no-store so a clock-out elsewhere lands
+  // on the next poll instead of a stale browser response.
   useEffect(() => {
     let cancelled = false;
     async function fetchClocked() {
       try {
-        const res = await fetch(`/api/clock?restaurantId=${RESTAURANT_SLUG}`);
+        const res = await fetch(`/api/clock?restaurantId=${RESTAURANT_SLUG}`, { cache: "no-store" });
         if (res.ok && !cancelled) {
           const data = await res.json();
           setClockedInIds(new Set<string>(data.openStaffIds || []));
@@ -107,12 +113,12 @@ export function useFloorData(loggedInStaff: LoggedInStaff) {
       } catch {}
     }
     fetchClocked();
-    const interval = setInterval(fetchClocked, 30000);
-    return () => { cancelled = true; clearInterval(interval); };
+    const stop = startPoll(fetchClocked, 30000);
+    return () => { cancelled = true; stop(); };
   }, []);
 
   useEffect(() => {
-    const poll = setInterval(() => {
+    return startPoll(() => {
       fetch(`/api/messages?since=${lastMsgPoll.current}&to=${loggedInStaff.id}&restaurantId=${RESTAURANT_SLUG}`)
         .then((res) => res.json())
         .then((msgs: RecentMessage[]) => {
@@ -128,7 +134,6 @@ export function useFloorData(loggedInStaff: LoggedInStaff) {
         })
         .catch(() => {});
     }, 15000);
-    return () => clearInterval(poll);
   }, [loggedInStaff.id]);
 
   // ─── Derivations ───────────────────────────────────
