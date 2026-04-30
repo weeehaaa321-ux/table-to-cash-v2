@@ -450,7 +450,10 @@ export function useLiveData(staffId?: string) {
       if (snap.sessions) setActiveSessions(snap.sessions);
 
       if (Array.isArray(snap.openStaffIds)) {
-        usePerception.setState({ openStaffIds: new Set(snap.openStaffIds) });
+        usePerception.setState({
+          openStaffIds: new Set(snap.openStaffIds),
+          openStaffIdsLoaded: true,
+        });
       }
 
       if (snap.tables && snap.tables.length > 0) {

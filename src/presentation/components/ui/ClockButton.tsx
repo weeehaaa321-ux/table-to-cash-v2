@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import { useLanguage } from "@/lib/use-language";
 import { RESTAURANT_TZ } from "@/lib/restaurant-config";
+import { usePerception } from "@/lib/engine/perception";
 
 // Clock-in / clock-out control for staff role pages.
 //
@@ -65,6 +66,26 @@ export function ClockButton({
   };
 
   useEffect(() => { refresh(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [staffId]);
+
+  // Cross-channel reconciliation. The pill caches `state` from the
+  // last refresh, so it can drift out of sync with the DB if:
+  //   (a) a floor manager clocks this staff out from the floor view,
+  //   (b) the shift gets auto-aged past the 14h staleness window.
+  // Floor manager polls and the dashboard read the *server*, so in
+  // both cases they correctly show red — but the staff's own page
+  // keeps showing green until they tap the pill. This effect plugs
+  // the gap by re-fetching whenever the live-snapshot poll lands an
+  // openStaffIds set that doesn't include this staff. No new poll —
+  // useLiveData already runs on every role page.
+  const openStaffIds = usePerception((s) => s.openStaffIds);
+  const openStaffIdsLoaded = usePerception((s) => s.openStaffIdsLoaded);
+  useEffect(() => {
+    if (!openStaffIdsLoaded) return;
+    if (state !== "in") return;
+    if (openStaffIds.has(staffId)) return;
+    refresh();
+    /* eslint-disable-next-line react-hooks/exhaustive-deps */
+  }, [openStaffIds, openStaffIdsLoaded, staffId, state]);
 
   const toggle = async () => {
     if (busy || state === "loading") return;

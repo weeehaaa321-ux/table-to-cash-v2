@@ -84,8 +84,12 @@ export type PerceptionState = {
   revenueSegment: RevenueSegment;
   // Staff IDs currently clocked in. Refreshed by /api/live-snapshot
   // alongside orders/sessions so the dashboard's "On Shift Now" bulbs
-  // don't need a second dedicated poll.
+  // don't need a second dedicated poll. `openStaffIdsLoaded` flips true
+  // the first time the snapshot reply lands — until then, consumers
+  // can't tell "no one is clocked in" from "we haven't asked yet" and
+  // shouldn't act on the empty set (e.g. force-show the clock-in gate).
   openStaffIds: ReadonlySet<string>;
+  openStaffIdsLoaded: boolean;
 
   metrics: {
     revenueToday: number;
@@ -138,6 +142,7 @@ export const usePerception = create<PerceptionState>((set, get) => ({
     room: { revenue: 0, orders: 0, avgValue: 0 },
   },
   openStaffIds: new Set<string>(),
+  openStaffIdsLoaded: false,
   metrics: {
     revenueToday: 0,
     ordersToday: 0,
