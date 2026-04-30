@@ -1090,7 +1090,7 @@ function TrackPage() {
                       <div className="pt-1">
                         <p className="text-[11px] font-bold text-text-muted mb-2 uppercase tracking-widest">{lang === "ar" ? "إكرامية" : "Leave a Tip"}</p>
                         <div className="flex gap-2">
-                          {[{ v: 0, l: lang === "ar" ? "لا" : "No tip" }, { v: 10, l: "10" }, { v: 20, l: "20" }, { v: 30, l: "30" }].map(({ v, l }) => {
+                          {[{ v: 0, l: lang === "ar" ? "لا" : "No tip" }, { v: 20, l: "20" }, { v: 50, l: "50" }, { v: 100, l: "100" }].map(({ v, l }) => {
                             const selected = tipAmount === v && !showCustomTip;
                             return (
                               <button
