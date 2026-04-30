@@ -1031,75 +1031,35 @@ function TrackPage() {
                     </div>
                   </div>
 
-                  {/* Tip + payment methods — locked behind a single-tap
-                      overlay until the guest explicitly chooses to pay.
-                      The default invites them to keep eating. */}
+                  {/* Payment methods + (conditionally) tip — locked behind
+                      a single-tap overlay until the guest explicitly
+                      chooses to pay. The default invites them to keep
+                      eating. Tip appears only AFTER a non-cash payment
+                      method is picked: cash tips happen physically at
+                      the cashier, and showing the tip pad before the
+                      guest has decided how to pay just adds noise. */}
                   <div className="relative mb-4">
                   <div className={paymentUnlocked ? "" : "blur-sm pointer-events-none select-none"}>
-                  {/* Tip selector */}
-                  <div className="mb-4">
-                    <p className="text-[11px] font-bold text-text-muted mb-2 uppercase tracking-widest">{lang === "ar" ? "إكرامية" : "Leave a Tip"}</p>
-                    <div className="flex gap-2">
-                      {[{ v: 0, l: lang === "ar" ? "لا" : "No tip" }, { v: 10, l: "10" }, { v: 20, l: "20" }, { v: 30, l: "30" }].map(({ v, l }) => {
-                        const locked = cashPending || cashConfirmed;
-                        const selected = tipAmount === v && !showCustomTip;
-                        return (
-                          <button
-                            key={v}
-                            onClick={() => { if (locked) return; setTipAmount(v); setShowCustomTip(false); setCustomTip(""); }}
-                            disabled={locked}
-                            className={`flex-1 py-2 rounded-xl text-xs font-bold border-2 transition-all ${
-                              selected
-                                ? "border-status-good-500 bg-status-good-50 text-status-good-700"
-                                : "border-sand-200 bg-white text-text-secondary"
-                            } ${locked && !selected ? "opacity-40 cursor-not-allowed" : ""} ${locked && selected ? "cursor-not-allowed" : ""}`}
-                          >
-                            {v === 0 ? l : `${l} EGP`}
-                          </button>
-                        );
-                      })}
-                      <button
-                        onClick={() => { if (cashPending || cashConfirmed) return; setShowCustomTip(!showCustomTip); if (!showCustomTip) setTipAmount(0); }}
-                        disabled={cashPending || cashConfirmed}
-                        className={`flex-1 py-2 rounded-xl text-xs font-bold border-2 transition-all ${
-                          showCustomTip
-                            ? "border-status-good-500 bg-status-good-50 text-status-good-700"
-                            : "border-sand-200 bg-white text-text-secondary"
-                        } ${(cashPending || cashConfirmed) && !showCustomTip ? "opacity-40 cursor-not-allowed" : ""}`}
-                      >
-                        {lang === "ar" ? "آخر" : "Other"}
-                      </button>
-                    </div>
-                    <AnimatePresence>
-                      {showCustomTip && (
-                        <motion.div
-                          className="mt-2 flex gap-2"
-                          initial={{ opacity: 0, height: 0 }}
-                          animate={{ opacity: 1, height: "auto" }}
-                          exit={{ opacity: 0, height: 0 }}
-                        >
-                          <input
-                            type="number"
-                            placeholder={lang === "ar" ? "أدخل المبلغ" : "Enter amount"}
-                            value={customTip}
-                            onChange={(e) => { setCustomTip(e.target.value); setTipAmount(parseInt(e.target.value) || 0); }}
-                            className="flex-1 px-3 py-2 rounded-xl border border-sand-200 bg-sand-50 text-sm text-text-secondary focus:outline-none focus:ring-2 focus:ring-status-good-200"
-                          />
-                          <span className="flex items-center text-xs text-text-muted font-medium">EGP</span>
-                        </motion.div>
-                      )}
-                    </AnimatePresence>
-                  </div>
-
                   <p className="text-[11px] font-bold text-text-muted mb-2.5 uppercase tracking-widest">{t("track.paymentMethod")}</p>
-                  <div className="flex gap-2 mb-4">
+                  <div className={`flex gap-2 ${paymentMethod && paymentMethod !== "CASH" && !cashPending && !cashConfirmed ? "mb-4" : "mb-0"}`}>
                     {([["CASH", t("track.cash"), "💵"], ["CARD", t("track.card"), "💳"], ["INSTAPAY", t("track.instapay"), "📱"]] as [string, string, string][]).map(([key, label, icon]) => {
                       const locked = cashPending || cashConfirmed;
                       const selected = paymentMethod === key;
                       return (
                         <button
                           key={key}
-                          onClick={() => { if (!locked) setPaymentMethod(key as "CASH" | "CARD" | "INSTAPAY"); }}
+                          onClick={() => {
+                            if (locked) return;
+                            // Switching to cash zeros any previously-entered
+                            // digital tip — there's no UI for it any more
+                            // and the receipt summary should reflect that.
+                            if (key === "CASH") {
+                              setTipAmount(0);
+                              setCustomTip("");
+                              setShowCustomTip(false);
+                            }
+                            setPaymentMethod(key as "CASH" | "CARD" | "INSTAPAY");
+                          }}
                           disabled={locked}
                           className={`flex-1 py-3.5 rounded-xl text-sm font-bold border-2 transition-all flex flex-col items-center gap-1 ${
                             selected
@@ -1113,6 +1073,73 @@ function TrackPage() {
                       );
                     })}
                   </div>
+
+                  {/* Tip selector — only after a non-cash method is picked
+                      and before the guest has actually requested payment.
+                      Animated open/close so it doesn't pop in jarringly. */}
+                  <AnimatePresence initial={false}>
+                  {paymentMethod && paymentMethod !== "CASH" && !cashPending && !cashConfirmed && (
+                    <motion.div
+                      key="tip-section"
+                      initial={{ opacity: 0, height: 0 }}
+                      animate={{ opacity: 1, height: "auto" }}
+                      exit={{ opacity: 0, height: 0 }}
+                      transition={{ duration: 0.18 }}
+                      className="overflow-hidden"
+                    >
+                      <div className="pt-1">
+                        <p className="text-[11px] font-bold text-text-muted mb-2 uppercase tracking-widest">{lang === "ar" ? "إكرامية" : "Leave a Tip"}</p>
+                        <div className="flex gap-2">
+                          {[{ v: 0, l: lang === "ar" ? "لا" : "No tip" }, { v: 10, l: "10" }, { v: 20, l: "20" }, { v: 30, l: "30" }].map(({ v, l }) => {
+                            const selected = tipAmount === v && !showCustomTip;
+                            return (
+                              <button
+                                key={v}
+                                onClick={() => { setTipAmount(v); setShowCustomTip(false); setCustomTip(""); }}
+                                className={`flex-1 py-2 rounded-xl text-xs font-bold border-2 transition-all ${
+                                  selected
+                                    ? "border-status-good-500 bg-status-good-50 text-status-good-700"
+                                    : "border-sand-200 bg-white text-text-secondary"
+                                }`}
+                              >
+                                {v === 0 ? l : `${l} EGP`}
+                              </button>
+                            );
+                          })}
+                          <button
+                            onClick={() => { setShowCustomTip(!showCustomTip); if (!showCustomTip) setTipAmount(0); }}
+                            className={`flex-1 py-2 rounded-xl text-xs font-bold border-2 transition-all ${
+                              showCustomTip
+                                ? "border-status-good-500 bg-status-good-50 text-status-good-700"
+                                : "border-sand-200 bg-white text-text-secondary"
+                            }`}
+                          >
+                            {lang === "ar" ? "آخر" : "Other"}
+                          </button>
+                        </div>
+                        <AnimatePresence>
+                          {showCustomTip && (
+                            <motion.div
+                              className="mt-2 flex gap-2"
+                              initial={{ opacity: 0, height: 0 }}
+                              animate={{ opacity: 1, height: "auto" }}
+                              exit={{ opacity: 0, height: 0 }}
+                            >
+                              <input
+                                type="number"
+                                placeholder={lang === "ar" ? "أدخل المبلغ" : "Enter amount"}
+                                value={customTip}
+                                onChange={(e) => { setCustomTip(e.target.value); setTipAmount(parseInt(e.target.value) || 0); }}
+                                className="flex-1 px-3 py-2 rounded-xl border border-sand-200 bg-sand-50 text-sm text-text-secondary focus:outline-none focus:ring-2 focus:ring-status-good-200"
+                              />
+                              <span className="flex items-center text-xs text-text-muted font-medium">EGP</span>
+                            </motion.div>
+                          )}
+                        </AnimatePresence>
+                      </div>
+                    </motion.div>
+                  )}
+                  </AnimatePresence>
                   </div>
                   {!paymentUnlocked && (
                     <button
