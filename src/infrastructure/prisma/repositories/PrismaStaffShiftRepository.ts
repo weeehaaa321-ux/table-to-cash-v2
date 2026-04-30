@@ -19,18 +19,26 @@ async function getRestaurantId(): Promise<string> {
 }
 
 export class PrismaStaffShiftRepository implements StaffShiftRepository {
-  async findOpenForStaff(staffId: StaffId): Promise<StaffShift | null> {
+  async findOpenForStaff(staffId: StaffId, sinceClockIn?: Date): Promise<StaffShift | null> {
     const row = await db.staffShift.findFirst({
-      where: { staffId, clockOut: null },
+      where: {
+        staffId,
+        clockOut: null,
+        ...(sinceClockIn ? { clockIn: { gte: sinceClockIn } } : {}),
+      },
       orderBy: { clockIn: "desc" },
     });
     return row ? mapStaffShift(row) : null;
   }
 
-  async listOpenStaffIds(): Promise<readonly string[]> {
+  async listOpenStaffIds(sinceClockIn?: Date): Promise<readonly string[]> {
     const restaurantId = await getRestaurantId();
     const rows = await db.staffShift.findMany({
-      where: { restaurantId, clockOut: null },
+      where: {
+        restaurantId,
+        clockOut: null,
+        ...(sinceClockIn ? { clockIn: { gte: sinceClockIn } } : {}),
+      },
       select: { staffId: true },
     });
     return rows.map((r) => r.staffId);
