@@ -15,7 +15,7 @@ type Cat = {
 
 type Item = {
   name: string; nameAr?: string; description?: string; price: number;
-  image: string; categorySlug: string; sortOrder: number;
+  image: string | null; categorySlug: string; sortOrder: number;
   prepTime?: number; bestSeller?: boolean;
   addOns?: { name: string; price: number }[];
 };
@@ -77,8 +77,9 @@ const items: Item[] = [
   { name: "Watermelon with Mint", nameAr: "بطيخ بالنعناع", price: 140, image: u("1527161153332-f99fded0e024"), categorySlug: "fresh-juices", sortOrder: 10, prepTime: 3 },
   { name: "Avocado Juice", nameAr: "عصير أفوكادو", price: 150, image: u("1638176066666-694728804773"), categorySlug: "fresh-juices", sortOrder: 11, prepTime: 3 },
   { name: "Orange Juice", nameAr: "عصير برتقال", price: 130, image: u("1621506289937-a8e93c95b77f"), categorySlug: "fresh-juices", sortOrder: 12, prepTime: 3, bestSeller: true },
-  { name: "Banana with Milk", nameAr: "موز بالحليب", price: 140, image: u("1571019613454-1cb2f99b2d8b"), categorySlug: "fresh-juices", sortOrder: 13, prepTime: 3 },
-  { name: "Banana with Caramel", nameAr: "موز بالكراميل", price: 150, image: u("1571019613454-1cb2f99b2d8b"), categorySlug: "fresh-juices", sortOrder: 14, prepTime: 3 },
+  // image: null — the previous Unsplash photo here was a portrait, not food.
+  { name: "Banana with Milk", nameAr: "موز بالحليب", price: 140, image: null, categorySlug: "fresh-juices", sortOrder: 13, prepTime: 3 },
+  { name: "Banana with Caramel", nameAr: "موز بالكراميل", price: 150, image: null, categorySlug: "fresh-juices", sortOrder: 14, prepTime: 3 },
   { name: "Kiwi Juice", nameAr: "عصير كيوي", price: 150, image: u("1616684000067-36952fde56ec"), categorySlug: "fresh-juices", sortOrder: 15, prepTime: 3 },
 
   // ─── Soft Drinks ──────────────────────────────────
@@ -103,7 +104,7 @@ const items: Item[] = [
   { name: "Mango Milkshake", nameAr: "ميلك شيك مانجو", price: 150, image: u("1546173159-315724a31696"), categorySlug: "milkshakes", sortOrder: 5, prepTime: 4 },
   { name: "Blueberry Milkshake", nameAr: "ميلك شيك بلوبيري", price: 150, image: u("1553530666-ba11a7da3888"), categorySlug: "milkshakes", sortOrder: 6, prepTime: 4 },
   { name: "Mix Berry Milkshake", nameAr: "ميلك شيك ميكس بيري", price: 150, image: u("1553530666-ba11a7da3888"), categorySlug: "milkshakes", sortOrder: 7, prepTime: 4 },
-  { name: "Banana Milkshake", nameAr: "ميلك شيك موز", price: 140, image: u("1571019613454-1cb2f99b2d8b"), categorySlug: "milkshakes", sortOrder: 8, prepTime: 4 },
+  { name: "Banana Milkshake", nameAr: "ميلك شيك موز", price: 140, image: null, categorySlug: "milkshakes", sortOrder: 8, prepTime: 4 },
   { name: "Oreo Milkshake", nameAr: "ميلك شيك أوريو", price: 150, image: u("1563805042-7684c019e1cb"), categorySlug: "milkshakes", sortOrder: 9, prepTime: 4, bestSeller: true },
   { name: "Caramel Milkshake", nameAr: "ميلك شيك كراميل", price: 140, image: u("1572490122747-3968b75cc699"), categorySlug: "milkshakes", sortOrder: 10, prepTime: 4 },
   { name: "Lotus Milkshake", nameAr: "ميلك شيك لوتس", price: 140, image: u("1572490122747-3968b75cc699"), categorySlug: "milkshakes", sortOrder: 11, prepTime: 4 },
@@ -122,8 +123,8 @@ const items: Item[] = [
   { name: "Oreo Waffle", nameAr: "وافل أوريو", price: 180, image: u("1562376552-0d160a2f238d"), categorySlug: "desserts", sortOrder: 9, prepTime: 8 },
   { name: "Lotus Waffle", nameAr: "وافل لوتس", price: 180, image: u("1562376552-0d160a2f238d"), categorySlug: "desserts", sortOrder: 10, prepTime: 8 },
   { name: "Waffle Neom", nameAr: "وافل نيوم", price: 250, image: u("1562376552-0d160a2f238d"), categorySlug: "desserts", sortOrder: 11, prepTime: 10, bestSeller: true },
-  { name: "Umm Ali (Plain)", nameAr: "أم علي سادة", price: 130, image: u("1571019613454-1cb2f99b2d8b"), categorySlug: "desserts", sortOrder: 12, prepTime: 12 },
-  { name: "Umm Ali with Nuts", nameAr: "أم علي بالمكسرات", price: 180, image: u("1571019613454-1cb2f99b2d8b"), categorySlug: "desserts", sortOrder: 13, prepTime: 12 },
+  { name: "Umm Ali (Plain)", nameAr: "أم علي سادة", price: 130, image: null, categorySlug: "desserts", sortOrder: 12, prepTime: 12 },
+  { name: "Umm Ali with Nuts", nameAr: "أم علي بالمكسرات", price: 180, image: null, categorySlug: "desserts", sortOrder: 13, prepTime: 12 },
   { name: "Oreo Madness", nameAr: "أوريو مادنس", price: 200, image: u("1563805042-7684c019e1cb"), categorySlug: "desserts", sortOrder: 14, prepTime: 10 },
 
   // ─── Cocktails ────────────────────────────────────
