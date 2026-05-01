@@ -12,6 +12,15 @@ const SHIFT_LABELS: Record<number, string> = {
 
 const AUTO_CLOCKOUT_GRACE_MS = 60 * 60 * 1000;  // 1 hour after shift end
 
+// Hard cap on the "defer if work is in flight" path. A cashier who walks
+// out mid-settlement, or a waiter sitting on stranded tables that never
+// got reassigned (no current-shift waiter ever clocked in), would
+// otherwise stay clocked-in indefinitely. After this many ms past
+// shift end, we close anyway — the unfinished settlement / orphan
+// session stays in the DB for human cleanup, but the StaffShift no
+// longer counts toward someone's hours.
+const AUTO_CLOCKOUT_HARD_CAP_MS = 4 * 60 * 60 * 1000;  // 4 hours past shift end
+
 function cairoMinutes(): number {
   const t = nowInRestaurantTz(new Date());
   return t.getHours() * 60 + t.getMinutes();
@@ -108,14 +117,18 @@ export class CronUseCases {
    * 1 hour ago. This is the *only* path that closes a shift now —
    * staff and floor managers can't clock out manually.
    *
-   * Two safety checks layered on top of the deadline test:
+   * Three safety layers on top of the deadline test:
    *
-   *  - **Defer if work is in flight**: a waiter with an open
-   *    `TableSession`, or a cashier with an open `CashSettlement`,
-   *    isn't closed even if past deadline. Lets them finish what
-   *    they're doing without the gate slamming in mid-action. The
-   *    reassign sweep will normally have moved the waiter's tables
-   *    by then; if not, we wait.
+   *  - **Defer if work is in flight (within hard cap)**: a waiter with
+   *    an open `TableSession`, or a cashier with an open
+   *    `CashSettlement`, isn't closed at the soft deadline. Lets them
+   *    finish without the gate slamming in mid-action.
+   *
+   *  - **Hard cap at deadline + 4h**: if work is *still* in flight 4
+   *    hours past shift end (cashier walked out mid-settlement, no
+   *    current-shift waiter ever showed up to absorb stranded tables),
+   *    close anyway. The unfinished work stays in the DB for human
+   *    cleanup; the StaffShift no longer counts toward hours.
    *
    *  - **Race-safe close**: `updateMany` with `clockOut: null` in the
    *    `where` clause means an end-shift initiated seconds before this
@@ -125,13 +138,13 @@ export class CronUseCases {
    * skipped — no defined end time, the 24h staleness backstop in
    * ClockInOutUseCase covers them.
    */
-  async runAutoClockOut(): Promise<{ closed: number; skipped: number; checked: number; deferred: number }> {
+  async runAutoClockOut(): Promise<{ closed: number; skipped: number; checked: number; deferred: number; forced: number }> {
     const now = new Date();
     const open = await db.staffShift.findMany({
       where: { clockOut: null },
       select: { id: true, staffId: true, clockIn: true },
     });
-    if (open.length === 0) return { closed: 0, skipped: 0, deferred: 0, checked: 0 };
+    if (open.length === 0) return { closed: 0, skipped: 0, deferred: 0, forced: 0, checked: 0 };
 
     const staff = await db.staff.findMany({
       where: { id: { in: open.map((s) => s.staffId) } },
@@ -139,11 +152,10 @@ export class CronUseCases {
     });
     const staffById = new Map(staff.map((s) => [s.id, s]));
 
-    // First pass: figure out which shifts are even past deadline. We
-    // only need to check "work in flight" for those — saves a pile of
-    // queries on every cron tick (most shifts are well within their
-    // window).
-    const dueShifts: { id: string; staffId: string; role: string }[] = [];
+    // First pass: figure out which shifts are past the soft deadline,
+    // and tag the ones that are also past the hard cap so we know to
+    // ignore "work in flight" for them.
+    const dueShifts: { id: string; staffId: string; role: string; forced: boolean }[] = [];
     let skipped = 0;
     for (const shift of open) {
       const s = staffById.get(shift.staffId);
@@ -155,11 +167,12 @@ export class CronUseCases {
       const deadline = shiftEnd.getTime() + AUTO_CLOCKOUT_GRACE_MS;
       if (now.getTime() <= deadline) { skipped++; continue; }
 
-      dueShifts.push({ id: shift.id, staffId: s.id, role: s.role });
+      const forced = now.getTime() > shiftEnd.getTime() + AUTO_CLOCKOUT_HARD_CAP_MS;
+      dueShifts.push({ id: shift.id, staffId: s.id, role: s.role, forced });
     }
 
     if (dueShifts.length === 0) {
-      return { closed: 0, skipped, deferred: 0, checked: open.length };
+      return { closed: 0, skipped, deferred: 0, forced: 0, checked: open.length };
     }
 
     // Bulk-check open work for the due staff (one query per kind, not
@@ -190,8 +203,10 @@ export class CronUseCases {
 
     let closed = 0;
     let deferred = 0;
+    let forcedCount = 0;
     for (const due of dueShifts) {
-      if (busyStaff.has(due.staffId)) {
+      const busy = busyStaff.has(due.staffId);
+      if (busy && !due.forced) {
         // Mid-payment cashier or waiter still holding a table — defer.
         // Next cron tick will retry; reassign sweep will have moved
         // the table by then in normal flow.
@@ -204,11 +219,15 @@ export class CronUseCases {
         where: { id: due.id, clockOut: null },
         data: { clockOut: now },
       });
-      if (result.count > 0) closed++;
-      else skipped++;
+      if (result.count > 0) {
+        closed++;
+        if (busy && due.forced) forcedCount++;
+      } else {
+        skipped++;
+      }
     }
 
-    return { closed, skipped, deferred, checked: open.length };
+    return { closed, skipped, deferred, forced: forcedCount, checked: open.length };
   }
 
   /** Fire any check_table messages whose scheduled time has passed. */
