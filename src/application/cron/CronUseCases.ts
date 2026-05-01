@@ -1,5 +1,5 @@
 import { db } from "@/lib/db";
-import { sendPushToStaff } from "@/lib/web-push";
+import { sendPushToStaff, sendPushToRole } from "@/lib/web-push";
 import { nowInRestaurantTz } from "@/lib/restaurant-config";
 import { getShiftBounds } from "@/lib/shifts";
 
@@ -12,14 +12,19 @@ const SHIFT_LABELS: Record<number, string> = {
 
 const AUTO_CLOCKOUT_GRACE_MS = 60 * 60 * 1000;  // 1 hour after shift end
 
-// Hard cap on the "defer if work is in flight" path. A cashier who walks
-// out mid-settlement, or a waiter sitting on stranded tables that never
-// got reassigned (no current-shift waiter ever clocked in), would
-// otherwise stay clocked-in indefinitely. After this many ms past
-// shift end, we close anyway — the unfinished settlement / orphan
-// session stays in the DB for human cleanup, but the StaffShift no
-// longer counts toward someone's hours.
-const AUTO_CLOCKOUT_HARD_CAP_MS = 4 * 60 * 60 * 1000;  // 4 hours past shift end
+// Hard cap on the "defer if work is in flight" path. A cashier who
+// walks out mid-settlement, or a waiter sitting on stranded tables
+// that never got reassigned, would otherwise stay clocked-in
+// indefinitely. After this many ms past shift end, close anyway —
+// the unfinished work stays in the DB for human cleanup, but the
+// StaffShift no longer counts toward someone's hours.
+const AUTO_CLOCKOUT_HARD_CAP_MS = 2 * 60 * 60 * 1000;  // 2 hours past shift end
+
+// A pending payment older than this gets a push to active cashiers.
+// Customer hit "Pay" -> cashier was supposed to confirm; if no one
+// has within this window, surface it loudly so the table doesn't sit
+// stuck. The check runs on the auto-clockout cron tick (every 5min).
+const STUCK_PAYMENT_AGE_MS = 10 * 60 * 1000;  // 10 minutes
 
 function cairoMinutes(): number {
   const t = nowInRestaurantTz(new Date());
@@ -138,13 +143,32 @@ export class CronUseCases {
    * skipped — no defined end time, the 24h staleness backstop in
    * ClockInOutUseCase covers them.
    */
-  async runAutoClockOut(): Promise<{ closed: number; skipped: number; checked: number; deferred: number; forced: number }> {
+  async runAutoClockOut(): Promise<{ closed: number; skipped: number; checked: number; deferred: number; forced: number; nudgedCashiers: number }> {
     const now = new Date();
     const open = await db.staffShift.findMany({
       where: { clockOut: null },
       select: { id: true, staffId: true, clockIn: true },
     });
-    if (open.length === 0) return { closed: 0, skipped: 0, deferred: 0, forced: 0, checked: 0 };
+
+    // Always run the stuck-payments nudge at the end, even if there's
+    // nothing to clock out — pending confirmations are independent of
+    // shift state. Wraps the whole flow in a single helper.
+    const finish = async (partial: {
+      closed: number; skipped: number; deferred: number; forced: number;
+    }) => {
+      let nudgedCashiers = 0;
+      try {
+        const result = await this.notifyStuckPayments();
+        nudgedCashiers = result.notified;
+      } catch (err) {
+        console.error("notifyStuckPayments failed:", err);
+      }
+      return { ...partial, checked: open.length, nudgedCashiers };
+    };
+
+    if (open.length === 0) {
+      return finish({ closed: 0, skipped: 0, deferred: 0, forced: 0 });
+    }
 
     const staff = await db.staff.findMany({
       where: { id: { in: open.map((s) => s.staffId) } },
@@ -172,7 +196,7 @@ export class CronUseCases {
     }
 
     if (dueShifts.length === 0) {
-      return { closed: 0, skipped, deferred: 0, forced: 0, checked: open.length };
+      return finish({ closed: 0, skipped, deferred: 0, forced: 0 });
     }
 
     // Bulk-check open work for the due staff (one query per kind, not
@@ -181,10 +205,28 @@ export class CronUseCases {
     const cashierIds = dueShifts.filter((d) => d.role === "CASHIER").map((d) => d.staffId);
 
     const [busyWaiters, busyCashiers] = await Promise.all([
+      // A waiter is "busy" only if they have a session with at least
+      // one order that's still in active waiter territory: not paid,
+      // no payment method requested yet, and not cancelled. A session
+      // whose only unpaid orders are sitting on cashier confirmation
+      // ISN'T waiter work — the waiter is done, the cashier is the
+      // bottleneck. Without this filter, a waiter who handed off the
+      // last order at 3:55 PM gets unfairly held on the clock just
+      // because the cashier hasn't confirmed yet.
       waiterIds.length === 0
         ? Promise.resolve<{ waiterId: string | null }[]>([])
         : db.tableSession.findMany({
-            where: { waiterId: { in: waiterIds }, status: "OPEN" },
+            where: {
+              waiterId: { in: waiterIds },
+              status: "OPEN",
+              orders: {
+                some: {
+                  paidAt: null,
+                  paymentMethod: null,
+                  status: { not: "CANCELLED" },
+                },
+              },
+            },
             select: { waiterId: true },
             distinct: ["waiterId"],
           }),
@@ -227,7 +269,63 @@ export class CronUseCases {
       }
     }
 
-    return { closed, skipped, deferred, forced: forcedCount, checked: open.length };
+    return finish({ closed, skipped, deferred, forced: forcedCount });
+  }
+
+  /**
+   * Push-notify cashiers about payments that have been "pay requested"
+   * (paymentMethod set, paidAt still null) for longer than the stuck
+   * threshold. Runs alongside the auto-clockout cron so we don't add
+   * another schedule. The push tag is per-restaurant so re-runs
+   * REPLACE rather than stack — the cashier sees one persistent
+   * notification, not a flood.
+   */
+  private async notifyStuckPayments(): Promise<{ notified: number }> {
+    const cutoff = new Date(Date.now() - STUCK_PAYMENT_AGE_MS);
+
+    const stuck = await db.order.findMany({
+      where: {
+        paidAt: null,
+        paymentMethod: { not: null },
+        updatedAt: { lt: cutoff },
+        status: { not: "CANCELLED" },
+      },
+      select: {
+        restaurantId: true,
+        session: {
+          select: { table: { select: { number: true } } },
+        },
+      },
+    });
+    if (stuck.length === 0) return { notified: 0 };
+
+    // Group by restaurant + collect distinct table numbers so the
+    // notification body lists which tables are waiting.
+    const byRestaurant = new Map<string, Set<number | null>>();
+    for (const o of stuck) {
+      const set = byRestaurant.get(o.restaurantId) ?? new Set<number | null>();
+      set.add(o.session?.table?.number ?? null);
+      byRestaurant.set(o.restaurantId, set);
+    }
+
+    let notified = 0;
+    for (const [restaurantId, tableSet] of byRestaurant) {
+      const numbered = Array.from(tableSet).filter((n): n is number => n != null).sort((a, b) => a - b);
+      const hasVip = tableSet.has(null);
+      const tableLabel = numbered.length > 0
+        ? `Table${numbered.length > 1 ? "s" : ""} ${numbered.join(", ")}${hasVip ? " + VIP" : ""}`
+        : "VIP session";
+      const count = tableSet.size;
+      await sendPushToRole("CASHIER", restaurantId, {
+        title: count === 1 ? "Payment confirmation needed" : `${count} payments need confirmation`,
+        body: `${tableLabel} — guest tapped Pay 10+ min ago.`,
+        tag: `stuck-payments-${restaurantId}`,
+        url: "/cashier",
+      }).catch(() => {});
+      notified++;
+    }
+
+    return { notified };
   }
 
   /** Fire any check_table messages whose scheduled time has passed. */
