@@ -106,22 +106,32 @@ export class CronUseCases {
   /**
    * Close every open StaffShift whose scheduled shift ended more than
    * 1 hour ago. This is the *only* path that closes a shift now —
-   * staff and floor managers can't clock out manually. The 1h grace
-   * covers cleanup time after the shift technically ends.
+   * staff and floor managers can't clock out manually.
    *
-   * Idempotent + safe to re-run: each row is checked independently,
-   * and the update target (`clockOut`) is the closure timestamp itself.
-   * Shifts with `shift === 0` (unassigned) are skipped — there's no
-   * defined end time for them, so the 14h staleness filter in
-   * ClockInOutUseCase is the backstop instead.
+   * Two safety checks layered on top of the deadline test:
+   *
+   *  - **Defer if work is in flight**: a waiter with an open
+   *    `TableSession`, or a cashier with an open `CashSettlement`,
+   *    isn't closed even if past deadline. Lets them finish what
+   *    they're doing without the gate slamming in mid-action. The
+   *    reassign sweep will normally have moved the waiter's tables
+   *    by then; if not, we wait.
+   *
+   *  - **Race-safe close**: `updateMany` with `clockOut: null` in the
+   *    `where` clause means an end-shift initiated seconds before this
+   *    runs won't get its `clockOut` overwritten by ours.
+   *
+   * Idempotent + safe to re-run. Shifts with `shift === 0` are
+   * skipped — no defined end time, the 24h staleness backstop in
+   * ClockInOutUseCase covers them.
    */
-  async runAutoClockOut(): Promise<{ closed: number; skipped: number; checked: number }> {
+  async runAutoClockOut(): Promise<{ closed: number; skipped: number; checked: number; deferred: number }> {
     const now = new Date();
     const open = await db.staffShift.findMany({
       where: { clockOut: null },
       select: { id: true, staffId: true, clockIn: true },
     });
-    if (open.length === 0) return { closed: 0, skipped: 0, checked: 0 };
+    if (open.length === 0) return { closed: 0, skipped: 0, deferred: 0, checked: 0 };
 
     const staff = await db.staff.findMany({
       where: { id: { in: open.map((s) => s.staffId) } },
@@ -129,9 +139,12 @@ export class CronUseCases {
     });
     const staffById = new Map(staff.map((s) => [s.id, s]));
 
-    let closed = 0;
+    // First pass: figure out which shifts are even past deadline. We
+    // only need to check "work in flight" for those — saves a pile of
+    // queries on every cron tick (most shifts are well within their
+    // window).
+    const dueShifts: { id: string; staffId: string; role: string }[] = [];
     let skipped = 0;
-
     for (const shift of open) {
       const s = staffById.get(shift.staffId);
       if (!s || s.shift === 0) { skipped++; continue; }
@@ -142,14 +155,60 @@ export class CronUseCases {
       const deadline = shiftEnd.getTime() + AUTO_CLOCKOUT_GRACE_MS;
       if (now.getTime() <= deadline) { skipped++; continue; }
 
-      await db.staffShift.update({
-        where: { id: shift.id },
-        data: { clockOut: now },
-      });
-      closed++;
+      dueShifts.push({ id: shift.id, staffId: s.id, role: s.role });
     }
 
-    return { closed, skipped, checked: open.length };
+    if (dueShifts.length === 0) {
+      return { closed: 0, skipped, deferred: 0, checked: open.length };
+    }
+
+    // Bulk-check open work for the due staff (one query per kind, not
+    // per staff). We fetch all the relevant counts in parallel.
+    const waiterIds = dueShifts.filter((d) => d.role === "WAITER").map((d) => d.staffId);
+    const cashierIds = dueShifts.filter((d) => d.role === "CASHIER").map((d) => d.staffId);
+
+    const [busyWaiters, busyCashiers] = await Promise.all([
+      waiterIds.length === 0
+        ? Promise.resolve<{ waiterId: string | null }[]>([])
+        : db.tableSession.findMany({
+            where: { waiterId: { in: waiterIds }, status: "OPEN" },
+            select: { waiterId: true },
+            distinct: ["waiterId"],
+          }),
+      cashierIds.length === 0
+        ? Promise.resolve<{ cashierId: string }[]>([])
+        : db.cashSettlement.findMany({
+            where: { cashierId: { in: cashierIds }, status: { in: ["REQUESTED", "ACCEPTED"] } },
+            select: { cashierId: true },
+            distinct: ["cashierId"],
+          }),
+    ]);
+    const busyStaff = new Set<string>([
+      ...busyWaiters.map((w) => w.waiterId).filter((id): id is string => !!id),
+      ...busyCashiers.map((c) => c.cashierId),
+    ]);
+
+    let closed = 0;
+    let deferred = 0;
+    for (const due of dueShifts) {
+      if (busyStaff.has(due.staffId)) {
+        // Mid-payment cashier or waiter still holding a table — defer.
+        // Next cron tick will retry; reassign sweep will have moved
+        // the table by then in normal flow.
+        deferred++;
+        continue;
+      }
+      // updateMany + clockOut:null filter so a concurrent end-shift
+      // doesn't get its timestamp clobbered by ours.
+      const result = await db.staffShift.updateMany({
+        where: { id: due.id, clockOut: null },
+        data: { clockOut: now },
+      });
+      if (result.count > 0) closed++;
+      else skipped++;
+    }
+
+    return { closed, skipped, deferred, checked: open.length };
   }
 
   /** Fire any check_table messages whose scheduled time has passed. */
