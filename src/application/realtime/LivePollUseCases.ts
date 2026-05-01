@@ -34,13 +34,20 @@ export class LivePollUseCases {
     });
   }
 
-  /** Every OPEN session, including ones with no waiter assigned. The
-   *  reassign sweep needs both: orphan-waiter sessions (need adoption)
-   *  AND assigned ones (might need reassignment if waiter is off-shift
-   *  or no longer clocked in). */
+  /** Every OPEN session that needs a waiter — i.e., dine-in (TABLE or
+   *  VIP_DINE_IN). DELIVERY sessions are excluded because they're
+   *  driven by a deliveryDriverId, not a waiter; treating them as
+   *  orphan-waiter sessions would push a waiter onto orders that don't
+   *  belong on the floor. The reassign sweep needs both null-waiter
+   *  rows (need adoption) and assigned ones (might need reassignment
+   *  if waiter is off-shift or no longer clocked in). */
   async listAllOpenSessions(restaurantId: string) {
     return db.tableSession.findMany({
-      where: { restaurantId, status: "OPEN" },
+      where: {
+        restaurantId,
+        status: "OPEN",
+        orderType: { not: "DELIVERY" },
+      },
       include: { waiter: { select: { id: true, shift: true } } },
     });
   }
