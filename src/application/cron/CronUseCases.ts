@@ -273,12 +273,22 @@ export class CronUseCases {
   }
 
   /**
-   * Push-notify cashiers about payments that have been "pay requested"
-   * (paymentMethod set, paidAt still null) for longer than the stuck
-   * threshold. Runs alongside the auto-clockout cron so we don't add
-   * another schedule. The push tag is per-restaurant so re-runs
-   * REPLACE rather than stack — the cashier sees one persistent
-   * notification, not a flood.
+   * Push-notify cashiers AND floor managers about payments that have
+   * been "pay requested" (paymentMethod set, paidAt still null) for
+   * longer than the stuck threshold.
+   *
+   * Why both roles: any of CASHIER / OWNER / FLOOR_MANAGER can confirm
+   * a payment (PAY_CONFIRM_ROLES). When no cashier is clocked in —
+   * the user's classic "guest pays mid-shift-handover" case — the
+   * floor manager is almost always on the floor and is the natural
+   * operational fallback. Without this, the table sat in limbo until
+   * the next cashier happened to clock in. Owner's not in the target
+   * list because they already see pending payments on their dashboard.
+   *
+   * Push tag is per-restaurant per-role so re-runs REPLACE rather
+   * than stack — each device sees one persistent notification, not
+   * a flood. Different tags per role so a cashier dismissing it
+   * doesn't auto-dismiss the floor manager's view.
    */
   private async notifyStuckPayments(): Promise<{ notified: number }> {
     const cutoff = new Date(Date.now() - STUCK_PAYMENT_AGE_MS);
@@ -308,6 +318,8 @@ export class CronUseCases {
       byRestaurant.set(o.restaurantId, set);
     }
 
+    const PUSH_TARGETS = ["CASHIER", "FLOOR_MANAGER"] as const;
+
     let notified = 0;
     for (const [restaurantId, tableSet] of byRestaurant) {
       const numbered = Array.from(tableSet).filter((n): n is number => n != null).sort((a, b) => a - b);
@@ -316,12 +328,17 @@ export class CronUseCases {
         ? `Table${numbered.length > 1 ? "s" : ""} ${numbered.join(", ")}${hasVip ? " + VIP" : ""}`
         : "VIP session";
       const count = tableSet.size;
-      await sendPushToRole("CASHIER", restaurantId, {
-        title: count === 1 ? "Payment confirmation needed" : `${count} payments need confirmation`,
-        body: `${tableLabel} — guest tapped Pay 10+ min ago.`,
-        tag: `stuck-payments-${restaurantId}`,
-        url: "/cashier",
-      }).catch(() => {});
+      const title = count === 1 ? "Payment confirmation needed" : `${count} payments need confirmation`;
+      const body = `${tableLabel} — guest tapped Pay 10+ min ago.`;
+
+      for (const role of PUSH_TARGETS) {
+        await sendPushToRole(role, restaurantId, {
+          title,
+          body,
+          tag: `stuck-payments-${restaurantId}-${role.toLowerCase()}`,
+          url: role === "FLOOR_MANAGER" ? "/floor" : "/cashier",
+        }).catch(() => {});
+      }
       notified++;
     }
 
