@@ -46,6 +46,12 @@ export async function POST(
       if (err.code === "ORDER_NOT_FOUND") {
         return NextResponse.json({ error: "Order not found" }, { status: 404 });
       }
+      if (err.code === "ORDER_CANCELLED") {
+        return NextResponse.json(
+          { error: "ORDER_CANCELLED", message: "This order has been cancelled — start a new one." },
+          { status: 409 },
+        );
+      }
     }
     console.error("Failed to append items:", err);
     return NextResponse.json({ error: "Failed to append items" }, { status: 500 });

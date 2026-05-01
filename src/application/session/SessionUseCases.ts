@@ -246,9 +246,14 @@ export class SessionUseCases {
     const orders = await db.order.findMany({ where: orderWhere, select: { id: true } });
     let cancelledCount = 0;
     if (orders.length > 0) {
+      // Zero everything money-shaped on the cancelled rows. If a guest
+      // had tapped "Pay X" before this close fires, the order would
+      // otherwise stay tagged with paymentMethod + tip on a CANCELLED
+      // row, and downstream aggregations that filter on paymentMethod
+      // (cashTotal, ledger views) would falsely pick it up.
       await db.order.updateMany({
         where: { id: { in: orders.map((o) => o.id) } },
-        data: { status: "CANCELLED" },
+        data: { status: "CANCELLED", paymentMethod: null, tip: 0 },
       });
       await db.orderItem.updateMany({
         where: { orderId: { in: orders.map((o) => o.id) }, cancelled: false },
@@ -613,6 +618,11 @@ export class SessionUseCases {
           data: {
             paidAt: null,
             paymentMethod: null,
+            // Reset the tip too — leaving a tip > 0 on a row with
+            // paidAt = null is an invariant violation. The next
+            // confirmPayRound will SET tip from the cashier's input,
+            // so this is purely hygiene.
+            tip: 0,
             status: o.status === "PAID" ? "SERVED" : o.status,
           },
         });

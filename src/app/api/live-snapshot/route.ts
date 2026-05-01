@@ -242,7 +242,9 @@ async function loadSessions(realId: string) {
       unpaidTotal: s.orders
         .filter((o) => o.status !== "CANCELLED" && o.paidAt == null)
         .reduce((sum, o) => sum + toNum(o.total), 0),
-      cashTotal: s.orders.filter((o) => o.paymentMethod === "CASH").reduce((sum, o) => sum + toNum(o.total), 0),
+      cashTotal: s.orders
+        .filter((o) => o.paymentMethod === "CASH" && o.status !== "CANCELLED" && o.paidAt != null)
+        .reduce((sum, o) => sum + toNum(o.total), 0),
       paymentReceived:
         s.orders.length > 0 &&
         s.orders.every((o) => o.status === "CANCELLED" || o.paidAt != null),

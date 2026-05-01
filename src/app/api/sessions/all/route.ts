@@ -70,7 +70,15 @@ export async function GET(request: NextRequest) {
           unpaidTotal: s.orders
             .filter((o) => o.status !== "CANCELLED" && o.paidAt == null)
             .reduce((sum, o) => sum + toNum(o.total), 0),
-          cashTotal: s.orders.filter((o) => o.paymentMethod === "CASH").reduce((sum, o) => sum + toNum(o.total), 0),
+          // Only orders that are actually settled in cash count toward
+          // cashTotal. The previous filter (paymentMethod === "CASH"
+          // alone) caught CANCELLED orders that still had a stale
+          // paymentMethod stamp, AND pending pay-requests where the
+          // guest had selected "CASH" but the cashier hadn't yet
+          // confirmed — both inflated the cashier's collected total.
+          cashTotal: s.orders
+            .filter((o) => o.paymentMethod === "CASH" && o.status !== "CANCELLED" && o.paidAt != null)
+            .reduce((sum, o) => sum + toNum(o.total), 0),
           paymentReceived:
             s.orders.length > 0 &&
             s.orders.every((o) => o.status === "CANCELLED" || o.paidAt != null),

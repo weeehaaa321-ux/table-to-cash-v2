@@ -473,6 +473,16 @@ export async function updateOrderStatus(
     paidAtValue = existing?.paidAt ?? now;
   }
 
+  // When the floor cancels a whole order, zero its money-shaped fields.
+  // Otherwise the row keeps a non-zero total (and any pre-stamped
+  // paymentMethod/tip from a "Pay X" tap), which downstream aggregations
+  // — cashTotal, daily-close cash bucket, cashier ledger — silently
+  // include in revenue. The per-item cancel cascade in OrderUseCases
+  // already does this; this path is the whole-order analogue.
+  const cancelExtras = status === "CANCELLED"
+    ? { subtotal: 0, total: 0, paymentMethod: null, tip: 0, deliveryFee: 0 }
+    : {};
+
   const order = await db.order.update({
     where: { id: orderId, restaurantId },
     data: {
@@ -481,6 +491,7 @@ export async function updateOrderStatus(
       readyAt: status === "READY" ? now : undefined,
       servedAt: status === "SERVED" ? now : undefined,
       ...(notes !== undefined ? { notes } : {}),
+      ...cancelExtras,
     },
     select: { id: true, status: true, orderNumber: true, notes: true },
   });
@@ -491,9 +502,9 @@ export async function updateOrderStatus(
 // ─── Append Items to Order ──────────────────────
 
 export class AppendItemsError extends Error {
-  code: "ORDER_NOT_FOUND" | "ITEMS_UNAVAILABLE";
+  code: "ORDER_NOT_FOUND" | "ITEMS_UNAVAILABLE" | "ORDER_CANCELLED";
   detail?: unknown;
-  constructor(code: "ORDER_NOT_FOUND" | "ITEMS_UNAVAILABLE", detail?: unknown) {
+  constructor(code: "ORDER_NOT_FOUND" | "ITEMS_UNAVAILABLE" | "ORDER_CANCELLED", detail?: unknown) {
     super(code);
     this.code = code;
     this.detail = detail;
@@ -533,9 +544,14 @@ export async function appendItemsToOrder(
   const order = await db.$transaction(async (tx) => {
     const exists = await tx.order.findUnique({
       where: { id: orderId },
-      select: { id: true },
+      select: { id: true, status: true },
     });
     if (!exists) throw new AppendItemsError("ORDER_NOT_FOUND");
+    // Refuse to append items to a CANCELLED order. Without this guard,
+    // bolting items onto a cancelled row would push its total back
+    // above zero while status stays CANCELLED — and most aggregations
+    // filter out CANCELLED, so the revenue would silently disappear.
+    if (exists.status === "CANCELLED") throw new AppendItemsError("ORDER_CANCELLED");
 
     await tx.orderItem.createMany({
       data: items.map((item) => ({
