@@ -452,21 +452,30 @@ export class SessionUseCases {
     });
   }
 
-  /** Guest cancels their pending payment request — only succeeds if no order has paidAt yet. */
+  /**
+   * Guest cancels their pending payment request. Only the *current*
+   * round's pending stamp is touched (orders with paymentMethod set
+   * and paidAt still null). Previously-paid rounds are untouched.
+   *
+   * The earlier implementation refused the cancel if ANY order in
+   * the session had paidAt set — which meant the moment a session
+   * had a settled round 1, the cancel button in round 2 silently
+   * 409'd as PAYMENT_CONFIRMED and looked broken to the guest.
+   *
+   * If updateMany clears nothing, the request had already been
+   * confirmed (or never existed) — either way the guest's UI is
+   * about to refresh from the next poll, so we return ok with
+   * cleared=0 and let the live state speak for itself.
+   */
   async cancelPaymentRequest(sessionId: string): Promise<
     | { ok: true; cleared: number }
-    | { ok: false; reason: "PAYMENT_CONFIRMED" }
   > {
-    const confirmed = await db.order.count({
-      where: { sessionId, paidAt: { not: null } },
-    });
-    if (confirmed > 0) return { ok: false, reason: "PAYMENT_CONFIRMED" };
-    // Clear both the chosen method AND the guest's pre-stamped tip.
-    // Cancelling the request should reset both — otherwise a tip the
-    // guest typed in then cancelled would silently linger and show up
-    // on the cashier's pre-fill the next time they tapped pay.
     const result = await db.order.updateMany({
       where: { sessionId, paidAt: null, paymentMethod: { not: null } },
+      // Reset both the chosen method AND the guest's pre-stamped tip.
+      // Without the tip reset, a tip the guest typed then cancelled
+      // would silently linger and show up on the cashier's pre-fill
+      // the next time they tapped Pay.
       data: { paymentMethod: null, tip: 0 },
     });
     return { ok: true, cleared: result.count };

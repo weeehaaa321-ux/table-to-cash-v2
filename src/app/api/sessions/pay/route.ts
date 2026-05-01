@@ -80,12 +80,6 @@ export async function DELETE(request: NextRequest) {
 
   try {
     const result = await useCases.sessions.cancelPaymentRequest(sessionId);
-    if (!result.ok) {
-      return NextResponse.json(
-        { error: "PAYMENT_CONFIRMED", message: "Cashier has already confirmed payment — cannot cancel." },
-        { status: 409 }
-      );
-    }
     return NextResponse.json({ success: true, cleared: result.cleared });
   } catch (err) {
     console.error("Payment cancel failed:", err);
