@@ -6,6 +6,7 @@ import { getCurrentShift } from "@/lib/shifts";
 import { computeSessionRounds } from "@/lib/session-rounds";
 import { nowInRestaurantTz } from "@/lib/restaurant-config";
 import { toNum } from "@/lib/money";
+import { db } from "@/lib/db";
 
 // ═══════════════════════════════════════════════════════
 // LIVE SNAPSHOT — combined endpoint
@@ -42,6 +43,16 @@ const reassignBackoffUntil = new Map<string, number>();
 const REASSIGN_THROTTLE_MS = 10 * 1000;
 const REASSIGN_BACKOFF_MS = 5 * 60 * 1000;
 
+// Postgres advisory lock key for the reassign sweep. The in-memory
+// throttle above is per-Lambda — two different Vercel function
+// instances serving concurrent polls can't see each other's throttle
+// map and would both run the sweep, doubling DB writes. This lock
+// makes "only one sweep across all instances at a time" guaranteed
+// at the database level. Arbitrary stable bigint that fits in int4
+// (Postgres advisory locks accept either) and is unlikely to collide
+// with anyone else's lock keys.
+const REASSIGN_SWEEP_LOCK_KEY = 0x7E555233; // 2_120_557_107
+
 // Allow at most this much imbalance before rebalancing. ±1 means a
 // 5-3 split sits, but a 5-2 split triggers a move. Larger values
 // reduce reassign churn at the cost of more uneven loads.
@@ -75,6 +86,18 @@ async function reassignSweep(realId: string, currentShift: number) {
 
   const backoff = reassignBackoffUntil.get(realId) || 0;
   if (Date.now() < backoff) return;
+
+  // Cross-instance lock: pg_try_advisory_lock returns true if we got it,
+  // false if another Lambda already holds it. We're not waiting — if
+  // someone else is sweeping, we just skip and let them do the work.
+  // The .catch(() => false) collapses any DB hiccup (connection drop,
+  // timeout) into "didn't get the lock" so we don't accidentally run
+  // a second sweep on top of an in-flight one.
+  const acquired = await db
+    .$queryRaw<{ locked: boolean }[]>`SELECT pg_try_advisory_lock(${REASSIGN_SWEEP_LOCK_KEY}) AS locked`
+    .then((r) => Boolean(r[0]?.locked))
+    .catch(() => false);
+  if (!acquired) return;
 
   lastReassignAt.set(realId, Date.now());
 
@@ -150,6 +173,13 @@ async function reassignSweep(realId: string, currentShift: number) {
     reassignBackoffUntil.set(realId, Date.now() + REASSIGN_BACKOFF_MS);
     Sentry.captureException(err, { tags: { area: "live-snapshot.reassign" } });
     console.error("reassignSweep failed:", err);
+  } finally {
+    // Always release the advisory lock, even on error. .catch swallows
+    // the rare case where the connection died — the lock would have
+    // released when Postgres closed the connection anyway.
+    await db
+      .$queryRaw`SELECT pg_advisory_unlock(${REASSIGN_SWEEP_LOCK_KEY})`
+      .catch(() => {});
   }
 }
 
