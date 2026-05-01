@@ -831,7 +831,13 @@ function KitchenSystem({ staff }: { staff: StaffInfo }) {
               )}
             </div>
             <ClockButton staffId={staff.id} name={staff.name} role={staff.role} />
-            {/* Desktop: inline history + schedule + language + logout. */}
+            {/* Always-visible language toggle (compact for mobile). */}
+            <LanguageToggle
+              lang={lang}
+              onToggle={toggleLang}
+              className="h-8 px-2.5 rounded-xl text-[11px] font-bold bg-sand-100 text-text-secondary hover:bg-sand-200 transition active:scale-95"
+            />
+            {/* Desktop: inline history + schedule + logout. */}
             <div className="hidden sm:flex items-center gap-2">
               <button onClick={() => setShowHistory(true)} className="p-2 hover:bg-sand-100 rounded-xl transition" title="Order history">
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><polyline points="3 3 3 8 8 8"/><polyline points="12 7 12 12 15 14"/></svg>
@@ -839,10 +845,10 @@ function KitchenSystem({ staff }: { staff: StaffInfo }) {
               <button onClick={() => setShowSchedule(true)} className="p-2 hover:bg-sand-100 rounded-xl transition" title={t("kitchen.mySchedule")}>
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
               </button>
-              <LanguageToggle lang={lang} onToggle={toggleLang} />
               <LogoutButton role="kitchen" />
             </div>
-            {/* Mobile kebab: schedule, language, logout */}
+            {/* Mobile kebab: schedule + logout. Language is now always
+                visible above so it's reachable in one tap. */}
             <StaffHeaderMenu
               lang={lang}
               onToggleLang={toggleLang}

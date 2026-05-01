@@ -8,16 +8,20 @@ type LogoutRole = "waiter" | "kitchen" | "bar" | "cashier" | "owner" | "floorman
 
 const ROLE_KEYS = ["waiter_staff", "kitchen_staff", "bar_staff", "cashier_staff", "floormanager_staff", "delivery_staff", "dashboard_owner"];
 
+// Mobile-only kebab menu for staff role pages. The language toggle
+// used to live in here; it's now always visible in the main header
+// row, so this is just schedule + logout.
+//
+// `lang` / `onToggleLang` props are kept (optional) for backward
+// compatibility with existing call sites, but they aren't rendered.
 export function StaffHeaderMenu({
-  lang,
-  onToggleLang,
   onOpenSchedule,
   scheduleLabel,
   logoutRole,
   onLogout,
 }: {
-  lang: string;
-  onToggleLang: () => void;
+  lang?: string;
+  onToggleLang?: () => void;
   onOpenSchedule?: () => void;
   scheduleLabel?: string;
   logoutRole?: LogoutRole;
@@ -76,13 +80,6 @@ export function StaffHeaderMenu({
               <span className="text-[12px] font-bold text-text-secondary">{scheduleLabel || t("common.schedule") || "Schedule"}</span>
             </button>
           )}
-          <button
-            onClick={() => { onToggleLang(); setOpen(false); }}
-            className="w-full flex items-center gap-3 px-3 py-2.5 text-left hover:bg-sand-50 transition"
-          >
-            <span className="w-3.5 h-3.5 inline-flex items-center justify-center text-[9px] font-semibold text-text-secondary bg-sand-100 rounded">ع</span>
-            <span className="text-[12px] font-bold text-text-secondary">{lang === "ar" ? "English" : "العربية"}</span>
-          </button>
           <div className="border-t border-sand-100 mt-1 pt-1">
             <button
               onClick={() => { setOpen(false); handleLogout(); }}
