@@ -186,13 +186,25 @@ export async function PATCH(request: NextRequest) {
     }
 
     if (action === "assign_waiter" && body.waiterId) {
-      // Only allow assignment to a clocked-in waiter. Picking someone
-      // off the schedule who hasn't tapped the gate yet would push them
-      // a table they aren't there to serve.
-      const openIds = await useCases.clockInOut.listOpenStaffIds();
+      // Manual assignment must match the same eligibility rules as
+      // auto-assign: target must be clocked in AND scheduled for the
+      // current shift (or shift=0). Otherwise the next reassign sweep
+      // would just yank the table off them, and we'd be silently
+      // overriding the floor manager's choice.
+      const [openIds, target, currentShift] = await Promise.all([
+        useCases.clockInOut.listOpenStaffIds(),
+        useCases.staffManagement.findById(body.waiterId),
+        Promise.resolve(useCases.sessions.currentShift()),
+      ]);
       if (!openIds.includes(body.waiterId)) {
         return NextResponse.json(
           { error: "WAITER_NOT_CLOCKED_IN", message: "That waiter hasn't clocked in for this shift yet." },
+          { status: 409 },
+        );
+      }
+      if (!target || (target.shift !== 0 && target.shift !== currentShift)) {
+        return NextResponse.json(
+          { error: "WAITER_OFF_SHIFT", message: "That waiter isn't scheduled for the current shift." },
           { status: 409 },
         );
       }

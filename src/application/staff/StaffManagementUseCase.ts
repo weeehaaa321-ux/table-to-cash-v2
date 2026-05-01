@@ -76,7 +76,10 @@ export class StaffManagementUseCase {
   }
 
   async findById(id: string) {
-    return db.staff.findUnique({ where: { id }, select: { id: true } });
+    return db.staff.findUnique({
+      where: { id },
+      select: { id: true, role: true, shift: true, active: true },
+    });
   }
 
   async findOwnerPublic(id: string) {
@@ -250,6 +253,10 @@ export class StaffManagementUseCase {
         where: { waiterId: id },
         data: { waiterId: null },
       }),
+      // Without this, deleting a staff member orphans every StaffShift
+      // they ever opened (no cascade in the schema). Open ones become
+      // permanent ghosts no cron will ever close.
+      db.staffShift.deleteMany({ where: { staffId: id } }),
       db.staff.delete({ where: { id } }),
     ]);
   }
