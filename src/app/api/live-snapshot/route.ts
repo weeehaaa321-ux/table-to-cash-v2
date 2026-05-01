@@ -42,16 +42,33 @@ const reassignBackoffUntil = new Map<string, number>();
 const REASSIGN_THROTTLE_MS = 10 * 1000;
 const REASSIGN_BACKOFF_MS = 5 * 60 * 1000;
 
+// Allow at most this much imbalance before rebalancing. ±1 means a
+// 5-3 split sits, but a 5-2 split triggers a move. Larger values
+// reduce reassign churn at the cost of more uneven loads.
+const REBALANCE_TOLERANCE = 1;
+
 // The reassign sweep. Runs on every snapshot poll (throttled), not just
-// at shift boundaries. Three cases trigger a session move:
-//   (1) waiterId is null              — orphaned, adopt it
-//   (2) waiter is no longer clocked in — stranded (auto-cron'd, etc.)
-//   (3) waiter.shift is neither currentShift nor 0 — past their shift
-// Targets are clocked-in waiters with shift in [currentShift, 0]. Each
-// move picks the least-loaded target so the load equalizes naturally
-// over time. Already-correct assignments are not rebalanced — mid-meal
-// waiter swaps would confuse customers, so a waiter who legitimately
-// owns a session keeps it even if the load isn't perfectly even.
+// at shift boundaries. Two phases:
+//
+//   Phase A — fix broken assignments. A session is "broken" if its
+//   waiter is missing (orphan), no longer clocked in (stranded), or
+//   off-shift (waiter.shift not in {currentShift, 0}). Each broken
+//   session moves to the least-loaded eligible waiter.
+//
+//   Phase B — rebalance. After phase A, if the load gap between the
+//   most-loaded and least-loaded eligible waiter exceeds the tolerance,
+//   move sessions from the heaviest to the lightest until the gap
+//   closes. This catches the "first-to-clock-in absorbs everything,
+//   later arrivals stay empty" case (e.g. shift change with 20
+//   inherited tables, A clocks in at 4:01 and gets all 20, B clocks
+//   in at 4:11 with nothing). We move the *newest* session each
+//   iteration — newer sessions are likelier to still be in early
+//   service (browsing/ordering) and less disruptive to swap.
+//
+// Targets are clocked-in waiters with shift in {currentShift, 0}.
+// `assignWaiterToSession` writes the DB row only — no push notification
+// fires from the sweep, so a rebalance move is invisible to the
+// customer (only future routing changes).
 async function reassignSweep(realId: string, currentShift: number) {
   const last = lastReassignAt.get(realId) || 0;
   if (Date.now() - last < REASSIGN_THROTTLE_MS) return;
@@ -77,54 +94,89 @@ async function reassignSweep(realId: string, currentShift: number) {
       return;
     }
 
-    const toReassign = openSessions.filter((s) => {
-      // (1) orphan-waiter session
-      if (!s.waiterId) return true;
-      // (2) waiter not clocked in (auto-cron'd or never showed up)
-      if (!openSet.has(s.waiterId)) return true;
-      // (3) waiter's shift no longer current
+    // Live map of session -> waiter that we update as we go. Starts
+    // from DB state so phase A and phase B share one source of truth.
+    const assignedTo = new Map<string, string | null>();
+    for (const s of openSessions) assignedTo.set(s.id, s.waiterId);
+
+    // ── Phase A: fix broken assignments ───────────────────────────
+    const broken = openSessions.filter((s) => {
+      const wid = assignedTo.get(s.id);
+      if (!wid) return true;                                   // orphan
+      if (!openSet.has(wid)) return true;                      // stranded
       const wShift = s.waiter?.shift ?? 0;
-      if (wShift !== 0 && wShift !== currentShift) return true;
+      if (wShift !== 0 && wShift !== currentShift) return true;// off-shift
       return false;
     });
 
-    if (toReassign.length === 0) {
-      reassignBackoffUntil.delete(realId);
-      return;
-    }
-
-    // Build current load only from sessions we're keeping (i.e., those
-    // already correctly assigned to an eligible waiter). New writes
-    // from this loop increment their target's load so subsequent picks
-    // distribute evenly.
-    const load = new Map<string, number>();
-    for (const w of eligible) load.set(w.id, 0);
-    const reassignSet = new Set(toReassign.map((s) => s.id));
-    for (const sess of openSessions) {
-      if (reassignSet.has(sess.id)) continue;
-      if (sess.waiterId && load.has(sess.waiterId)) {
-        load.set(sess.waiterId, (load.get(sess.waiterId) || 0) + 1);
-      }
-    }
-
-    for (const sess of toReassign) {
-      let target = eligible[0].id;
-      let minLoad = load.get(target) ?? 0;
-      for (const w of eligible) {
-        const l = load.get(w.id) ?? 0;
-        if (l < minLoad) { minLoad = l; target = w.id; }
-      }
+    for (const sess of broken) {
+      const target = pickLeastLoaded(eligible, assignedTo);
       await useCases.livePoll.assignWaiterToSession(sess.id, target).catch((err) => {
         console.warn(`Reassign failed for session ${sess.id}:`, err?.message || err);
       });
-      load.set(target, (load.get(target) ?? 0) + 1);
+      assignedTo.set(sess.id, target);
     }
+
+    // ── Phase B: rebalance ────────────────────────────────────────
+    // Cap iterations at the total session count as a defence against
+    // a bug-introduced infinite loop; in practice this exits as soon
+    // as the gap is within tolerance.
+    const maxIterations = openSessions.length;
+    for (let i = 0; i < maxIterations; i++) {
+      const loads = countLoads(eligible, assignedTo);
+      const sorted = eligible
+        .map((w) => ({ id: w.id, load: loads.get(w.id) ?? 0 }))
+        .sort((a, b) => a.load - b.load);
+      const min = sorted[0];
+      const max = sorted[sorted.length - 1];
+      if (max.load - min.load <= REBALANCE_TOLERANCE) break;
+
+      // Pick the newest session held by max — least likely to be
+      // mid-service, so the swap is least disruptive.
+      const candidates = openSessions
+        .filter((s) => assignedTo.get(s.id) === max.id)
+        .sort((a, b) => b.openedAt.getTime() - a.openedAt.getTime());
+      if (candidates.length === 0) break;
+      const sess = candidates[0];
+
+      await useCases.livePoll.assignWaiterToSession(sess.id, min.id).catch((err) => {
+        console.warn(`Rebalance failed for session ${sess.id}:`, err?.message || err);
+      });
+      assignedTo.set(sess.id, min.id);
+    }
+
     reassignBackoffUntil.delete(realId);
   } catch (err) {
     reassignBackoffUntil.set(realId, Date.now() + REASSIGN_BACKOFF_MS);
     Sentry.captureException(err, { tags: { area: "live-snapshot.reassign" } });
     console.error("reassignSweep failed:", err);
   }
+}
+
+function countLoads(
+  eligible: { id: string }[],
+  assignedTo: Map<string, string | null>,
+): Map<string, number> {
+  const loads = new Map<string, number>();
+  for (const w of eligible) loads.set(w.id, 0);
+  for (const wid of assignedTo.values()) {
+    if (wid && loads.has(wid)) loads.set(wid, (loads.get(wid) ?? 0) + 1);
+  }
+  return loads;
+}
+
+function pickLeastLoaded(
+  eligible: { id: string }[],
+  assignedTo: Map<string, string | null>,
+): string {
+  const loads = countLoads(eligible, assignedTo);
+  let target = eligible[0].id;
+  let min = loads.get(target) ?? 0;
+  for (const w of eligible) {
+    const l = loads.get(w.id) ?? 0;
+    if (l < min) { min = l; target = w.id; }
+  }
+  return target;
 }
 
 async function loadSessions(realId: string) {
