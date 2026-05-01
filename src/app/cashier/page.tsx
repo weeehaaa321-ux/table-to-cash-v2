@@ -861,12 +861,20 @@ function AcceptPaymentPanel({ sessions, onAcceptPayment, onReversePayment, recen
 // that all carried overlapping numbers.
 //
 // Layout:
-//   • Header: "This Shift" + balance/leakage indicator
+//   • Header: "This Shift"
 //   • Hero: shift revenue (with order count)
 //   • Breakdown: cash, card/digital, optional unpaid (only when > 0)
-//   • Optional gap callout when collected diverges from billed
 //   • Dim footer: today's total — there for end-of-shift handover,
 //     not for in-shift work
+//
+// Note: there used to be a "balanced / leakage / over-collected"
+// status pill here. It came from comparing shiftRevenue against
+// (cash + card + unpaid), but the cashout endpoint that populates
+// shiftRevenue includes only PAID orders, so cash + card already
+// equals shiftRevenue by construction — meaning gap was always
+// −unpaid, falsely flagging "over-collected" whenever any table
+// was open. Real cash leakage is caught by the DrawerPanel
+// reconciliation above (physical count vs expected). Removed.
 // ═══════════════════════════════════════════════
 
 function ShiftSummary({
@@ -892,45 +900,13 @@ function ShiftSummary({
   const unpaidTotal = unpaid.reduce((sum, s) => sum + (s.unpaidTotal || 0), 0);
   const unpaidCount = unpaid.length;
 
-  const totalCollected = cashCollected + cardCollected;
-  const accounted = totalCollected + unpaidTotal;
-  // Tolerance of 5 EGP — small enough to catch real leakage, big
-  // enough to absorb sub-pound rounding drift from per-order math.
-  const gap = shiftRevenue - accounted;
-  const hasLeakage = gap > 5;
-  const overCollected = gap < -5;
-
   return (
     <div className="bg-white rounded-2xl border-2 border-sand-200 overflow-hidden shadow-sm">
-      {/* Header — title + balance status pill */}
-      <div className="px-5 py-3 bg-sand-50 border-b-2 border-sand-200 flex items-center justify-between gap-3">
+      {/* Header */}
+      <div className="px-5 py-3 bg-sand-50 border-b-2 border-sand-200">
         <h3 className="text-[11px] font-extrabold text-text-primary uppercase tracking-[0.2em]">
           {t("shiftSummary.title")}
         </h3>
-        <span
-          className={`flex items-center gap-1.5 text-[10px] font-extrabold uppercase tracking-widest px-2 py-0.5 rounded-full ${
-            hasLeakage
-              ? "bg-status-bad-100 text-status-bad-700"
-              : overCollected
-              ? "bg-status-warn-100 text-status-warn-700"
-              : "bg-status-good-100 text-status-good-700"
-          }`}
-        >
-          <span
-            className={`w-1.5 h-1.5 rounded-full ${
-              hasLeakage
-                ? "bg-status-bad-500 animate-pulse"
-                : overCollected
-                ? "bg-status-warn-500"
-                : "bg-status-good-500"
-            }`}
-          />
-          {hasLeakage
-            ? t("shiftSummary.leakage")
-            : overCollected
-            ? t("shiftSummary.over")
-            : t("shiftSummary.balanced")}
-        </span>
       </div>
 
       {/* Hero — shift revenue */}
@@ -990,46 +966,6 @@ function ShiftSummary({
           </div>
         )}
       </div>
-
-      {/* Gap callout — only when reconciliation drifts beyond tolerance */}
-      {(hasLeakage || overCollected) && (
-        <div
-          className={`mx-5 mb-4 rounded-xl p-3 border ${
-            hasLeakage
-              ? "bg-status-bad-50 border-status-bad-200"
-              : "bg-status-warn-50 border-status-warn-200"
-          }`}
-        >
-          <div className="flex items-baseline justify-between gap-2 mb-1">
-            <span
-              className={`text-[10px] font-extrabold uppercase tracking-widest ${
-                hasLeakage ? "text-status-bad-700" : "text-status-warn-700"
-              }`}
-            >
-              {hasLeakage ? t("shiftSummary.gap") : t("shiftSummary.over")}
-            </span>
-            <span
-              className={`text-lg font-extrabold tabular-nums leading-none ${
-                hasLeakage ? "text-status-bad-700" : "text-status-warn-700"
-              }`}
-            >
-              {formatEGP(Math.abs(gap))}{" "}
-              <span className="text-[10px] font-bold opacity-70">
-                {t("common.egp")}
-              </span>
-            </span>
-          </div>
-          <p
-            className={`text-[10px] leading-snug ${
-              hasLeakage ? "text-status-bad-600" : "text-status-warn-600"
-            }`}
-          >
-            {hasLeakage
-              ? t("shiftSummary.gapNote")
-              : t("shiftSummary.overNote")}
-          </p>
-        </div>
-      )}
 
       {/* Dim footer — today's running total. Helpful at handover, not
           load-bearing during a shift, so it doesn't compete with the
