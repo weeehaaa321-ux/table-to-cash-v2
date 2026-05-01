@@ -3,14 +3,18 @@ import type { Clock } from "../ports/Clock";
 import type { StaffId } from "@/domain/staff/Staff";
 import type { StaffShift } from "@/domain/staff/ShiftSchedule";
 
-// A shift left open longer than this is treated as stale — the staff
-// member forgot to clock out (or the browser was closed). We don't want
-// stale rows to (a) keep the dashboard bulb green forever, or (b) skip
-// the clock-in gate the next time the staff member opens their role
-// page. The longest legitimate single shift in this restaurant is a
-// 12-hour cashier/delivery slot, so 14h gives a 2h grace window for
-// late clock-outs without ever covering a second consecutive shift.
-const STALE_HOURS = 14;
+// A shift left open longer than this is treated as stale and ignored
+// by reads — keeps the dashboard bulb honest and forces the gate to
+// re-appear if a phantom row somehow lingers. With the auto-clockout
+// cron now closing shifts at scheduled-end + 1h, this cap is a safety
+// net for two cases:
+//   - staff with shift=0 (cron skips them, no scheduled end)
+//   - cron downtime (Vercel outage, deploy gap, etc.)
+// 24h covers any owner-extended shift (e.g. a cashier swapped from
+// shift 1 to shift 2 mid-day, ending up with ~17h between clock-in and
+// auto-cron deadline) without locking the staff member out before the
+// cron has a chance to close them.
+const STALE_HOURS = 24;
 const STALE_MS = STALE_HOURS * 60 * 60 * 1000;
 
 /**

@@ -102,6 +102,12 @@ export function getShiftProgress(): number {
   return Math.min(100, Math.max(0, (elapsed / 480) * 100));
 }
 
+// Post-shift grace window in minutes — matches the auto-clockout cron's
+// 1-hour deadline-after-shift-end, so a clocked-in staff member who's
+// past their scheduled end can still finish the last order, accept the
+// last payment, etc. without the gate slamming in their face mid-action.
+const POST_SHIFT_GRACE_MIN = 60;
+
 // Minutes until the staff's shift ends (positive = in shift, negative = before shift starts)
 export function getShiftTimer(staffShift: number, role?: string): { isOnShift: boolean; minutesRemaining: number; label: string } {
   if (staffShift === 0) return { isOnShift: true, minutesRemaining: 0, label: "No shift assigned" };
@@ -122,12 +128,15 @@ export function getShiftTimer(staffShift: number, role?: string): { isOnShift: b
     };
   }
 
-  // 30-min grace after shift ends for KITCHEN/BAR — matches canLoginNow
-  if (role === "KITCHEN" || role === "BAR") {
+  // 60-min post-shift grace for ALL roles — matches the auto-clockout
+  // cron deadline. Without this, order-status updates 403 immediately
+  // at shift end while the pill on the device still says "On" for up
+  // to an hour. Now they stay aligned.
+  {
     const sinceEnd = cairoMinutes - shiftEndMin;
     const sinceEndWrapped = sinceEnd < 0 ? sinceEnd + 1440 : sinceEnd;
-    if (sinceEndWrapped >= 0 && sinceEndWrapped <= 30) {
-      const graceLeft = 30 - sinceEndWrapped;
+    if (sinceEndWrapped >= 0 && sinceEndWrapped <= POST_SHIFT_GRACE_MIN) {
+      const graceLeft = POST_SHIFT_GRACE_MIN - sinceEndWrapped;
       return {
         isOnShift: true,
         minutesRemaining: graceLeft,
@@ -221,14 +230,14 @@ export function canLoginNow(staffShift: number, role: string): { allowed: boolea
     return { allowed: true, reason: "" };
   }
 
-  // Grace window AFTER shift end — kitchen/bar get 30 min to re-login
-  // for cleanup (finishing last tickets, marking orders ready). Waiters
-  // hand off via end-shift so they don't need it.
-  if (role === "KITCHEN" || role === "BAR") {
-    // shiftEndMin of 1440 (midnight) wraps to 0, but we compare raw minutes here
+  // 60-min post-shift re-login grace for ALL roles. Matches the auto-
+  // clockout deadline: if the system closed someone's shift early or
+  // they got booted (network / page reload), they can tap the gate
+  // again within the grace window to keep working.
+  {
     const sinceEnd = cairoMinutes - shiftEndMin;
     const sinceEndWrapped = sinceEnd < 0 ? sinceEnd + 1440 : sinceEnd;
-    if (sinceEndWrapped >= 0 && sinceEndWrapped <= 30) {
+    if (sinceEndWrapped >= 0 && sinceEndWrapped <= POST_SHIFT_GRACE_MIN) {
       return { allowed: true, reason: "" };
     }
   }
