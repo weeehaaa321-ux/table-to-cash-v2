@@ -853,177 +853,197 @@ function AcceptPaymentPanel({ sessions, onAcceptPayment, onReversePayment, recen
 
 
 // ═══════════════════════════════════════════════
-// CASHIER WALLET
+// SHIFT SUMMARY
+//
+// Single card replacing the old three-card stack (CashierWallet +
+// RevenueSummary + ShiftComparison). The cashier sees one money
+// snapshot for their shift instead of mentally diffing three boxes
+// that all carried overlapping numbers.
+//
+// Layout:
+//   • Header: "This Shift" + balance/leakage indicator
+//   • Hero: shift revenue (with order count)
+//   • Breakdown: cash, card/digital, optional unpaid (only when > 0)
+//   • Optional gap callout when collected diverges from billed
+//   • Dim footer: today's total — there for end-of-shift handover,
+//     not for in-shift work
 // ═══════════════════════════════════════════════
 
-function CashierWallet({ cashCollected, cardCollected, totalOrders }: {
-  cashCollected: number;
-  cardCollected: number;
-  totalOrders: number;
-}) {
-  const { t } = useLanguage();
-  // Layout note: previously this was a 3-column grid with text-3xl
-  // numbers. As soon as the register hit 4+ digits the columns
-  // overflowed in the narrow desktop sidebar — `tabular-nums` keeps
-  // every digit the same width, so the wraps were ugly. Stacked
-  // rows (label left, value right) handle any digit count and let
-  // the grand total stand out as the hero in its own divider.
-  return (
-    <div className="bg-gradient-to-br from-status-wait-600 to-status-wait-800 rounded-2xl p-5 text-white shadow-lg">
-      <div className="flex items-center justify-between mb-4">
-        <div className="text-[10px] font-extrabold uppercase tracking-[0.2em] opacity-70">
-          {t("cashier.myRegister")}
-        </div>
-        <span className="text-[11px] font-extrabold bg-white/20 px-2.5 py-1 rounded-full uppercase tracking-widest">
-          {totalOrders} {t("cashier.orders")}
-        </span>
-      </div>
-      <div className="space-y-2">
-        <div className="flex items-center justify-between gap-3">
-          <span className="text-[11px] font-extrabold uppercase tracking-widest opacity-80">
-            {t("cashier.cash")}
-          </span>
-          <span className="text-base sm:text-lg font-extrabold tabular-nums tracking-tight">
-            {formatEGP(cashCollected)}{" "}
-            <span className="text-[10px] font-bold opacity-70">EGP</span>
-          </span>
-        </div>
-        <div className="flex items-center justify-between gap-3">
-          <span className="text-[11px] font-extrabold uppercase tracking-widest opacity-80">
-            {t("cashier.cardDigital")}
-          </span>
-          <span className="text-base sm:text-lg font-extrabold tabular-nums tracking-tight">
-            {formatEGP(cardCollected)}{" "}
-            <span className="text-[10px] font-bold opacity-70">EGP</span>
-          </span>
-        </div>
-      </div>
-      <div className="mt-3 pt-3 border-t border-white/20 flex items-baseline justify-between gap-3">
-        <span className="text-[10px] font-extrabold uppercase tracking-[0.2em] opacity-80">
-          {t("cashier.grandTotal")}
-        </span>
-        <span className="text-2xl sm:text-3xl font-extrabold tabular-nums tracking-tight leading-none">
-          {formatEGP(cashCollected + cardCollected)}{" "}
-          <span className="text-xs font-bold opacity-70">EGP</span>
-        </span>
-      </div>
-    </div>
-  );
-}
-
-// ═══════════════════════════════════════════════
-// REVENUE SUMMARY
-// ═══════════════════════════════════════════════
-
-function RevenueSummary({ dayRevenue, shiftRevenue, dayOrders, shiftOrders }: {
-  dayRevenue: number; shiftRevenue: number; dayOrders: number; shiftOrders: number;
-}) {
-  const { t } = useLanguage();
-  return (
-    <div className="bg-white rounded-2xl border-2 border-sand-200 overflow-hidden shadow-sm">
-      <div className="px-5 py-3 bg-sand-50 border-b-2 border-sand-200">
-        <h3 className="text-[11px] font-extrabold text-text-primary uppercase tracking-[0.2em]">{t("cashier.revenue")}</h3>
-      </div>
-      <div className="grid grid-cols-2 divide-x-2 divide-sand-100">
-        <div className="p-5 text-center">
-          <p className="text-[10px] text-text-muted font-extrabold uppercase tracking-widest mb-1.5">{t("cashier.today")}</p>
-          <p className="text-3xl font-extrabold text-text-primary tabular-nums tracking-tight leading-none">{formatEGP(dayRevenue)}</p>
-          <p className="text-[10px] text-text-muted font-medium mt-1.5">{dayOrders} {t("cashier.orders")}</p>
-        </div>
-        <div className="p-5 text-center">
-          <p className="text-[10px] text-text-muted font-extrabold uppercase tracking-widest mb-1.5">{t("cashier.thisShift")}</p>
-          <p className="text-3xl font-extrabold text-status-wait-700 tabular-nums tracking-tight leading-none">{formatEGP(shiftRevenue)}</p>
-          <p className="text-[10px] text-text-muted font-medium mt-1.5">{shiftOrders} {t("cashier.orders")}</p>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-
-// ═══════════════════════════════════════════════
-// SHIFT COMPARISON — leakage detection
-// ═══════════════════════════════════════════════
-
-function ShiftComparison({
-  shiftRevenue, cashCollected, cardCollected, activeSessions,
+function ShiftSummary({
+  shiftRevenue,
+  shiftOrders,
+  cashCollected,
+  cardCollected,
+  dayRevenue,
+  activeSessions,
 }: {
   shiftRevenue: number;
+  shiftOrders: number;
   cashCollected: number;
   cardCollected: number;
+  dayRevenue: number;
   activeSessions: SessionInfo[];
 }) {
   const { t } = useLanguage();
-  const totalCollected = cashCollected + cardCollected;
-  const unpaidTotal = activeSessions
-    .filter((s) => s.status === "OPEN" && (s.unpaidTotal || 0) > 0)
-    .reduce((sum, s) => sum + (s.unpaidTotal || 0), 0);
-  const unpaidCount = activeSessions.filter(
-    (s) => s.status === "OPEN" && (s.unpaidTotal || 0) > 0
-  ).length;
 
-  const expectedCollected = shiftRevenue;
+  const unpaid = activeSessions.filter(
+    (s) => s.status === "OPEN" && (s.unpaidTotal || 0) > 0,
+  );
+  const unpaidTotal = unpaid.reduce((sum, s) => sum + (s.unpaidTotal || 0), 0);
+  const unpaidCount = unpaid.length;
+
+  const totalCollected = cashCollected + cardCollected;
   const accounted = totalCollected + unpaidTotal;
-  const gap = expectedCollected - accounted;
-  const hasLeakage = gap > 5; // tolerance of 5 EGP for rounding
+  // Tolerance of 5 EGP — small enough to catch real leakage, big
+  // enough to absorb sub-pound rounding drift from per-order math.
+  const gap = shiftRevenue - accounted;
+  const hasLeakage = gap > 5;
+  const overCollected = gap < -5;
 
   return (
     <div className="bg-white rounded-2xl border-2 border-sand-200 overflow-hidden shadow-sm">
-      <div className={`px-5 py-3 border-b-2 flex items-center gap-2 ${hasLeakage ? "bg-status-bad-50 border-status-bad-200" : "bg-status-good-50 border-status-good-200"}`}>
-        <span className={`w-2 h-2 rounded-full ${hasLeakage ? "bg-status-bad-500 animate-pulse" : "bg-status-good-500"}`} />
-        <h3 className={`text-[11px] font-extrabold uppercase tracking-[0.2em] ${hasLeakage ? "text-status-bad-800" : "text-status-good-800"}`}>
-          {hasLeakage ? t("cashier.leakageDetected") : t("cashier.shiftBalanced")}
+      {/* Header — title + balance status pill */}
+      <div className="px-5 py-3 bg-sand-50 border-b-2 border-sand-200 flex items-center justify-between gap-3">
+        <h3 className="text-[11px] font-extrabold text-text-primary uppercase tracking-[0.2em]">
+          {t("shiftSummary.title")}
         </h3>
+        <span
+          className={`flex items-center gap-1.5 text-[10px] font-extrabold uppercase tracking-widest px-2 py-0.5 rounded-full ${
+            hasLeakage
+              ? "bg-status-bad-100 text-status-bad-700"
+              : overCollected
+              ? "bg-status-warn-100 text-status-warn-700"
+              : "bg-status-good-100 text-status-good-700"
+          }`}
+        >
+          <span
+            className={`w-1.5 h-1.5 rounded-full ${
+              hasLeakage
+                ? "bg-status-bad-500 animate-pulse"
+                : overCollected
+                ? "bg-status-warn-500"
+                : "bg-status-good-500"
+            }`}
+          />
+          {hasLeakage
+            ? t("shiftSummary.leakage")
+            : overCollected
+            ? t("shiftSummary.over")
+            : t("shiftSummary.balanced")}
+        </span>
       </div>
-      <div className="p-5 space-y-3">
-        <div className="flex justify-between items-baseline">
-          <span className="text-[10px] text-text-muted font-extrabold uppercase tracking-widest">{t("cashier.totalSales")}</span>
-          <span className="text-2xl font-extrabold text-text-primary tabular-nums tracking-tight leading-none">{formatEGP(expectedCollected)}</span>
+
+      {/* Hero — shift revenue */}
+      <div className="px-5 pt-5 pb-4 text-center border-b border-sand-100">
+        <p className="text-[10px] text-text-muted font-extrabold uppercase tracking-[0.2em] mb-2">
+          {t("shiftSummary.shiftRevenue")}
+        </p>
+        <p className="text-4xl font-extrabold text-text-primary tabular-nums tracking-tight leading-none">
+          {formatEGP(shiftRevenue)}
+          <span className="text-base text-text-muted font-bold ms-1.5">
+            {t("common.egp")}
+          </span>
+        </p>
+        <p className="text-[11px] text-text-muted font-medium mt-2">
+          {shiftOrders} {t("cashier.orders")}
+        </p>
+      </div>
+
+      {/* Breakdown — collected + (optional) unpaid */}
+      <div className="px-5 py-4 space-y-2.5">
+        <div className="flex items-center justify-between gap-3">
+          <span className="text-xs text-text-secondary font-semibold">
+            {t("shiftSummary.cashCollected")}
+          </span>
+          <span className="text-base font-extrabold text-status-good-700 tabular-nums">
+            {formatEGP(cashCollected)}{" "}
+            <span className="text-[10px] font-bold text-text-muted">
+              {t("common.egp")}
+            </span>
+          </span>
         </div>
-        <div className="border-t border-sand-100 pt-3 space-y-2">
-          <div className="flex justify-between items-center">
-            <span className="text-xs text-text-muted font-semibold">{t("cashier.cashCollected")}</span>
-            <span className="text-base font-extrabold text-status-good-600 tabular-nums">{formatEGP(cashCollected)}</span>
-          </div>
-          <div className="flex justify-between items-center">
-            <span className="text-xs text-text-muted font-semibold">{t("cashier.cardCollected")}</span>
-            <span className="text-base font-extrabold text-status-info-600 tabular-nums">{formatEGP(cardCollected)}</span>
-          </div>
-          {unpaidCount > 0 && (
-            <div className="flex justify-between items-center">
-              <span className="text-xs text-status-warn-600 font-semibold">{unpaidCount} {t("cashier.activeTablesUnpaid")}</span>
-              <span className="text-base font-extrabold text-status-warn-600 tabular-nums">{formatEGP(unpaidTotal)}</span>
-            </div>
-          )}
+        <div className="flex items-center justify-between gap-3">
+          <span className="text-xs text-text-secondary font-semibold">
+            {t("shiftSummary.cardCollected")}
+          </span>
+          <span className="text-base font-extrabold text-status-info-700 tabular-nums">
+            {formatEGP(cardCollected)}{" "}
+            <span className="text-[10px] font-bold text-text-muted">
+              {t("common.egp")}
+            </span>
+          </span>
         </div>
-        <div className="border-t-2 border-sand-200 pt-3">
-          <div className="flex justify-between items-baseline">
-            <span className="text-[10px] text-text-secondary font-extrabold uppercase tracking-widest">{t("cashier.accountedFor")}</span>
-            <span className="text-2xl font-extrabold text-text-primary tabular-nums tracking-tight leading-none">{formatEGP(accounted)}</span>
-          </div>
-        </div>
-        {hasLeakage && (
-          <div className="bg-status-bad-50 border-2 border-status-bad-200 rounded-xl p-4 mt-2">
-            <div className="flex justify-between items-baseline">
-              <span className="text-[10px] font-extrabold text-status-bad-700 uppercase tracking-widest">{t("cashier.unaccountedGap")}</span>
-              <span className="text-2xl font-extrabold text-status-bad-700 tabular-nums tracking-tight leading-none">{formatEGP(gap)}</span>
-            </div>
-            <p className="text-[10px] text-status-bad-500 mt-2 leading-snug">
-              {t("cashier.unaccountedGapDesc")}
-            </p>
+        {unpaidCount > 0 && (
+          <div className="flex items-center justify-between gap-3">
+            <span className="text-xs text-status-warn-700 font-semibold">
+              {t("shiftSummary.unpaidTables")} · {unpaidCount}{" "}
+              {unpaidCount === 1
+                ? t("shiftSummary.unpaidTable")
+                : t("shiftSummary.unpaidTablesPlural")}
+            </span>
+            <span className="text-base font-extrabold text-status-warn-700 tabular-nums">
+              {formatEGP(unpaidTotal)}{" "}
+              <span className="text-[10px] font-bold text-text-muted">
+                {t("common.egp")}
+              </span>
+            </span>
           </div>
         )}
-        {!hasLeakage && gap < -5 && (
-          <div className="bg-status-warn-50 border-2 border-status-warn-200 rounded-xl p-4 mt-2">
-            <div className="flex justify-between items-baseline">
-              <span className="text-[10px] font-extrabold text-status-warn-700 uppercase tracking-widest">{t("cashier.overCollection")}</span>
-              <span className="text-2xl font-extrabold text-status-warn-700 tabular-nums tracking-tight leading-none">{formatEGP(Math.abs(gap))}</span>
-            </div>
-            <p className="text-[10px] text-status-warn-500 mt-2 leading-snug">
-              {t("cashier.overCollectionDesc")}
-            </p>
+      </div>
+
+      {/* Gap callout — only when reconciliation drifts beyond tolerance */}
+      {(hasLeakage || overCollected) && (
+        <div
+          className={`mx-5 mb-4 rounded-xl p-3 border ${
+            hasLeakage
+              ? "bg-status-bad-50 border-status-bad-200"
+              : "bg-status-warn-50 border-status-warn-200"
+          }`}
+        >
+          <div className="flex items-baseline justify-between gap-2 mb-1">
+            <span
+              className={`text-[10px] font-extrabold uppercase tracking-widest ${
+                hasLeakage ? "text-status-bad-700" : "text-status-warn-700"
+              }`}
+            >
+              {hasLeakage ? t("shiftSummary.gap") : t("shiftSummary.over")}
+            </span>
+            <span
+              className={`text-lg font-extrabold tabular-nums leading-none ${
+                hasLeakage ? "text-status-bad-700" : "text-status-warn-700"
+              }`}
+            >
+              {formatEGP(Math.abs(gap))}{" "}
+              <span className="text-[10px] font-bold opacity-70">
+                {t("common.egp")}
+              </span>
+            </span>
           </div>
-        )}
+          <p
+            className={`text-[10px] leading-snug ${
+              hasLeakage ? "text-status-bad-600" : "text-status-warn-600"
+            }`}
+          >
+            {hasLeakage
+              ? t("shiftSummary.gapNote")
+              : t("shiftSummary.overNote")}
+          </p>
+        </div>
+      )}
+
+      {/* Dim footer — today's running total. Helpful at handover, not
+          load-bearing during a shift, so it doesn't compete with the
+          hero. */}
+      <div className="px-5 py-2.5 bg-sand-50 border-t border-sand-100 flex items-center justify-between gap-3">
+        <span className="text-[10px] text-text-muted font-bold uppercase tracking-widest">
+          {t("shiftSummary.todaySoFar")}
+        </span>
+        <span className="text-xs font-extrabold text-text-secondary tabular-nums">
+          {formatEGP(dayRevenue)}{" "}
+          <span className="text-[9px] font-bold text-text-muted">
+            {t("common.egp")}
+          </span>
+        </span>
       </div>
     </div>
   );
@@ -1088,7 +1108,6 @@ function CashierSystem({ staff, onLogout }: { staff: LoggedInStaff; onLogout: ()
   const [recentlyPaid, setRecentlyPaid] = useState<{ id: string; tableNumber: number | null; orderType?: string; vipGuestName?: string | null; total: number }[]>([]);
   const [dayRevenue, setDayRevenue] = useState(0);
   const [shiftRevenue, setShiftRevenue] = useState(0);
-  const [dayOrders, setDayOrders] = useState(0);
   const [shiftOrders, setShiftOrders] = useState(0);
   const [cashCollected, setCashCollected] = useState(0);
   const [cardCollected, setCardCollected] = useState(0);
@@ -1191,7 +1210,7 @@ function CashierSystem({ staff, onLogout }: { staff: LoggedInStaff; onLogout: ()
         markApiOk();
         if (res.ok) {
           const data = await res.json();
-          let totalDayRevenue = 0, totalDayOrders = 0;
+          let totalDayRevenue = 0;
           let totalShiftRevenue = 0, totalShiftOrders = 0;
           let totalCash = 0, totalCard = 0;
           let totalDayTips = 0, totalShiftTips = 0;
@@ -1208,7 +1227,6 @@ function CashierSystem({ staff, onLogout }: { staff: LoggedInStaff; onLogout: ()
             totalDayTips += day.tips || 0;
             for (const shift of day.shifts || []) {
               for (const w of shift.waiters || []) {
-                totalDayOrders += w.totalOrders || 0;
                 if (shift.shift === currentShift) {
                   totalShiftRevenue += w.totalRevenue || 0;
                   totalShiftOrders += w.totalOrders || 0;
@@ -1227,7 +1245,6 @@ function CashierSystem({ staff, onLogout }: { staff: LoggedInStaff; onLogout: ()
           }
 
           setDayRevenue(totalDayRevenue);
-          setDayOrders(totalDayOrders);
           setShiftRevenue(totalShiftRevenue);
           setShiftOrders(totalShiftOrders);
           setCashCollected(totalCash);
@@ -1471,10 +1488,13 @@ function CashierSystem({ staff, onLogout }: { staff: LoggedInStaff; onLogout: ()
           {/* Stats column — below the fold on mobile, left on desktop */}
           <div className="lg:col-span-1 lg:order-1 space-y-4 sm:space-y-6">
             <DrawerPanel restaurantId={restaurantSlug} cashierId={staff.id} />
-            <CashierWallet
+            <ShiftSummary
+              shiftRevenue={shiftRevenue}
+              shiftOrders={shiftOrders}
               cashCollected={cashCollected}
               cardCollected={cardCollected}
-              totalOrders={shiftOrders}
+              dayRevenue={dayRevenue}
+              activeSessions={sessions}
             />
             <TipsCounter
               todayTips={dayTips}
@@ -1482,18 +1502,6 @@ function CashierSystem({ staff, onLogout }: { staff: LoggedInStaff; onLogout: ()
               todayRevenue={dayRevenue}
               waiters={shiftTipsByWaiter}
               compact
-            />
-            <RevenueSummary
-              dayRevenue={dayRevenue}
-              shiftRevenue={shiftRevenue}
-              dayOrders={dayOrders}
-              shiftOrders={shiftOrders}
-            />
-            <ShiftComparison
-              shiftRevenue={shiftRevenue}
-              cashCollected={cashCollected}
-              cardCollected={cardCollected}
-              activeSessions={sessions}
             />
           </div>
         </div>
