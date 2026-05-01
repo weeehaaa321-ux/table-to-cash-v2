@@ -23,7 +23,7 @@ import { resolveImage } from "@/lib/placeholders";
 import { useLanguage } from "@/lib/use-language";
 import { LanguageToggle } from "@/presentation/components/ui/LanguageToggle";
 import LogoutButton from "@/presentation/components/ui/LogoutButton";
-import { getShiftCount, getShiftLabel, getShiftTimer } from "@/lib/shifts";
+import { getShiftCount, getShiftLabel, getShiftTimer, getCurrentShift } from "@/lib/shifts";
 import { DEFAULT_KITCHEN_CONFIG, normalizeKitchenConfig, type KitchenConfig } from "@/lib/kitchen-config";
 import { OwnerManual } from "@/presentation/components/dashboard/OwnerManual";
 import { QRCodePanel } from "@/presentation/components/dashboard/QRCodePanel";
@@ -5419,6 +5419,31 @@ function OwnerControlSystem({ verifiedOwnerId }: { verifiedOwnerId: string }) {
   const pendingCount = orders.filter((o) => o.status === "pending").length;
   const delayedCount = orders.filter((o) => o.isDelayed).length;
 
+  // Shift-scoped average serving time = avg(servedAt - createdAt)
+  // across orders served inside the current shift's Cairo window.
+  // Replaces the "tips" KPI tile, since shift-level serving time is
+  // a more actionable signal at-a-glance for the owner. Tips remain
+  // derivable from the books tab + the cashier card.
+  const shiftAvgServeMin = (() => {
+    const cairoNow = nowInRestaurantTz();
+    const shift = getCurrentShift();
+    const shiftStartHour = shift === 1 ? 0 : shift === 2 ? 8 : 16;
+    const shiftStartCairo = new Date(
+      cairoNow.getFullYear(), cairoNow.getMonth(), cairoNow.getDate(), shiftStartHour, 0, 0, 0,
+    );
+    const offset = new Date().getTime() - cairoNow.getTime();
+    const shiftStartMs = shiftStartCairo.getTime() + offset;
+    const samples = orders.filter(
+      (o) =>
+        typeof o.servedAt === "number" &&
+        typeof o.createdAt === "number" &&
+        o.servedAt >= shiftStartMs,
+    );
+    if (samples.length === 0) return 0;
+    const total = samples.reduce((s, o) => s + (o.servedAt! - o.createdAt) / 60000, 0);
+    return Math.round(total / samples.length);
+  })();
+
   return (
     <div className="min-h-dvh bg-sunset" dir={dir}>
       {/* Header */}
@@ -5474,7 +5499,15 @@ function OwnerControlSystem({ verifiedOwnerId }: { verifiedOwnerId: string }) {
                 <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-4">
                   <KpiCard icon="◈" label={t("dashboard.kpi.revenue")} value={metrics.revenueToday} unit={t("common.egp")} accent="text-success" sub={`${(metrics.ordersPerMinute * 60).toFixed(1)} ${t("dashboard.kpi.ordersPerHour")}`} />
                   <KpiCard icon="◇" label={t("dashboard.kpi.orders")} value={metrics.ordersToday} accent="text-ocean-600" sub={`${formatEGP(metrics.avgOrderValue)} ${t("dashboard.kpi.avg")}`} />
-                  <KpiCard icon="◆" label={t("dashboard.kpi.tips")} value={metrics.tipsToday} unit={t("common.egp")} accent="text-status-warn-600" sub={metrics.tipsToday === 0 ? t("dashboard.kpi.tipsEmpty") : t("dashboard.kpi.tipsFilled")} />
+                  <KpiCard
+                    icon="◐"
+                    label={t("dashboard.kpi.shiftServeTime")}
+                    value={shiftAvgServeMin}
+                    unit={t("common.minutes")}
+                    placeholder={shiftAvgServeMin === 0 ? "—" : undefined}
+                    accent={shiftAvgServeMin > 20 ? "text-coral-600" : shiftAvgServeMin > 12 ? "text-sunset-500" : "text-success"}
+                    sub={shiftAvgServeMin === 0 ? t("dashboard.kpi.shiftServeEmpty") : t("dashboard.kpi.shiftServeSub")}
+                  />
                   <KpiCard icon="◈" label={t("dashboard.kpi.waitTime")} value={metrics.avgWaitTime} unit={t("common.minutes")} placeholder={metrics.avgWaitTime === 0 ? "—" : undefined} accent={metrics.avgWaitTime > 15 ? "text-coral-600" : "text-text-primary"} sub={metrics.avgWaitTime === 0 ? t("dashboard.kpi.waitEmpty") : kitchen.stuckOrders.length > 0 ? tr("dashboard.kpi.stuckInKitchen", { n: kitchen.stuckOrders.length }) : t("dashboard.kpi.kitchenFlowing")} />
                 </div>
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
