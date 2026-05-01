@@ -14,7 +14,7 @@ export function getShiftCount(role?: string): number {
 }
 
 // Get shift boundaries in minutes-of-day for a given role + shift number.
-function getShiftBounds(shift: number, role?: string): { start: number; end: number } {
+export function getShiftBounds(shift: number, role?: string): { start: number; end: number } {
   if (role === "CASHIER") {
     return { start: (shift - 1) * 720, end: shift * 720 };
   }

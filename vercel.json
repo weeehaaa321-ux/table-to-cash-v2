@@ -9,6 +9,10 @@
       "schedule": "*/5 * * * *"
     },
     {
+      "path": "/api/cron/auto-clockout",
+      "schedule": "*/5 * * * *"
+    },
+    {
       "path": "/api/cron/daily-close",
       "schedule": "0 3 * * *"
     }

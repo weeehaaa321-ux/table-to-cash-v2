@@ -1,6 +1,7 @@
 import { db } from "@/lib/db";
 import { sendPushToStaff } from "@/lib/web-push";
 import { nowInRestaurantTz } from "@/lib/restaurant-config";
+import { getShiftBounds } from "@/lib/shifts";
 
 const SHIFT_STARTS: Record<number, number> = { 1: 0, 2: 8, 3: 16 };
 const SHIFT_LABELS: Record<number, string> = {
@@ -9,9 +10,52 @@ const SHIFT_LABELS: Record<number, string> = {
   3: "Shift 3 (4PM - 12AM)",
 };
 
+const AUTO_CLOCKOUT_GRACE_MS = 60 * 60 * 1000;  // 1 hour after shift end
+
 function cairoMinutes(): number {
   const t = nowInRestaurantTz(new Date());
   return t.getHours() * 60 + t.getMinutes();
+}
+
+// Given a clockIn instant, role, and scheduled shift number, return the
+// real-UTC instant at which the staff member's *current* shift ends —
+// i.e., the smallest shift-end time strictly after clockIn. Returns
+// null for shift=0 (unassigned, handled by the 14h staleness backstop
+// in ClockInOutUseCase, not by the cron).
+//
+// Restaurant-TZ midnight math mirrors lib/daily-close.ts: Vercel runs
+// in UTC, so `new Date(y,m,d)` builds midnight-UTC of that calendar
+// date. Subtracting the (real - tzNow) offset shifts that to the real
+// UTC instant of the restaurant's local midnight on that date.
+function shiftEndAfterClockIn(
+  clockIn: Date,
+  shift: number,
+  role: string,
+): Date | null {
+  if (shift === 0) return null;
+  const { end: endMin } = getShiftBounds(shift, role);
+
+  const realNow = new Date();
+  const tzNow = nowInRestaurantTz(realNow);
+  const offset = realNow.getTime() - tzNow.getTime();
+
+  const candidates: Date[] = [];
+  for (const dayOffset of [-1, 0, 1, 2]) {
+    const dayMidnightLocal = new Date(
+      tzNow.getFullYear(),
+      tzNow.getMonth(),
+      tzNow.getDate() + dayOffset,
+    );
+    const realDayMidnight = new Date(dayMidnightLocal.getTime() + offset);
+    candidates.push(new Date(realDayMidnight.getTime() + endMin * 60_000));
+  }
+
+  let chosen: Date | null = null;
+  for (const c of candidates) {
+    if (c.getTime() <= clockIn.getTime()) continue;
+    if (!chosen || c.getTime() < chosen.getTime()) chosen = c;
+  }
+  return chosen;
 }
 
 export class CronUseCases {
@@ -57,6 +101,55 @@ export class CronUseCases {
       }
     }
     return { message: "Reminders sent", sent };
+  }
+
+  /**
+   * Close every open StaffShift whose scheduled shift ended more than
+   * 1 hour ago. This is the *only* path that closes a shift now —
+   * staff and floor managers can't clock out manually. The 1h grace
+   * covers cleanup time after the shift technically ends.
+   *
+   * Idempotent + safe to re-run: each row is checked independently,
+   * and the update target (`clockOut`) is the closure timestamp itself.
+   * Shifts with `shift === 0` (unassigned) are skipped — there's no
+   * defined end time for them, so the 14h staleness filter in
+   * ClockInOutUseCase is the backstop instead.
+   */
+  async runAutoClockOut(): Promise<{ closed: number; skipped: number; checked: number }> {
+    const now = new Date();
+    const open = await db.staffShift.findMany({
+      where: { clockOut: null },
+      select: { id: true, staffId: true, clockIn: true },
+    });
+    if (open.length === 0) return { closed: 0, skipped: 0, checked: 0 };
+
+    const staff = await db.staff.findMany({
+      where: { id: { in: open.map((s) => s.staffId) } },
+      select: { id: true, role: true, shift: true },
+    });
+    const staffById = new Map(staff.map((s) => [s.id, s]));
+
+    let closed = 0;
+    let skipped = 0;
+
+    for (const shift of open) {
+      const s = staffById.get(shift.staffId);
+      if (!s || s.shift === 0) { skipped++; continue; }
+
+      const shiftEnd = shiftEndAfterClockIn(shift.clockIn, s.shift, s.role);
+      if (!shiftEnd) { skipped++; continue; }
+
+      const deadline = shiftEnd.getTime() + AUTO_CLOCKOUT_GRACE_MS;
+      if (now.getTime() <= deadline) { skipped++; continue; }
+
+      await db.staffShift.update({
+        where: { id: shift.id },
+        data: { clockOut: now },
+      });
+      closed++;
+    }
+
+    return { closed, skipped, checked: open.length };
   }
 
   /** Fire any check_table messages whose scheduled time has passed. */
