@@ -27,6 +27,7 @@ import { getShiftCount, getShiftLabel, getShiftTimer } from "@/lib/shifts";
 import { DEFAULT_KITCHEN_CONFIG, normalizeKitchenConfig, type KitchenConfig } from "@/lib/kitchen-config";
 import { OwnerManual } from "@/presentation/components/dashboard/OwnerManual";
 import { QRCodePanel } from "@/presentation/components/dashboard/QRCodePanel";
+import { TipsCounter } from "@/presentation/components/ui/TipsCounter";
 
 // ─── Types ──────────────────────────────────────
 
@@ -5272,6 +5273,8 @@ function OwnerControlSystem({ verifiedOwnerId }: { verifiedOwnerId: string }) {
   ownerIdRef.current = ownerId;
   const [now, setNow] = useState(Date.now());
   const [sessions, setSessions] = useState<{ id: string; tableNumber: number | null; waiterId?: string; waiterName?: string; status: string; orderType?: string; vipGuestName?: string | null; orderTotal?: number; openedAt?: string }[]>([]);
+  const [shiftTipsTotal, setShiftTipsTotal] = useState(0);
+  const [shiftTipsByWaiter, setShiftTipsByWaiter] = useState<{ id: string; name: string; tips: number }[]>([]);
 
   useLiveData(ownerId ?? undefined);
   useEffect(() => { useMenu.getState().initialize(); }, []);
@@ -5323,6 +5326,44 @@ function OwnerControlSystem({ verifiedOwnerId }: { verifiedOwnerId: string }) {
     }
     fetchSessions();
     return startPoll(fetchSessions, 20000);
+  }, [restaurantSlug, ownerId]);
+
+  // Poll cashout for the current shift's tip totals + per-waiter
+  // breakdown. Today's overall tips arrive via live-snapshot and
+  // already feed metrics.tipsToday, so we only ask cashout here for
+  // the shift-scoped numbers the TipsCounter card needs.
+  useEffect(() => {
+    let active = true;
+    async function fetchTips() {
+      try {
+        const res = await ownerFetch(ownerIdRef.current, `/api/shifts/cashout?restaurantId=${restaurantSlug}`, { method: "GET" });
+        if (!res.ok || !active) return;
+        const data = await res.json();
+        const currentShift = data.currentShift as number;
+        let tips = 0;
+        const byWaiter = new Map<string, { id: string; name: string; tips: number }>();
+        for (const day of data.days || []) {
+          for (const s of day.shifts || []) {
+            if (s.shift !== currentShift) continue;
+            tips += s.tips || 0;
+            for (const w of s.waiters || []) {
+              if ((w.tips || 0) <= 0) continue;
+              const existing = byWaiter.get(w.id);
+              byWaiter.set(w.id, {
+                id: w.id,
+                name: w.name,
+                tips: (existing?.tips || 0) + (w.tips || 0),
+              });
+            }
+          }
+        }
+        setShiftTipsTotal(tips);
+        setShiftTipsByWaiter(Array.from(byWaiter.values()));
+      } catch { /* silent */ }
+    }
+    fetchTips();
+    const stop = startPoll(fetchTips, 30000);
+    return () => { active = false; stop(); };
   }, [restaurantSlug, ownerId]);
 
   const { metrics, tableStates, kitchen, bar, orders } = perception;
@@ -5483,6 +5524,12 @@ function OwnerControlSystem({ verifiedOwnerId }: { verifiedOwnerId: string }) {
                     <AIBrain insights={insights} decisions={sys.decisions} onAcceptInsight={handleAcceptInsight} onDismissInsight={() => {}} onRevertDecision={handleRevertDecision} />
                   </div>
                   <div className="space-y-4">
+                    <TipsCounter
+                      todayTips={metrics.tipsToday}
+                      shiftTips={shiftTipsTotal}
+                      todayRevenue={metrics.revenueToday}
+                      waiters={shiftTipsByWaiter}
+                    />
                     <LiveOrdersFeed orders={orders} />
                     <VipDeliveryActivity orders={orders} sessions={sessions} />
                     <PaymentBreakdown orders={orders} />

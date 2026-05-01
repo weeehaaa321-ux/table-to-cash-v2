@@ -13,11 +13,21 @@ const PAY_CONFIRM_ROLES = ["CASHIER", "OWNER", "FLOOR_MANAGER"];
 
 export async function POST(request: NextRequest) {
   const body = await request.json();
-  const { sessionId, paymentMethod } = body;
+  const { sessionId, paymentMethod, tip } = body as {
+    sessionId?: string;
+    paymentMethod?: string;
+    tip?: number;
+  };
 
   if (!sessionId || !paymentMethod) {
     return NextResponse.json({ error: "sessionId and paymentMethod required" }, { status: 400 });
   }
+
+  // Whole-EGP, non-negative. Anything else becomes 0 — the cashier can
+  // still type a tip in their own input if the guest skipped it.
+  const tipAmount = typeof tip === "number" && tip > 0 && isFinite(tip)
+    ? Math.round(tip)
+    : 0;
 
   try {
     const session = await useCases.sessions.findForPayRequest(sessionId);
@@ -28,7 +38,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Session is already closed" }, { status: 409 });
     }
 
-    await useCases.sessions.stampPendingPaymentMethod(sessionId, paymentMethod);
+    await useCases.sessions.stampPendingPaymentMethod(sessionId, paymentMethod, tipAmount);
 
     const total = await useCases.sessions.sumOpenTotal(sessionId);
     const labelByMethod = paymentMethod === "CASH"

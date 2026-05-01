@@ -472,11 +472,19 @@ export function ImmersiveMenu({ tableNumber, restaurantSlug, sessionId }: { tabl
     return startPoll(checkSession, 30000);
   }, [sessionId, tableNumber, restaurantSlug]);
 
-  // Filter categories by super-category (Food = KITCHEN, Drinks = BAR)
+  // Filter categories by super-category (Food = KITCHEN, Drinks = BAR).
+  // Also drop categories whose items list is empty — items outside their
+  // serving window are filtered server-side, so an out-of-hours category
+  // (e.g. breakfast at 3pm) lands here with `items.length === 0`. Hiding
+  // them keeps the tab strip honest: tapping "Breakfast" before noon used
+  // to scroll to nothing (no section rendered) and silently drop the user
+  // on whatever section was at the top of the list.
   const filteredCategories = useMemo(
-    () => categories.filter((c) =>
-      superCategory === "food" ? c.station === "KITCHEN" : c.station === "BAR"
-    ),
+    () => categories.filter((c) => {
+      const stationOk = superCategory === "food" ? c.station === "KITCHEN" : c.station === "BAR";
+      if (!stationOk) return false;
+      return c.items.some((i) => i.available);
+    }),
     [categories, superCategory]
   );
   const filteredItems = useMemo(

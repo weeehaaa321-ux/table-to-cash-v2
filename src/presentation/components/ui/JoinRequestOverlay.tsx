@@ -42,7 +42,7 @@ export function JoinRequestOverlay() {
     }
 
     poll();
-    const stop = startPoll(poll, 16000);
+    const stop = startPoll(poll, 8000);
     return () => { active = false; stop(); };
   }, [isSessionOwner, sessionId]);
 

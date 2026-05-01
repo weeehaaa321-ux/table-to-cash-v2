@@ -416,7 +416,13 @@ function TrackPage() {
     }
 
     guestPoll();
-    const stop = startPoll(guestPoll, 20000);
+    // 10s — fast enough that a payment delegation handed to another
+    // guest still arrives in their UI within ~10s, but conservative
+    // enough to keep Vercel invocation cost in check (every guest tab
+    // hits this, plus the JoinRequestOverlay at 8s). The previous 20s
+    // was the single biggest cause of the "is delegation broken?"
+    // complaint.
+    const stop = startPoll(guestPoll, 10000);
     return () => { active = false; stop(); };
   }, [sessionId, tableNumber, restaurant, isSessionOwner, guestNumber, orderId, cashPending, setHasPaymentAuthority]);
 
@@ -973,9 +979,15 @@ function TrackPage() {
                               headers: { "Content-Type": "application/json" },
                               body: JSON.stringify({ sessionId, guestNumber: delegateGuest }),
                             });
-                            // Authority will flip on the next poll — no
-                            // local flag needed. The old holder's panel
-                            // (this one) will unmount automatically.
+                            // Flip authority locally so this panel
+                            // unmounts immediately — the next poll will
+                            // confirm. Without the optimistic flip the
+                            // delegating guest sat staring at their own
+                            // (now-stale) checkout panel for up to one
+                            // poll interval, which made delegation feel
+                            // broken.
+                            setHasPaymentAuthority(false);
+                            setDelegateGuest(null);
                           } catch { /* silent */ }
                           setIsDelegating(false);
                         }}
@@ -1312,7 +1324,7 @@ function TrackPage() {
                       const res = await fetch("/api/sessions/pay", {
                         method: "POST",
                         headers: { "Content-Type": "application/json" },
-                        body: JSON.stringify({ sessionId, paymentMethod }),
+                        body: JSON.stringify({ sessionId, paymentMethod, tip: tipAmount }),
                         signal: payCtrl.signal,
                       });
                       clearTimeout(payTimeout);

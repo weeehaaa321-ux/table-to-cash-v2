@@ -71,10 +71,11 @@ export async function GET(request: NextRequest) {
       cashTotal: number; cashOrders: number;
       cardTotal: number; cardOrders: number;
       totalRevenue: number; totalOrders: number;
+      tips: number;
       tables: number[];
     };
-    type ShiftEntry = { shift: number; waiters: Map<string, WaiterEntry>; cash: number; card: number; revenue: number };
-    type DayEntry = { date: string; shifts: Map<number, ShiftEntry>; cash: number; card: number; revenue: number };
+    type ShiftEntry = { shift: number; waiters: Map<string, WaiterEntry>; cash: number; card: number; revenue: number; tips: number };
+    type DayEntry = { date: string; shifts: Map<number, ShiftEntry>; cash: number; card: number; revenue: number; tips: number };
 
     const dayMap = new Map<string, DayEntry>();
 
@@ -92,12 +93,12 @@ export async function GET(request: NextRequest) {
         const dateKey = getDateForTime(revenueTime);
 
         if (!dayMap.has(dateKey)) {
-          dayMap.set(dateKey, { date: dateKey, shifts: new Map(), cash: 0, card: 0, revenue: 0 });
+          dayMap.set(dateKey, { date: dateKey, shifts: new Map(), cash: 0, card: 0, revenue: 0, tips: 0 });
         }
         const day = dayMap.get(dateKey)!;
 
         if (!day.shifts.has(orderShift)) {
-          day.shifts.set(orderShift, { shift: orderShift, waiters: new Map(), cash: 0, card: 0, revenue: 0 });
+          day.shifts.set(orderShift, { shift: orderShift, waiters: new Map(), cash: 0, card: 0, revenue: 0, tips: 0 });
         }
         const shiftEntry = day.shifts.get(orderShift)!;
 
@@ -106,7 +107,7 @@ export async function GET(request: NextRequest) {
           shiftEntry.waiters.set(wid, {
             id: wid, name: wname, shift: wStaff?.shift || 0,
             cashTotal: 0, cashOrders: 0, cardTotal: 0, cardOrders: 0,
-            totalRevenue: 0, totalOrders: 0, tables: [],
+            totalRevenue: 0, totalOrders: 0, tips: 0, tables: [],
           });
         }
         const waiterEntry = shiftEntry.waiters.get(wid)!;
@@ -117,16 +118,20 @@ export async function GET(request: NextRequest) {
 
         const isCash = order.paymentMethod === "CASH";
         const amount = toNum(order.total);
+        const orderTip = toNum(order.tip ?? 0);
 
         waiterEntry.totalRevenue += amount;
         waiterEntry.totalOrders++;
+        waiterEntry.tips += orderTip;
         if (isCash) { waiterEntry.cashTotal += amount; waiterEntry.cashOrders++; }
         else { waiterEntry.cardTotal += amount; waiterEntry.cardOrders++; }
 
         if (isCash) { shiftEntry.cash += amount; day.cash += amount; }
         else { shiftEntry.card += amount; day.card += amount; }
         shiftEntry.revenue += amount;
+        shiftEntry.tips += orderTip;
         day.revenue += amount;
+        day.tips += orderTip;
       }
     }
 
@@ -138,6 +143,7 @@ export async function GET(request: NextRequest) {
         cash: Math.round(day.cash),
         card: Math.round(day.card),
         revenue: Math.round(day.revenue),
+        tips: Math.round(day.tips),
         shifts: Array.from(day.shifts.values())
           .sort((a, b) => a.shift - b.shift)
           .map((s) => ({
@@ -146,6 +152,7 @@ export async function GET(request: NextRequest) {
             cash: Math.round(s.cash),
             card: Math.round(s.card),
             revenue: Math.round(s.revenue),
+            tips: Math.round(s.tips),
             waiters: Array.from(s.waiters.values())
               .sort((a, b) => b.cashTotal - a.cashTotal)
               .map((w) => ({
@@ -157,6 +164,7 @@ export async function GET(request: NextRequest) {
                 cardOrders: w.cardOrders,
                 totalRevenue: Math.round(w.totalRevenue),
                 totalOrders: w.totalOrders,
+                tips: Math.round(w.tips),
                 tablesServed: w.tables,
               })),
           })),
@@ -165,13 +173,14 @@ export async function GET(request: NextRequest) {
     const totalCash = days.reduce((s, d) => s + d.cash, 0);
     const totalCard = days.reduce((s, d) => s + d.card, 0);
     const totalRevenue = days.reduce((s, d) => s + d.revenue, 0);
+    const totalTips = days.reduce((s, d) => s + d.tips, 0);
 
     return NextResponse.json({
       from: fromDate,
       to: toDate,
       currentShift: getCurrentShift(),
       days,
-      totals: { cash: totalCash, card: totalCard, revenue: totalRevenue },
+      totals: { cash: totalCash, card: totalCard, revenue: totalRevenue, tips: totalTips },
     });
   } catch (err) {
     console.error("Cashout fetch failed:", err);

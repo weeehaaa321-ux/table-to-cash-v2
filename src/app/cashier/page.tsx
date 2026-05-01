@@ -13,6 +13,7 @@ import { useCashierReliability } from "@/lib/use-cashier-reliability";
 import { getOrderLabel } from "@/lib/order-label";
 import { staffFetch } from "@/lib/staff-fetch";
 import { DrawerPanel } from "@/presentation/components/cashier/DrawerPanel";
+import { TipsCounter } from "@/presentation/components/ui/TipsCounter";
 
 // ═══════════════════════════════════════════════
 // TYPES
@@ -49,6 +50,15 @@ type SessionInfo = {
   // "Paid so far: 200 CASH · 150 CARD" strip and round labels on
   // the confirm modal and buttons. Empty on first-time payers.
   paidRounds?: PaidRoundInfo[];
+  // What the guest chose on /track when they tapped "Pay X EGP".
+  // Surfaced so the cashier sees and reconciles the same method —
+  // the chosen method is highlighted and the rest dimmed, instead
+  // of asking the guest "did you pick cash or card?" again.
+  pendingPaymentMethod?: "CASH" | "CARD" | "INSTAPAY" | null;
+  // The tip the guest selected on /track. Pre-fills the cashier's
+  // tip input so the cashier doesn't type it from scratch (and
+  // doesn't accidentally drop it).
+  pendingTip?: number;
 };
 
 
@@ -158,17 +168,20 @@ function printInvoice(inv: InvoiceData) {
       "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
     }[ch] as string));
 
+  // One language per row, consistently across all items. Some menu
+  // items have nameAr filled in and some don't, so the previous
+  // "English + Arabic when available" branch printed bilingual rows
+  // for half the order and English-only rows for the other half —
+  // looked like a bug. Stick to the canonical English `name` field;
+  // the bottom-of-receipt thank-you line carries the Arabic touch.
   const renderItemRows = (items: InvoiceItem[]) =>
     items.map((item) => {
       const line = `${item.quantity}x ${escapeHtml(item.name)}`;
-      const arabicLine = item.nameAr
-        ? `<br><span style="font-size:11px;color:#000;" dir="rtl">${escapeHtml(item.nameAr)}</span>`
-        : "";
       const price = `${Math.round(item.price * item.quantity)}`;
       const addOns = item.addOns.length > 0 ? item.addOns.map((a) => { try { const p = JSON.parse(a); return p.name || a; } catch { return a; } }).join(", ") : "";
       return `
       <tr>
-        <td style="text-align:left;padding:2px 0;font-size:12px;">${line}${arabicLine}${addOns ? `<br><span style="font-size:10px;color:#666;">  + ${escapeHtml(addOns)}</span>` : ""}${item.notes ? `<br><span style="font-size:10px;color:#666;">  "${escapeHtml(item.notes)}"</span>` : ""}</td>
+        <td style="text-align:left;padding:2px 0;font-size:12px;">${line}${addOns ? `<br><span style="font-size:10px;color:#666;">  + ${escapeHtml(addOns)}</span>` : ""}${item.notes ? `<br><span style="font-size:10px;color:#666;">  "${escapeHtml(item.notes)}"</span>` : ""}</td>
         <td style="text-align:right;padding:2px 0;font-size:12px;white-space:nowrap;">${price}</td>
       </tr>`;
     }).join("");
@@ -365,9 +378,11 @@ function CashierLogin({ onLogin }: { onLogin: (staff: LoggedInStaff) => void }) 
 // CASHIER ACCEPT PAYMENT (for walk-up guests)
 // ═══════════════════════════════════════════════
 
+type PaymentMethodChoice = "CASH" | "CARD" | "INSTAPAY";
+
 function AcceptPaymentPanel({ sessions, onAcceptPayment, onReversePayment, recentlyPaidSessions, busyRef, staffId }: {
   sessions: SessionInfo[];
-  onAcceptPayment: (sessionId: string, method: "CASH" | "CARD", tip: number) => Promise<{ confirmedTotal: number } | null>;
+  onAcceptPayment: (sessionId: string, method: PaymentMethodChoice, tip: number) => Promise<{ confirmedTotal: number } | null>;
   onReversePayment: (sessionId: string, reason: string) => Promise<boolean>;
   recentlyPaidSessions: { id: string; tableNumber: number | null; orderType?: string; vipGuestName?: string | null; total: number }[];
   busyRef: React.MutableRefObject<boolean>;
@@ -387,7 +402,7 @@ function AcceptPaymentPanel({ sessions, onAcceptPayment, onReversePayment, recen
     (s) => s.status === "OPEN" && (s.unpaidTotal || 0) === 0 && (s.orderTotal || 0) > 0 && s.paymentReceived
   );
   const [printing, setPrinting] = useState<string | null>(null);
-  const [justPaid, setJustPaid] = useState<{ tableNumber: number | null; orderType?: string; vipGuestName?: string | null; method: "CASH" | "CARD"; total: number } | null>(null);
+  const [justPaid, setJustPaid] = useState<{ tableNumber: number | null; orderType?: string; vipGuestName?: string | null; method: PaymentMethodChoice; total: number } | null>(null);
   // Final "did you actually receive the payment?" guard before we settle.
   // Prevents accidental taps and makes the walk-up case (guest didn't tap
   // pay on their phone) an explicit, intentional action.
@@ -396,7 +411,7 @@ function AcceptPaymentPanel({ sessions, onAcceptPayment, onReversePayment, recen
     tableNumber: number | null;
     orderType?: string;
     vipGuestName?: string | null;
-    method: "CASH" | "CARD";
+    method: PaymentMethodChoice;
     total: number;
     roundLabel: string;
     priorSummary: string | null;
@@ -444,7 +459,7 @@ function AcceptPaymentPanel({ sessions, onAcceptPayment, onReversePayment, recen
 
   // Step 1: method picked — stage the confirm modal instead of settling
   // straight away. Nothing hits the server until the cashier answers Yes.
-  const handleMethodChosen = (sessionId: string, method: "CASH" | "CARD") => {
+  const handleMethodChosen = (sessionId: string, method: PaymentMethodChoice) => {
     const session = sessions.find((s) => s.id === sessionId);
     if (!session) return;
     const priorRounds = session.paidRounds || [];
@@ -452,7 +467,11 @@ function AcceptPaymentPanel({ sessions, onAcceptPayment, onReversePayment, recen
     const roundLabel = priorRounds.length > 0
       ? `Payment ${nextRoundIndex} of ${nextRoundIndex}`
       : t("cashier.fullPayment");
-    setTipInput("");
+    // Pre-fill the cashier's tip input with whatever the guest picked
+    // on /track. The cashier can still edit; the value at confirm is
+    // what gets stamped (SET, not incremented), so there's no double-
+    // counting risk.
+    setTipInput(session.pendingTip && session.pendingTip > 0 ? String(session.pendingTip) : "");
     setPendingConfirm({
       sessionId,
       tableNumber: session.tableNumber,
@@ -502,9 +521,9 @@ function AcceptPaymentPanel({ sessions, onAcceptPayment, onReversePayment, recen
           <div className="bg-white rounded-2xl max-w-sm w-full p-6 shadow-2xl">
             <div className="flex items-center gap-3 mb-4">
               <div className={`w-12 h-12 rounded-xl flex items-center justify-center text-2xl ${
-                pendingConfirm.method === "CASH" ? "bg-status-good-50" : "bg-status-info-50"
+                pendingConfirm.method === "CASH" ? "bg-status-good-50" : pendingConfirm.method === "CARD" ? "bg-status-info-50" : "bg-status-wait-50"
               }`}>
-                {pendingConfirm.method === "CASH" ? "💵" : "💳"}
+                {pendingConfirm.method === "CASH" ? "💵" : pendingConfirm.method === "CARD" ? "💳" : "📱"}
               </div>
               <div>
                 <h3 className="text-base font-semibold text-text-primary">
@@ -512,7 +531,7 @@ function AcceptPaymentPanel({ sessions, onAcceptPayment, onReversePayment, recen
                 </h3>
                 <p className="text-xs text-text-secondary font-semibold">
                   {getOrderLabel(pendingConfirm)} · {formatEGP(pendingConfirm.total)} {t("common.egp")} ·{" "}
-                  {pendingConfirm.method === "CASH" ? t("cashier.cash") : t("cashier.card")}
+                  {pendingConfirm.method === "CASH" ? t("cashier.cash") : pendingConfirm.method === "CARD" ? t("cashier.card") : t("cashier.instapay")}
                 </p>
               </div>
             </div>
@@ -559,7 +578,7 @@ function AcceptPaymentPanel({ sessions, onAcceptPayment, onReversePayment, recen
                 onClick={handleConfirmReceived}
                 disabled={settling}
                 className={`flex-1 py-3 rounded-xl text-white text-sm font-bold active:scale-95 disabled:opacity-60 ${
-                  pendingConfirm.method === "CASH" ? "bg-status-good-600" : "bg-status-info-600"
+                  pendingConfirm.method === "CASH" ? "bg-status-good-600" : pendingConfirm.method === "CARD" ? "bg-status-info-600" : "bg-status-wait-600"
                 }`}
               >
                 {settling ? t("cashier.confirming") : t("cashier.yesReceived")}
@@ -580,7 +599,7 @@ function AcceptPaymentPanel({ sessions, onAcceptPayment, onReversePayment, recen
               {t("cashier.confirmed")} · {formatEGP(justPaid.total)} {t("common.egp")} — {getOrderLabel(justPaid)}
             </p>
             <p className="text-[11px] text-status-good-100 font-semibold">
-              {justPaid.method === "CASH" ? t("cashier.cashReceivedMsg") : t("cashier.cardCharged")} · {t("cashier.printingReceipt")}
+              {justPaid.method === "CASH" ? t("cashier.cashReceivedMsg") : justPaid.method === "CARD" ? t("cashier.cardCharged") : t("cashier.instapayCharged")} · {t("cashier.printingReceipt")}
             </p>
           </div>
         </div>
@@ -781,22 +800,46 @@ function AcceptPaymentPanel({ sessions, onAcceptPayment, onReversePayment, recen
                 )}
 
                 {/* Direct payment-method buttons. No intermediate "Process Payment" step —
-                    safety is in the confirm modal that fires next. */}
-                <div className="grid grid-cols-2 border-t-2 border-sand-200">
-                  <button
-                    onClick={() => handleMethodChosen(s.id, "CASH")}
-                    className="py-5 text-base font-extrabold uppercase tracking-wider bg-status-good-500 hover:bg-status-good-600 text-white transition active:scale-[0.99] flex items-center justify-center gap-2"
-                  >
-                    <span className="text-2xl leading-none">💵</span>
-                    {t("cashier.cash")}
-                  </button>
-                  <button
-                    onClick={() => handleMethodChosen(s.id, "CARD")}
-                    className="py-5 text-base font-extrabold uppercase tracking-wider bg-status-info-500 hover:bg-status-info-600 text-white transition active:scale-[0.99] flex items-center justify-center gap-2 border-l-2 border-sand-200"
-                  >
-                    <span className="text-2xl leading-none">💳</span>
-                    {t("cashier.card")}
-                  </button>
+                    safety is in the confirm modal that fires next.
+                    When the guest already picked a method on /track, that
+                    method is highlighted and the others dimmed so the
+                    cashier can't second-guess (or accidentally settle)
+                    the wrong one. */}
+                {s.pendingPaymentMethod && (
+                  <div className="mx-5 mb-3 rounded-lg bg-ocean-50 border border-ocean-200 px-3 py-2 flex items-center justify-between gap-2">
+                    <span className="text-[10px] font-extrabold text-ocean-700 uppercase tracking-widest">
+                      {t("cashier.guestChose")}
+                    </span>
+                    <span className="text-sm font-extrabold text-ocean-800">
+                      {s.pendingPaymentMethod === "CASH" ? `💵 ${t("cashier.cash")}` :
+                       s.pendingPaymentMethod === "CARD" ? `💳 ${t("cashier.card")}` :
+                       `📱 ${t("cashier.instapay")}`}
+                      {(s.pendingTip || 0) > 0 && (
+                        <span className="ms-2 text-xs font-bold text-ocean-700">
+                          + {formatEGP(s.pendingTip || 0)} {t("common.egp")} tip
+                        </span>
+                      )}
+                    </span>
+                  </div>
+                )}
+                <div className="grid grid-cols-3 border-t-2 border-sand-200">
+                  {([
+                    ["CASH", "💵", t("cashier.cash"), "bg-status-good-500 hover:bg-status-good-600"],
+                    ["CARD", "💳", t("cashier.card"), "bg-status-info-500 hover:bg-status-info-600"],
+                    ["INSTAPAY", "📱", t("cashier.instapay"), "bg-status-wait-500 hover:bg-status-wait-600"],
+                  ] as [PaymentMethodChoice, string, string, string][]).map(([key, icon, label, color], idx) => {
+                    const isPreferred = !s.pendingPaymentMethod || s.pendingPaymentMethod === key;
+                    return (
+                      <button
+                        key={key}
+                        onClick={() => handleMethodChosen(s.id, key)}
+                        className={`py-5 text-sm font-extrabold uppercase tracking-wider text-white transition active:scale-[0.99] flex items-center justify-center gap-1.5 ${color} ${idx > 0 ? "border-l-2 border-sand-200" : ""} ${isPreferred ? "" : "opacity-30 saturate-50"}`}
+                      >
+                        <span className="text-xl leading-none">{icon}</span>
+                        <span className="truncate">{label}</span>
+                      </button>
+                    );
+                  })}
                 </div>
               </div>
               );
@@ -1030,6 +1073,9 @@ function CashierSystem({ staff, onLogout }: { staff: LoggedInStaff; onLogout: ()
   const [shiftOrders, setShiftOrders] = useState(0);
   const [cashCollected, setCashCollected] = useState(0);
   const [cardCollected, setCardCollected] = useState(0);
+  const [dayTips, setDayTips] = useState(0);
+  const [shiftTips, setShiftTips] = useState(0);
+  const [shiftTipsByWaiter, setShiftTipsByWaiter] = useState<{ id: string; name: string; tips: number }[]>([]);
   const [shiftInfo, setShiftInfo] = useState(() => getShiftTimer(staff.shift, "CASHIER"));
   const [showSchedule, setShowSchedule] = useState(false);
 
@@ -1129,18 +1175,33 @@ function CashierSystem({ staff, onLogout }: { staff: LoggedInStaff; onLogout: ()
           let totalDayRevenue = 0, totalDayOrders = 0;
           let totalShiftRevenue = 0, totalShiftOrders = 0;
           let totalCash = 0, totalCard = 0;
+          let totalDayTips = 0, totalShiftTips = 0;
+          // Aggregate per-waiter shift tips across the days returned —
+          // typically just today, but the response structure supports
+          // longer windows.
+          const shiftWaiterTips = new Map<string, { id: string; name: string; tips: number }>();
           const currentShift = getCurrentShift();
 
           for (const day of data.days || []) {
             totalDayRevenue += day.revenue || 0;
             totalCash += day.cash || 0;
             totalCard += day.card || 0;
+            totalDayTips += day.tips || 0;
             for (const shift of day.shifts || []) {
               for (const w of shift.waiters || []) {
                 totalDayOrders += w.totalOrders || 0;
                 if (shift.shift === currentShift) {
                   totalShiftRevenue += w.totalRevenue || 0;
                   totalShiftOrders += w.totalOrders || 0;
+                  totalShiftTips += w.tips || 0;
+                  if ((w.tips || 0) > 0) {
+                    const existing = shiftWaiterTips.get(w.id);
+                    shiftWaiterTips.set(w.id, {
+                      id: w.id,
+                      name: w.name,
+                      tips: (existing?.tips || 0) + (w.tips || 0),
+                    });
+                  }
                 }
               }
             }
@@ -1152,6 +1213,9 @@ function CashierSystem({ staff, onLogout }: { staff: LoggedInStaff; onLogout: ()
           setShiftOrders(totalShiftOrders);
           setCashCollected(totalCash);
           setCardCollected(totalCard);
+          setDayTips(totalDayTips);
+          setShiftTips(totalShiftTips);
+          setShiftTipsByWaiter(Array.from(shiftWaiterTips.values()));
         }
       } catch (err) {
         if ((err as Error)?.name === "AbortError") return;
@@ -1173,7 +1237,7 @@ function CashierSystem({ staff, onLogout }: { staff: LoggedInStaff; onLogout: ()
   // would see the check come back and assume the confirm failed.
   const handleAcceptPayment = useCallback(async (
     sessionId: string,
-    method: "CASH" | "CARD",
+    method: PaymentMethodChoice,
     tip: number,
   ): Promise<{ confirmedTotal: number } | null> => {
     let priorUnpaid = 0;
@@ -1392,6 +1456,13 @@ function CashierSystem({ staff, onLogout }: { staff: LoggedInStaff; onLogout: ()
               cashCollected={cashCollected}
               cardCollected={cardCollected}
               totalOrders={shiftOrders}
+            />
+            <TipsCounter
+              todayTips={dayTips}
+              shiftTips={shiftTips}
+              todayRevenue={dayRevenue}
+              waiters={shiftTipsByWaiter}
+              compact
             />
             <RevenueSummary
               dayRevenue={dayRevenue}

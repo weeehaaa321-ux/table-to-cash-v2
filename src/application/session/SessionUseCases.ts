@@ -138,7 +138,7 @@ export class SessionUseCases {
         waiter: { select: { id: true, name: true } },
         vipGuest: { select: { name: true } },
         orders: {
-          select: { id: true, orderNumber: true, total: true, status: true, paymentMethod: true, paidAt: true },
+          select: { id: true, orderNumber: true, total: true, status: true, paymentMethod: true, paidAt: true, tip: true },
           orderBy: { createdAt: "asc" },
         },
       },
@@ -404,13 +404,36 @@ export class SessionUseCases {
     });
   }
 
-  /** Stamp paymentMethod on all unpaid open orders in the session. */
-  async stampPendingPaymentMethod(sessionId: string, paymentMethod: string) {
-    return db.order.updateMany({
+  /**
+   * Stamp paymentMethod on all unpaid open orders in the session, and
+   * the guest-selected tip on the first unpaid order. The tip lives on
+   * a single order so the cashier's confirm step can replace it
+   * cleanly without double-counting (and so summarising tip via
+   * `sum(tip)` over the round still produces the right number).
+   */
+  async stampPendingPaymentMethod(
+    sessionId: string,
+    paymentMethod: string,
+    tipAmount: number = 0,
+  ) {
+    await db.order.updateMany({
       where: { sessionId, status: { notIn: ["PAID", "CANCELLED"] }, paidAt: null },
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      data: { paymentMethod: paymentMethod as any },
+      data: { paymentMethod: paymentMethod as any, tip: 0 },
     });
+    if (tipAmount > 0) {
+      const firstUnpaid = await db.order.findFirst({
+        where: { sessionId, status: { notIn: ["PAID", "CANCELLED"] }, paidAt: null },
+        orderBy: { createdAt: "asc" },
+        select: { id: true },
+      });
+      if (firstUnpaid) {
+        await db.order.update({
+          where: { id: firstUnpaid.id },
+          data: { tip: Math.round(tipAmount) },
+        });
+      }
+    }
   }
 
   async sumOpenTotal(sessionId: string): Promise<number> {
@@ -438,9 +461,13 @@ export class SessionUseCases {
       where: { sessionId, paidAt: { not: null } },
     });
     if (confirmed > 0) return { ok: false, reason: "PAYMENT_CONFIRMED" };
+    // Clear both the chosen method AND the guest's pre-stamped tip.
+    // Cancelling the request should reset both — otherwise a tip the
+    // guest typed in then cancelled would silently linger and show up
+    // on the cashier's pre-fill the next time they tapped pay.
     const result = await db.order.updateMany({
       where: { sessionId, paidAt: null, paymentMethod: { not: null } },
-      data: { paymentMethod: null },
+      data: { paymentMethod: null, tip: 0 },
     });
     return { ok: true, cleared: result.count };
   }
@@ -492,8 +519,13 @@ export class SessionUseCases {
       const now = new Date();
       const method = (paymentMethod || "CASH") as "CASH" | "CARD" | "INSTAPAY" | "APPLE_PAY" | "GOOGLE_PAY";
       const tipTargetId = orders[0]?.id;
+      // SET tip (not increment) — the cashier's input is the
+      // authoritative value at confirm time. The guest may have
+      // pre-stamped a tip when they tapped "Pay X EGP" on /track;
+      // the cashier sees that pre-fill and can adjust. Incrementing
+      // here would compound the two values into double the tip.
       for (const order of orders) {
-        const applyTip = order.id === tipTargetId && tipAmount > 0;
+        const isTipTarget = order.id === tipTargetId;
         if (order.status === "SERVED") {
           await tx.order.update({
             where: { id: order.id },
@@ -501,7 +533,7 @@ export class SessionUseCases {
               status: "PAID",
               paymentMethod: method,
               paidAt: now,
-              ...(applyTip ? { tip: { increment: tipAmount } } : {}),
+              ...(isTipTarget ? { tip: Math.max(0, Math.round(tipAmount)) } : { tip: 0 }),
             },
           });
         } else {
@@ -510,7 +542,7 @@ export class SessionUseCases {
             data: {
               paymentMethod: method,
               paidAt: now,
-              ...(applyTip ? { tip: { increment: tipAmount } } : {}),
+              ...(isTipTarget ? { tip: Math.max(0, Math.round(tipAmount)) } : { tip: 0 }),
             },
           });
         }
