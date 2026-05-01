@@ -2582,6 +2582,15 @@ function StaffSystem({ loggedInStaff, onLogout }: { loggedInStaff: LoggedInStaff
   const readyCount = activeOrders.filter((o) => o.order.status === "ready").length;
   const preparingCount = activeOrders.filter((o) => o.order.status === "preparing").length;
   const servedCount = activeOrders.filter((o) => o.order.status === "served").length;
+
+  // "My Load" counts only orders for tables/sessions assigned to me.
+  // The filter tabs above intentionally stay restaurant-wide so a waiter
+  // sees what the floor is dealing with, but the load gauge is personal.
+  const myActiveOrderCount = activeOrders.filter(({ order }) => {
+    if (order.sessionId && mySessionIds.has(order.sessionId)) return true;
+    if (order.tableNumber != null && myTableNumbers.has(order.tableNumber)) return true;
+    return false;
+  }).length;
   const delayedCount = activeOrders.filter((o) => o.order.isDelayed).length;
   const criticalCount = activeOrders.filter((o) => o.urgency === "critical").length;
 
@@ -2708,7 +2717,7 @@ function StaffSystem({ loggedInStaff, onLogout }: { loggedInStaff: LoggedInStaff
 
           {/* Waiter load bar */}
           <WaiterLoadBar
-            activeOrders={activeOrders.length}
+            activeOrders={myActiveOrderCount}
             maxOrders={waiterCapacity}
           />
 
