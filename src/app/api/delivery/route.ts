@@ -81,8 +81,11 @@ export async function POST(request: NextRequest) {
     try {
       const { sendPushToStaff } = await import("@/lib/web-push");
       await sendPushToStaff(driverId, {
-        title: "New Delivery Assigned",
-        body: `Order #${order.orderNumber} — pick up from kitchen`,
+        title: { en: "New Delivery Assigned", ar: "تم تعيين توصيل جديد" },
+        body: {
+          en: `Order #${order.orderNumber} — pick up from kitchen`,
+          ar: `الطلب رقم ${order.orderNumber} — استلم من المطبخ`,
+        },
         tag: `delivery-${orderId}`,
         url: "/delivery",
       });

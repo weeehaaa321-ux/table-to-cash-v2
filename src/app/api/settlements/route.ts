@@ -95,8 +95,11 @@ export async function POST(request: NextRequest) {
     });
 
     sendPushToStaff(waiterId, {
-      title: "Cash Settlement Request",
-      body: `Cashier ${cashier?.name || ""} requests you settle ${amount} EGP`,
+      title: { en: "Cash Settlement Request", ar: "طلب تسوية نقدية" },
+      body: {
+        en: `Cashier ${cashier?.name || ""} requests you settle ${amount} EGP`,
+        ar: `الكاشير ${cashier?.name || ""} يطلب منك تسوية ${amount} جنيه`,
+      },
       tag: `settle-${settlement.id}`,
       url: "/waiter",
     }).catch(() => {});
@@ -155,8 +158,11 @@ export async function PATCH(request: NextRequest) {
     if (action === "accept") {
       const settlement = await useCases.cashier.acceptSettlement(settlementId);
       sendPushToStaff(settlement.cashier.id, {
-        title: "Settlement Accepted",
-        body: `${settlement.waiter.name} is bringing ${settlement.amount} EGP`,
+        title: { en: "Settlement Accepted", ar: "تم قبول التسوية" },
+        body: {
+          en: `${settlement.waiter.name} is bringing ${settlement.amount} EGP`,
+          ar: `${settlement.waiter.name} في الطريق بـ ${settlement.amount} جنيه`,
+        },
         tag: `settle-accepted-${settlementId}`,
         url: "/cashier",
       }).catch(() => {});
@@ -166,8 +172,11 @@ export async function PATCH(request: NextRequest) {
     if (action === "confirm") {
       const settlement = await useCases.cashier.confirmSettlement(settlementId);
       sendPushToStaff(settlement.waiter.id, {
-        title: "Cash Settled",
-        body: `Cashier confirmed receipt of ${settlement.amount} EGP`,
+        title: { en: "Cash Settled", ar: "تمت التسوية" },
+        body: {
+          en: `Cashier confirmed receipt of ${settlement.amount} EGP`,
+          ar: `الكاشير أكد استلام ${settlement.amount} جنيه`,
+        },
         tag: `settle-confirmed-${settlementId}`,
         url: "/waiter",
       }).catch(() => {});

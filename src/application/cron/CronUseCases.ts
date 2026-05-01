@@ -107,8 +107,14 @@ export class CronUseCases {
       });
       for (const s of scheduled) {
         await sendPushToStaff(s.staffId, {
-          title: `${SHIFT_LABELS[targetShift]} starts soon`,
-          body: `Your shift starts in ~1 hour. Don't be late.`,
+          title: {
+            en: `${SHIFT_LABELS[targetShift]} starts soon`,
+            ar: `${SHIFT_LABELS[targetShift]} تبدأ قريباً`,
+          },
+          body: {
+            en: `Your shift starts in ~1 hour. Don't be late.`,
+            ar: `مناوبتك تبدأ خلال حوالي ساعة. لا تتأخر.`,
+          },
           tag: `shift-reminder-${s.staffId}-${targetShift}`,
           url: "/waiter",
         }).catch(() => {});
@@ -327,15 +333,24 @@ export class CronUseCases {
     for (const [restaurantId, tableSet] of byRestaurant) {
       const numbered = Array.from(tableSet).filter((n): n is number => n != null).sort((a, b) => a - b);
       const hasVip = tableSet.has(null);
-      const tableLabel = numbered.length > 0
-        ? `Table${numbered.length > 1 ? "s" : ""} ${numbered.join(", ")}${hasVip ? " + VIP" : ""}`
+      const plural = numbered.length > 1;
+      const tableLabelEn = numbered.length > 0
+        ? `Table${plural ? "s" : ""} ${numbered.join(", ")}${hasVip ? " + VIP" : ""}`
         : "VIP session";
+      const tableLabelAr = numbered.length > 0
+        ? `${plural ? "طاولات" : "طاولة"} ${numbered.join("، ")}${hasVip ? " + VIP" : ""}`
+        : "جلسة VIP";
       const count = tableSet.size;
 
       await notifyPaymentConfirmation({
         restaurantId,
-        title: count === 1 ? "Payment confirmation needed" : `${count} payments need confirmation`,
-        body: `${tableLabel} — guest tapped Pay 10+ min ago.`,
+        title: count === 1
+          ? { en: "Payment confirmation needed", ar: "تأكيد دفع مطلوب" }
+          : { en: `${count} payments need confirmation`, ar: `${count} مدفوعات تحتاج تأكيد` },
+        body: {
+          en: `${tableLabelEn} — guest tapped Pay 10+ min ago.`,
+          ar: `${tableLabelAr} — الضيف ضغط دفع منذ ١٠+ دقائق.`,
+        },
         tagBase: `stuck-payments-${restaurantId}`,
       }).catch(() => {});
       notified++;
@@ -359,8 +374,8 @@ export class CronUseCases {
       if (isNaN(scheduledAt.getTime()) || scheduledAt > now) continue;
 
       await sendPushToStaff(msg.to, {
-        title: "Check Table",
-        body: msg.text || "Time to check on your table",
+        title: { en: "Check Table", ar: "افحص الطاولة" },
+        body: msg.text || { en: "Time to check on your table", ar: "حان وقت متابعة طاولتك" },
         tag: `table-check-${msg.id}`,
         url: "/waiter",
       }).catch(() => {});

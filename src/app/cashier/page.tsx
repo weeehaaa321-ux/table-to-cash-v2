@@ -1066,12 +1066,13 @@ function CashierSystem({ staff, onLogout }: { staff: LoggedInStaff; onLogout: ()
   // Notifications
   useEffect(() => { requestNotificationPermission(); }, []);
 
-  // Push subscription
+  // Push subscription. `lang` in deps so toggling the language re-
+  // subscribes with the new lang, and future pushes land translated.
   useEffect(() => {
     import("@/lib/push-client").then(({ subscribeToPush }) => {
-      subscribeToPush(staff.id, "CASHIER", restaurantSlug).catch(() => {});
+      subscribeToPush(staff.id, "CASHIER", restaurantSlug, lang as "en" | "ar").catch(() => {});
     });
-  }, [staff.id, restaurantSlug]);
+  }, [staff.id, restaurantSlug, lang]);
 
   // Poll sessions — visibility-aware, with an AbortController so a new
   // tick can never race a still-pending previous request. This is the

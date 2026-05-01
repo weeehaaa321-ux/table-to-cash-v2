@@ -62,9 +62,13 @@ export async function POST(request: NextRequest) {
 
       try {
         const { sendPushToStaff } = await import("@/lib/web-push");
+        const plural = openSettlements.length > 1;
         await sendPushToStaff(targetCashier.id, {
-          title: "Settlements Transferred",
-          body: `${openSettlements.length} open cash settlement${openSettlements.length > 1 ? "s" : ""} reassigned to you from a shift change`,
+          title: { en: "Settlements Transferred", ar: "تم تحويل التسويات" },
+          body: {
+            en: `${openSettlements.length} open cash settlement${plural ? "s" : ""} reassigned to you from a shift change`,
+            ar: `${openSettlements.length} ${plural ? "تسويات نقدية مفتوحة" : "تسوية نقدية مفتوحة"} تم تحويلها إليك من تغيير المناوبة`,
+          },
           tag: `settle-transfer-${Date.now()}`,
           url: "/cashier",
         });

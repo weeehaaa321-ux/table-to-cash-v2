@@ -1187,6 +1187,7 @@ function KitchenLogin({ onLogin }: { onLogin: (staff: { id: string; name: string
 export default function KitchenPage() {
   const [staff, setStaff] = useState<StaffInfo | null>(null);
   const [hydrated, setHydrated] = useState(false);
+  const { lang } = useLanguage();
 
   useEffect(() => {
     try {
@@ -1204,15 +1205,21 @@ export default function KitchenPage() {
     setHydrated(true);
   }, []);
 
+  // Push subscription, re-fired on lang change so notifications land
+  // in the cashier's chosen language.
+  useEffect(() => {
+    if (!staff?.id) return;
+    import("@/lib/push-client").then(({ subscribeToPush }) => {
+      const restaurantSlug = process.env.NEXT_PUBLIC_RESTAURANT_SLUG || "neom-dahab";
+      subscribeToPush(staff.id, "KITCHEN", restaurantSlug, lang as "en" | "ar").catch(() => {});
+    });
+  }, [staff?.id, lang]);
+
   const handleLogin = useCallback((s: StaffInfo) => {
     localStorage.setItem("kitchen_staff", JSON.stringify({ ...s, loginAt: Date.now() }));
     setStaff(s);
     import("@/lib/notifications").then(({ requestNotificationPermission }) => {
       requestNotificationPermission();
-    });
-    import("@/lib/push-client").then(({ subscribeToPush }) => {
-      const restaurantSlug = process.env.NEXT_PUBLIC_RESTAURANT_SLUG || "neom-dahab";
-      subscribeToPush(s.id, "KITCHEN", restaurantSlug).catch(() => {});
     });
   }, []);
 

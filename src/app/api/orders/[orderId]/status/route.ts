@@ -73,16 +73,23 @@ export async function PATCH(
       );
     }
 
-    // Push notifications for key status changes
+    // Push notifications for key status changes — sent with both
+    // English and Arabic strings; web-push.ts picks per recipient
+    // based on their stored subscription language.
     if (status === "READY" || status === "CONFIRMED" || status === "PREPARING") {
       const fullOrder = await useCases.orders.findOrderForPushContext(orderId);
       if (fullOrder) {
         const isDelivery = fullOrder.orderType === "DELIVERY";
+        const tableEn = fullOrder.table ? `Table ${fullOrder.table.number}` : "VIP";
+        const tableAr = fullOrder.table ? `طاولة ${fullOrder.table.number}` : "VIP";
 
         if (status === "READY" && fullOrder.session?.waiterId && !isDelivery) {
           sendPushToStaff(fullOrder.session.waiterId, {
-            title: "Order Ready",
-            body: `Order #${fullOrder.orderNumber} is ready — ${fullOrder.table ? `Table ${fullOrder.table.number}` : "VIP"}`,
+            title: { en: "Order Ready", ar: "الطلب جاهز" },
+            body: {
+              en: `Order #${fullOrder.orderNumber} is ready — ${tableEn}`,
+              ar: `الطلب رقم ${fullOrder.orderNumber} جاهز — ${tableAr}`,
+            },
             tag: `order-ready-${orderId}`,
             url: "/waiter",
           }).catch(() => {});
@@ -91,8 +98,11 @@ export async function PATCH(
           const targetRole = fullOrder.station === "BAR" ? "BAR" : "KITCHEN";
           const targetUrl = fullOrder.station === "BAR" ? "/bar" : "/kitchen";
           sendPushToRole(targetRole, restaurantId, {
-            title: "New Order",
-            body: `Order #${fullOrder.orderNumber} confirmed — ${fullOrder.table ? `Table ${fullOrder.table.number}` : "VIP"}`,
+            title: { en: "New Order", ar: "طلب جديد" },
+            body: {
+              en: `Order #${fullOrder.orderNumber} confirmed — ${tableEn}`,
+              ar: `تم تأكيد الطلب رقم ${fullOrder.orderNumber} — ${tableAr}`,
+            },
             tag: `order-confirmed-${orderId}`,
             url: targetUrl,
           }).catch(() => {});
@@ -100,14 +110,22 @@ export async function PATCH(
 
         // Notify delivery driver on status changes
         if (isDelivery && fullOrder.deliveryDriver?.id) {
-          const driverMsg =
-            status === "CONFIRMED" ? "Order confirmed by kitchen" :
-            status === "PREPARING" ? "Order is being prepared" :
-            status === "READY" ? "Order is READY for pickup!" : null;
+          const driverMsg = status === "CONFIRMED"
+            ? { en: "Order confirmed by kitchen", ar: "تم تأكيد الطلب من المطبخ" }
+            : status === "PREPARING"
+              ? { en: "Order is being prepared", ar: "جاري تحضير الطلب" }
+              : status === "READY"
+                ? { en: "Order is READY for pickup!", ar: "الطلب جاهز للاستلام!" }
+                : null;
           if (driverMsg) {
             sendPushToStaff(fullOrder.deliveryDriver.id, {
-              title: status === "READY" ? "Ready for Pickup!" : `Order #${fullOrder.orderNumber}`,
-              body: `#${fullOrder.orderNumber} — ${driverMsg}`,
+              title: status === "READY"
+                ? { en: "Ready for Pickup!", ar: "جاهز للاستلام!" }
+                : { en: `Order #${fullOrder.orderNumber}`, ar: `الطلب رقم ${fullOrder.orderNumber}` },
+              body: {
+                en: `#${fullOrder.orderNumber} — ${driverMsg.en}`,
+                ar: `رقم ${fullOrder.orderNumber} — ${driverMsg.ar}`,
+              },
               tag: `delivery-status-${orderId}`,
               url: "/delivery",
             }).catch(() => {});

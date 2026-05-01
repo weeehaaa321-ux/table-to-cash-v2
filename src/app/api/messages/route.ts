@@ -27,8 +27,16 @@ export async function POST(request: NextRequest) {
     if (!body.skipPush) {
       if (body.command === "call_waiter" && body.tableId) {
         const payload = {
-          title: `Table ${body.tableId} — Needs Attention`,
-          body: body.text || `Table ${body.tableId} is calling the waiter`,
+          title: {
+            en: `Table ${body.tableId} — Needs Attention`,
+            ar: `طاولة ${body.tableId} — تحتاج اهتمام`,
+          },
+          // body.text is whatever the manager typed; we don't translate
+          // free-form text. Falls back to a localized default if empty.
+          body: body.text || {
+            en: `Table ${body.tableId} is calling the waiter`,
+            ar: `طاولة ${body.tableId} تطلب الجرسون`,
+          },
           tag: `call-waiter-${body.tableId}-${Date.now()}`,
           url: "/waiter",
         };
@@ -40,14 +48,14 @@ export async function POST(request: NextRequest) {
           sendPushToRole("WAITER", restaurantId, payload).catch(() => {});
         }
       } else {
+        const titleByType = body.type === "voice"
+          ? { en: "Voice Note", ar: "ملاحظة صوتية" }
+          : body.command === "cash_payment"
+            ? { en: "Cash Collection", ar: "تحصيل نقدي" }
+            : { en: "Message", ar: "رسالة" };
         const payload = {
-          title:
-            body.type === "voice"
-              ? "Voice Note"
-              : body.command === "cash_payment"
-                ? "Cash Collection"
-                : "Message",
-          body: body.text || "New message from manager",
+          title: titleByType,
+          body: body.text || { en: "New message from manager", ar: "رسالة جديدة من المدير" },
           tag: `msg-${msg.id}`,
           url: "/waiter",
         };

@@ -78,9 +78,13 @@ export async function transferWaiterSessions(
   });
 
   try {
+    const plural = openSessions.length > 1;
     await sendPushToStaff(targetWaiter.id, {
-      title: "Tables Transferred to You",
-      body: `You've been assigned Table${openSessions.length > 1 ? "s" : ""} ${tableNumbers.join(", ")}`,
+      title: { en: "Tables Transferred to You", ar: "تم تحويل طاولات إليك" },
+      body: {
+        en: `You've been assigned Table${plural ? "s" : ""} ${tableNumbers.join(", ")}`,
+        ar: `تم تعيينك ${plural ? "للطاولات" : "للطاولة"} ${tableNumbers.join("، ")}`,
+      },
       tag: `transfer-${Date.now()}`,
       url: "/waiter",
     });

@@ -2349,13 +2349,15 @@ function StaffSystem({ loggedInStaff, onLogout }: { loggedInStaff: LoggedInStaff
     return () => clearInterval(clockInterval);
   }, []);
 
-  // Subscribe to push notifications
+  // Subscribe to push notifications. `lang` in deps so flipping the
+  // language toggle updates the server-side subscription record, and
+  // future pushes land in the new language.
   useEffect(() => {
     import("@/lib/push-client").then(({ subscribeToPush }) => {
       const restaurantSlug = process.env.NEXT_PUBLIC_RESTAURANT_SLUG || "neom-dahab";
-      subscribeToPush(loggedInStaff.id, loggedInStaff.role, restaurantSlug).catch(() => {});
+      subscribeToPush(loggedInStaff.id, loggedInStaff.role, restaurantSlug, lang as "en" | "ar").catch(() => {});
     });
-  }, [loggedInStaff.id, loggedInStaff.role]);
+  }, [loggedInStaff.id, loggedInStaff.role, lang]);
 
   // Poll for owner messages (voice notes, commands, alerts)
   useEffect(() => {

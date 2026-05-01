@@ -339,6 +339,10 @@ model PushSubscription {
   auth         String
   staffId      String?
   role         String?
+  // UI language the device was set to when this subscription was last
+  // refreshed. Server-side push helpers use this to pick title/body
+  // in the subscriber's language. Falls back to "en" for old rows.
+  lang         String     @default("en")
   restaurant   Restaurant @relation(fields: [restaurantId], references: [id])
   restaurantId String
   staff        Staff?     @relation(fields: [staffId], references: [id], onDelete: SetNull)

@@ -13,7 +13,25 @@ function urlBase64ToUint8Array(base64String: string): Uint8Array {
   return outputArray;
 }
 
-export async function subscribeToPush(staffId: string, role: string, restaurantId: string): Promise<boolean> {
+function readUiLang(): "en" | "ar" {
+  // Same source the useLanguage hook reads from — keeps client and
+  // server views of the user's language in sync.
+  try {
+    const stored = typeof localStorage !== "undefined"
+      ? localStorage.getItem("ttc_lang")
+      : null;
+    return stored === "ar" ? "ar" : "en";
+  } catch {
+    return "en";
+  }
+}
+
+export async function subscribeToPush(
+  staffId: string,
+  role: string,
+  restaurantId: string,
+  lang?: "en" | "ar",
+): Promise<boolean> {
   if (!VAPID_PUBLIC_KEY || !("serviceWorker" in navigator) || !("PushManager" in window)) {
     return false;
   }
@@ -34,7 +52,9 @@ export async function subscribeToPush(staffId: string, role: string, restaurantI
     const keys = subscription.toJSON().keys;
     if (!keys?.p256dh || !keys?.auth) return false;
 
-    // Send subscription to server
+    // Send subscription to server. `lang` lets the server pick the
+    // right title/body when it pushes notifications to this device;
+    // re-calling subscribeToPush after a language toggle updates it.
     await fetch("/api/push/subscribe", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -45,6 +65,7 @@ export async function subscribeToPush(staffId: string, role: string, restaurantI
         staffId,
         role,
         restaurantId,
+        lang: lang ?? readUiLang(),
       }),
     });
 

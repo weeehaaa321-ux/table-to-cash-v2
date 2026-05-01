@@ -211,9 +211,14 @@ export async function PATCH(request: NextRequest) {
       const session = await useCases.sessions.assignWaiter(sessionId, body.waiterId);
       try {
         const { sendPushToStaff } = await import("@/lib/web-push");
+        const tableEn = session.table ? `Table ${session.table.number}` : "a VIP session";
+        const tableAr = session.table ? `طاولة ${session.table.number}` : "جلسة VIP";
         await sendPushToStaff(body.waiterId, {
-          title: "Table Assigned",
-          body: `You've been assigned to ${session.table ? `Table ${session.table.number}` : "a VIP session"}`,
+          title: { en: "Table Assigned", ar: "تم تعيين طاولة" },
+          body: {
+            en: `You've been assigned to ${tableEn}`,
+            ar: `تم تعيينك لـ ${tableAr}`,
+          },
           tag: `assign-${sessionId}`,
           url: "/waiter",
         });
@@ -231,12 +236,16 @@ export async function PATCH(request: NextRequest) {
         return NextResponse.json({ error: "Table is occupied" }, { status: 409 });
       }
       const { currentSession, oldTableNumber } = result;
+      const moveTitle = { en: "Table Moved", ar: "تم نقل الطاولة" };
       if (currentSession.waiterId) {
         try {
           const { sendPushToStaff } = await import("@/lib/web-push");
           await sendPushToStaff(currentSession.waiterId, {
-            title: "Table Moved",
-            body: `Table ${oldTableNumber} → Table ${newTableNumber} — same session, serve the new table`,
+            title: moveTitle,
+            body: {
+              en: `Table ${oldTableNumber} → Table ${newTableNumber} — same session, serve the new table`,
+              ar: `طاولة ${oldTableNumber} → طاولة ${newTableNumber} — نفس الجلسة، اخدم الطاولة الجديدة`,
+            },
             tag: `table-move-${sessionId}`,
             url: "/waiter",
           });
@@ -245,8 +254,11 @@ export async function PATCH(request: NextRequest) {
       try {
         const { sendPushToRole } = await import("@/lib/web-push");
         await sendPushToRole("KITCHEN", currentSession.restaurantId, {
-          title: "Table Moved",
-          body: `Table ${oldTableNumber} → Table ${newTableNumber} — deliver orders to new table`,
+          title: moveTitle,
+          body: {
+            en: `Table ${oldTableNumber} → Table ${newTableNumber} — deliver orders to new table`,
+            ar: `طاولة ${oldTableNumber} → طاولة ${newTableNumber} — وصّل الطلبات للطاولة الجديدة`,
+          },
           tag: `table-move-kitchen-${sessionId}`,
           url: "/kitchen",
         });

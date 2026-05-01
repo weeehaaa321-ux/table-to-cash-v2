@@ -31,13 +31,13 @@ export async function POST(request: NextRequest) {
     await useCases.sessions.stampPendingPaymentMethod(sessionId, paymentMethod);
 
     const total = await useCases.sessions.sumOpenTotal(sessionId);
-    const label =
-      paymentMethod === "CASH"
-        ? "Cash Payment Incoming"
-        : paymentMethod === "CARD"
-          ? "Card Payment Incoming"
-          : "Payment Incoming";
-    const tableLabel = session.table ? `Table ${session.table.number}` : "VIP";
+    const labelByMethod = paymentMethod === "CASH"
+      ? { en: "Cash Payment Incoming", ar: "دفع نقدي قادم" }
+      : paymentMethod === "CARD"
+        ? { en: "Card Payment Incoming", ar: "دفع ببطاقة قادم" }
+        : { en: "Payment Incoming", ar: "دفع قادم" };
+    const tableEn = session.table ? `Table ${session.table.number}` : "VIP";
+    const tableAr = session.table ? `طاولة ${session.table.number}` : "VIP";
 
     // Targeted push: on-shift cashiers always get pinged (they're the
     // assigned ones). If none of them is currently clocked in, the
@@ -45,8 +45,11 @@ export async function POST(request: NextRequest) {
     // payment doesn't sit waiting until somebody happens to walk by.
     await notifyPaymentConfirmation({
       restaurantId: session.restaurant.id,
-      title: label,
-      body: `${tableLabel} — ${total} EGP (${paymentMethod})`,
+      title: labelByMethod,
+      body: {
+        en: `${tableEn} — ${total} EGP (${paymentMethod})`,
+        ar: `${tableAr} — ${total} جنيه (${paymentMethod})`,
+      },
       tagBase: `pay-${sessionId}`,
     }).catch(() => {});
 

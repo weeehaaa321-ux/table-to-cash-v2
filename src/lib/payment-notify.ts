@@ -19,7 +19,7 @@
 //     can keep the table from sitting stuck.
 
 import { db } from "./db";
-import { sendPushToStaff, sendPushToRole } from "./web-push";
+import { sendPushToStaff, sendPushToRole, type NotifText } from "./web-push";
 import { nowInRestaurantTz } from "./restaurant-config";
 
 // Mirror of the staleness filter in ClockInOutUseCase. A shift open
@@ -30,8 +30,10 @@ const STALE_HOURS = 24;
 
 export type PaymentNotifyParams = {
   restaurantId: string;
-  title: string;
-  body: string;
+  /** Plain string (English-only) or {en, ar} bilingual. The helpers in
+   *  web-push.ts pick per recipient based on stored subscription lang. */
+  title: NotifText;
+  body: NotifText;
   /** Caller-stable prefix; per-recipient suffixes are appended so dismissing
    *  on one device doesn't dismiss elsewhere. */
   tagBase: string;
@@ -93,7 +95,15 @@ export async function notifyPaymentConfirmation(p: PaymentNotifyParams): Promise
 }
 
 async function escalateToOwnerAndFloor(p: PaymentNotifyParams): Promise<void> {
-  const escalationBody = `${p.body} (No cashier on the floor right now.)`;
+  // Compose the "no cashier on the floor" suffix in both languages
+  // and stitch onto whatever shape the caller's body is.
+  const noCashierSuffixEn = " (No cashier on the floor right now.)";
+  const noCashierSuffixAr = " (لا يوجد كاشير على الأرض الآن.)";
+  const composeBody = (base: NotifText): NotifText => {
+    if (typeof base === "string") return base + noCashierSuffixEn;
+    return { en: base.en + noCashierSuffixEn, ar: base.ar + noCashierSuffixAr };
+  };
+  const escalationBody = composeBody(p.body);
   await Promise.all([
     sendPushToRole("OWNER", p.restaurantId, {
       title: p.title,
