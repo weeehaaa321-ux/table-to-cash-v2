@@ -11,7 +11,11 @@ function getShiftStart(shift: number): Date {
   return new Date(today.getTime() + shiftStartHour * 3600000 + offset);
 }
 
-const lastReassignShift = new Map<string, number>();
+// NOTE: this endpoint used to run its own reassignment sweep on every
+// poll. That logic now lives in /api/live-snapshot's reassignSweep,
+// which every role page polls via useLiveData. Running it here too
+// would just double the DB writes — the throttle in reassignSweep
+// would dedupe the work, but the queries fire twice. Removed.
 
 export async function GET(request: NextRequest) {
   const url = new URL(request.url);
@@ -27,37 +31,6 @@ export async function GET(request: NextRequest) {
     if (!realId) return NextResponse.json({ sessions: [], currentShift });
 
     const shiftStart = getShiftStart(currentShift);
-
-    // Mirror of the maybeReassignSessions logic in /api/live-snapshot:
-    // only mark this shift as "done" once we've actually moved the
-    // sessions (or there was nothing to move). If new-shift waiters
-    // haven't clocked in yet, retry on the next poll.
-    if (lastReassignShift.get(realId) !== currentShift) {
-      const [openSessions, shiftWaiters, openIds] = await Promise.all([
-        useCases.sessions.listOpenWithWaiterShift(realId),
-        useCases.sessions.listWaitersOnShifts(realId, [currentShift, 0]),
-        useCases.clockInOut.listOpenStaffIds(),
-      ]);
-      const openSet = new Set(openIds);
-      const newShiftWaiters = shiftWaiters.filter((w) => openSet.has(w.id));
-      const sessionsToReassign = openSessions.filter((s) => {
-        const w = s.waiter?.shift || 0;
-        return w !== 0 && w !== currentShift;
-      });
-
-      if (sessionsToReassign.length === 0) {
-        lastReassignShift.set(realId, currentShift);
-      } else if (newShiftWaiters.length > 0) {
-        let assignIdx = 0;
-        for (const sess of sessionsToReassign) {
-          const newWaiter = newShiftWaiters[assignIdx % newShiftWaiters.length];
-          await useCases.sessions.assignWaiter(sess.id, newWaiter.id);
-          assignIdx++;
-        }
-        lastReassignShift.set(realId, currentShift);
-      }
-      // else: leave lastReassignShift unset — retry next poll
-    }
 
     const cairoNow = useCases.sessions.nowInTz();
     const todayStartCairo = new Date(cairoNow.getFullYear(), cairoNow.getMonth(), cairoNow.getDate());

@@ -33,68 +33,97 @@ function getShiftStart(shift: number): Date {
   return new Date(today.getTime() + shiftStartHour * 3600000 + offset);
 }
 
-// Per-Lambda state: only run reassignment once per shift per restaurant
-// (not on every poll). lastReassignShift tracks the shift we last ran;
-// reassignBackoffUntil prevents a hot-loop after a failure.
-const lastReassignShift = new Map<string, number>();
+// Throttle the reassign sweep to once per 10s per restaurant. Snapshot
+// polls fire every 30s per active page, but multiple pages multiply
+// that — capping prevents redundant DB work and write storms when N
+// devices poll simultaneously. Failures back off for 5 min.
+const lastReassignAt = new Map<string, number>();
 const reassignBackoffUntil = new Map<string, number>();
+const REASSIGN_THROTTLE_MS = 10 * 1000;
 const REASSIGN_BACKOFF_MS = 5 * 60 * 1000;
 
-async function maybeReassignSessions(realId: string, currentShift: number) {
-  const lastShift = lastReassignShift.get(realId);
-  if (lastShift === currentShift) return;
+// The reassign sweep. Runs on every snapshot poll (throttled), not just
+// at shift boundaries. Three cases trigger a session move:
+//   (1) waiterId is null              — orphaned, adopt it
+//   (2) waiter is no longer clocked in — stranded (auto-cron'd, etc.)
+//   (3) waiter.shift is neither currentShift nor 0 — past their shift
+// Targets are clocked-in waiters with shift in [currentShift, 0]. Each
+// move picks the least-loaded target so the load equalizes naturally
+// over time. Already-correct assignments are not rebalanced — mid-meal
+// waiter swaps would confuse customers, so a waiter who legitimately
+// owns a session keeps it even if the load isn't perfectly even.
+async function reassignSweep(realId: string, currentShift: number) {
+  const last = lastReassignAt.get(realId) || 0;
+  if (Date.now() - last < REASSIGN_THROTTLE_MS) return;
 
   const backoff = reassignBackoffUntil.get(realId) || 0;
   if (Date.now() < backoff) return;
 
-  // Don't mark this shift as "done" up-front. If the new-shift waiter
-  // hasn't clocked in yet, the run below will be a no-op AND we want
-  // the next snapshot poll to retry (otherwise stale-shift sessions
-  // stay glued to the previous shift's waiter — who's been auto-
-  // clocked-out an hour later — for the rest of the day).
+  lastReassignAt.set(realId, Date.now());
 
   try {
     const [openSessions, shiftWaiters, openIds] = await Promise.all([
-      useCases.livePoll.listOpenSessionsWithWaiterShift(realId),
+      useCases.livePoll.listAllOpenSessions(realId),
       useCases.livePoll.listWaitersForShifts(realId, [currentShift, 0]),
       useCases.clockInOut.listOpenStaffIds(),
     ]);
-    // Only push tables onto waiters who are clocked in now. A scheduled
-    // waiter who hasn't shown up yet shouldn't accumulate tables that
-    // they aren't there to serve.
+
     const openSet = new Set(openIds);
-    const newShiftWaiters = shiftWaiters.filter((w) => openSet.has(w.id));
-    const sessionsToReassign = openSessions.filter((s) => {
-      const w = s.waiter?.shift || 0;
-      return w !== 0 && w !== currentShift;
+    const eligible = shiftWaiters.filter((w) => openSet.has(w.id));
+    if (eligible.length === 0) {
+      // No one is clocked in for the current shift. Nothing we can do
+      // here — floor mgr will pick orphans up manually until someone
+      // taps the gate. Don't mark done; the next sweep retries.
+      return;
+    }
+
+    const toReassign = openSessions.filter((s) => {
+      // (1) orphan-waiter session
+      if (!s.waiterId) return true;
+      // (2) waiter not clocked in (auto-cron'd or never showed up)
+      if (!openSet.has(s.waiterId)) return true;
+      // (3) waiter's shift no longer current
+      const wShift = s.waiter?.shift ?? 0;
+      if (wShift !== 0 && wShift !== currentShift) return true;
+      return false;
     });
 
-    if (sessionsToReassign.length === 0) {
-      // Nothing was on the wrong shift in the first place — mark done,
-      // no need to keep checking until the next shift change.
-      lastReassignShift.set(realId, currentShift);
-    } else if (newShiftWaiters.length === 0) {
-      // Sessions need a new home but nobody is clocked in for the new
-      // shift yet. Leave lastReassignShift unset so the next snapshot
-      // poll retries — we'll keep checking until at least one shift
-      // waiter taps the gate.
-    } else {
-      let assignIdx = 0;
-      for (const sess of sessionsToReassign) {
-        const newWaiter = newShiftWaiters[assignIdx % newShiftWaiters.length];
-        await useCases.livePoll.assignWaiterToSession(sess.id, newWaiter.id).catch((err) => {
-          console.warn(`Skipped reassigning session ${sess.id}:`, err?.message || err);
-        });
-        assignIdx++;
+    if (toReassign.length === 0) {
+      reassignBackoffUntil.delete(realId);
+      return;
+    }
+
+    // Build current load only from sessions we're keeping (i.e., those
+    // already correctly assigned to an eligible waiter). New writes
+    // from this loop increment their target's load so subsequent picks
+    // distribute evenly.
+    const load = new Map<string, number>();
+    for (const w of eligible) load.set(w.id, 0);
+    const reassignSet = new Set(toReassign.map((s) => s.id));
+    for (const sess of openSessions) {
+      if (reassignSet.has(sess.id)) continue;
+      if (sess.waiterId && load.has(sess.waiterId)) {
+        load.set(sess.waiterId, (load.get(sess.waiterId) || 0) + 1);
       }
-      lastReassignShift.set(realId, currentShift);
+    }
+
+    for (const sess of toReassign) {
+      let target = eligible[0].id;
+      let minLoad = load.get(target) ?? 0;
+      for (const w of eligible) {
+        const l = load.get(w.id) ?? 0;
+        if (l < minLoad) { minLoad = l; target = w.id; }
+      }
+      await useCases.livePoll.assignWaiterToSession(sess.id, target).catch((err) => {
+        console.warn(`Reassign failed for session ${sess.id}:`, err?.message || err);
+      });
+      load.set(target, (load.get(target) ?? 0) + 1);
     }
     reassignBackoffUntil.delete(realId);
   } catch (err) {
-    lastReassignShift.delete(realId);
     reassignBackoffUntil.set(realId, Date.now() + REASSIGN_BACKOFF_MS);
     Sentry.captureException(err, { tags: { area: "live-snapshot.reassign" } });
-    console.error("maybeReassignSessions failed:", err);
+    console.error("reassignSweep failed:", err);
   }
 }
 
@@ -102,7 +131,7 @@ async function loadSessions(realId: string) {
   const currentShift = getCurrentShift();
   const shiftStart = getShiftStart(currentShift);
 
-  await maybeReassignSessions(realId, currentShift);
+  await reassignSweep(realId, currentShift);
 
   const cairoNow = nowInRestaurantTz();
   const todayStartCairo = new Date(cairoNow.getFullYear(), cairoNow.getMonth(), cairoNow.getDate());

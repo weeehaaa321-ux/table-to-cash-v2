@@ -34,6 +34,17 @@ export class LivePollUseCases {
     });
   }
 
+  /** Every OPEN session, including ones with no waiter assigned. The
+   *  reassign sweep needs both: orphan-waiter sessions (need adoption)
+   *  AND assigned ones (might need reassignment if waiter is off-shift
+   *  or no longer clocked in). */
+  async listAllOpenSessions(restaurantId: string) {
+    return db.tableSession.findMany({
+      where: { restaurantId, status: "OPEN" },
+      include: { waiter: { select: { id: true, shift: true } } },
+    });
+  }
+
   async listWaitersForShifts(restaurantId: string, shifts: number[]) {
     return db.staff.findMany({
       where: { restaurantId, role: "WAITER", active: true, shift: { in: shifts } },
