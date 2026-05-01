@@ -7,7 +7,15 @@ async function autoAssignWaiter(restaurantId: string): Promise<string | null> {
 
   const currentShift = useCases.sessions.currentShift();
 
-  const waiters = await useCases.sessions.listActiveWaiters(realId, currentShift);
+  // Eligible = scheduled for the current shift AND currently clocked in.
+  // A waiter who's on the schedule but hasn't tapped the gate yet should
+  // not have tables auto-pushed to them — they're not on the floor yet.
+  const [shiftWaiters, openIds] = await Promise.all([
+    useCases.sessions.listActiveWaiters(realId, currentShift),
+    useCases.clockInOut.listOpenStaffIds(),
+  ]);
+  const openSet = new Set(openIds);
+  const waiters = shiftWaiters.filter((w) => openSet.has(w.id));
   if (waiters.length === 0) return null;
 
   const sessionCounts = await useCases.sessions.openSessionCountsByWaiter(realId);
@@ -178,6 +186,16 @@ export async function PATCH(request: NextRequest) {
     }
 
     if (action === "assign_waiter" && body.waiterId) {
+      // Only allow assignment to a clocked-in waiter. Picking someone
+      // off the schedule who hasn't tapped the gate yet would push them
+      // a table they aren't there to serve.
+      const openIds = await useCases.clockInOut.listOpenStaffIds();
+      if (!openIds.includes(body.waiterId)) {
+        return NextResponse.json(
+          { error: "WAITER_NOT_CLOCKED_IN", message: "That waiter hasn't clocked in for this shift yet." },
+          { status: 409 },
+        );
+      }
       const session = await useCases.sessions.assignWaiter(sessionId, body.waiterId);
       try {
         const { sendPushToStaff } = await import("@/lib/web-push");

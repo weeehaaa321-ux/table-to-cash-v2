@@ -50,8 +50,16 @@ async function maybeReassignSessions(realId: string, currentShift: number) {
   lastReassignShift.set(realId, currentShift);
 
   try {
-    const openSessions = await useCases.livePoll.listOpenSessionsWithWaiterShift(realId);
-    const newShiftWaiters = await useCases.livePoll.listWaitersForShifts(realId, [currentShift, 0]);
+    const [openSessions, shiftWaiters, openIds] = await Promise.all([
+      useCases.livePoll.listOpenSessionsWithWaiterShift(realId),
+      useCases.livePoll.listWaitersForShifts(realId, [currentShift, 0]),
+      useCases.clockInOut.listOpenStaffIds(),
+    ]);
+    // Only push tables onto waiters who are clocked in now. A scheduled
+    // waiter who hasn't shown up yet shouldn't accumulate tables that
+    // they aren't there to serve.
+    const openSet = new Set(openIds);
+    const newShiftWaiters = shiftWaiters.filter((w) => openSet.has(w.id));
 
     if (newShiftWaiters.length > 0) {
       let assignIdx = 0;

@@ -1,10 +1,11 @@
 import { db } from "./db";
 import { sendPushToStaff } from "./web-push";
+import { useCases } from "@/infrastructure/composition";
 
 // Move every OPEN session off `waiterId` onto another active waiter in
-// the same restaurant, load-balanced by count. If nobody else is active
-// the sessions are left unassigned (waiterId = null) so an on-shift
-// waiter can pick them up manually.
+// the same restaurant who is currently clocked in, load-balanced by
+// count. If nobody else is clocked in the sessions are left unassigned
+// (waiterId = null) so an on-shift waiter can pick them up manually.
 //
 // Only call this when the waiter is being removed from duty (shift end
 // or manager turning them off). Do NOT call periodically — we never
@@ -29,10 +30,18 @@ export async function transferWaiterSessions(
 
   const tableNumbers = openSessions.map((s) => s.table?.number).filter((n): n is number => n != null);
 
-  const otherWaiters = await db.staff.findMany({
-    where: { restaurantId, role: "WAITER", active: true, id: { not: waiterId } },
-    orderBy: { createdAt: "asc" },
-  });
+  // Only consider clocked-in waiters as transfer targets — handing off
+  // to someone scheduled but not yet on the floor would leave the
+  // tables effectively unattended.
+  const [allOtherWaiters, openIds] = await Promise.all([
+    db.staff.findMany({
+      where: { restaurantId, role: "WAITER", active: true, id: { not: waiterId } },
+      orderBy: { createdAt: "asc" },
+    }),
+    useCases.clockInOut.listOpenStaffIds(),
+  ]);
+  const openSet = new Set(openIds);
+  const otherWaiters = allOtherWaiters.filter((w) => openSet.has(w.id));
 
   if (otherWaiters.length === 0) {
     await db.tableSession.updateMany({

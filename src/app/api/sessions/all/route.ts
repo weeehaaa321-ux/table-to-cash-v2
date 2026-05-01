@@ -30,8 +30,13 @@ export async function GET(request: NextRequest) {
 
     if (lastReassignShift.get(realId) !== currentShift) {
       lastReassignShift.set(realId, currentShift);
-      const openSessions = await useCases.sessions.listOpenWithWaiterShift(realId);
-      const newShiftWaiters = await useCases.sessions.listWaitersOnShifts(realId, [currentShift, 0]);
+      const [openSessions, shiftWaiters, openIds] = await Promise.all([
+        useCases.sessions.listOpenWithWaiterShift(realId),
+        useCases.sessions.listWaitersOnShifts(realId, [currentShift, 0]),
+        useCases.clockInOut.listOpenStaffIds(),
+      ]);
+      const openSet = new Set(openIds);
+      const newShiftWaiters = shiftWaiters.filter((w) => openSet.has(w.id));
       if (newShiftWaiters.length > 0) {
         let assignIdx = 0;
         for (const sess of openSessions) {
