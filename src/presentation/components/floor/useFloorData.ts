@@ -462,29 +462,6 @@ export function useFloorData(loggedInStaff: LoggedInStaff) {
     } catch {}
   }, [loggedInStaff.id, logAction]);
 
-  // Clock another staff member out from the floor-mgr view. Hits the
-  // same /api/clock endpoint the pill button uses. Optimistically drops
-  // the id from clockedInIds so the bulb turns red without waiting for
-  // the next poll.
-  const handleClockOutStaff = useCallback(async (staffId: string) => {
-    try {
-      const res = await fetch("/api/clock", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ staffId, action: "out" }),
-      });
-      if (res.ok) {
-        setClockedInIds((prev) => {
-          const next = new Set(prev);
-          next.delete(staffId);
-          return next;
-        });
-        const who = allStaff.find((s) => s.id === staffId);
-        logAction("broadcast", `Clocked out ${who?.name ?? "staff"}`);
-      }
-    } catch {}
-  }, [allStaff, logAction]);
-
   const handleAlertAction = useCallback((alert: FloorAlert) => {
     if (alert.type === "kitchen_bottleneck") handlePrioritize(alert.orderId || "");
   }, [handlePrioritize]);
@@ -512,7 +489,7 @@ export function useFloorData(loggedInStaff: LoggedInStaff) {
     handleReassign, handleSendWaiter, handlePrioritize, handleEndSession,
     handleCancelItem, handleChangeTable, handleIncrementGuests, handleAdvanceStatus,
     handleAssignDriver, handleUpdateDeliveryStatus, handleBroadcast, handleLogIssue,
-    handleAlertAction, handleDismissAlert, handleClockOutStaff,
+    handleAlertAction, handleDismissAlert,
   };
 }
 

@@ -87,16 +87,17 @@ export function ClockButton({
     /* eslint-disable-next-line react-hooks/exhaustive-deps */
   }, [openStaffIds, openStaffIdsLoaded, staffId, state]);
 
-  const toggle = async () => {
-    if (busy || state === "loading") return;
+  // Clock-in only. Clock-out is system-driven (auto-clockout cron 1h
+   // after shift end) so the pill below is intentionally display-only.
+  const clockIn = async () => {
+    if (busy || state !== "out") return;
     setBusy(true);
     setError(null);
     try {
-      const action = state === "in" ? "out" : "in";
       const res = await fetch("/api/clock", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ staffId, action }),
+        body: JSON.stringify({ staffId, action: "in" }),
       });
       if (res.ok) {
         await refresh();
@@ -180,7 +181,7 @@ export function ClockButton({
           )}
 
           <button
-            onClick={toggle}
+            onClick={clockIn}
             disabled={busy}
             className={`group relative w-52 h-52 rounded-full flex flex-col items-center justify-center mb-6 bg-status-good-500 shadow-[0_20px_60px_rgba(16,185,129,0.35)] transition-all active:scale-95 ${
               busy ? "opacity-75" : "hover:bg-status-good-600 hover:shadow-[0_25px_70px_rgba(16,185,129,0.45)]"
@@ -216,24 +217,24 @@ export function ClockButton({
     return createPortal(gate, document.body);
   }
 
-  // ── Pill mode: clocked in, show elapsed time + clock-out ───
+  // ── Pill mode: display-only "on shift" indicator. Clock-out is no
+  //    longer user-initiated — the auto-clockout cron closes the shift
+  //    1h after its scheduled end. Rendering this as a <span> (not a
+  //    <button>) makes that intent obvious and removes the implicit
+  //    "tap to clock out" affordance.
   const elapsedMin = since ? Math.max(0, Math.round((now - since.getTime()) / 60000)) : 0;
   const h = Math.floor(elapsedMin / 60);
   const m = elapsedMin % 60;
   const elapsedLabel = h > 0 ? `${h}h ${m}m` : `${m}m`;
 
   return (
-    <button
-      onClick={toggle}
-      disabled={busy}
-      title={t("clock.clockOut")}
-      className={`inline-flex items-center gap-1.5 px-3 h-8 rounded-xl text-[11px] font-extrabold uppercase tracking-wider transition active:scale-95 bg-status-good-100 text-status-good-700 hover:bg-status-good-200 ${
-        busy ? "opacity-50" : ""
-      }`}
+    <span
+      title={t("clock.on")}
+      className="inline-flex items-center gap-1.5 px-3 h-8 rounded-xl text-[11px] font-extrabold uppercase tracking-wider bg-status-good-100 text-status-good-700"
     >
       <span className="w-1.5 h-1.5 rounded-full bg-status-good-500 animate-pulse" />
       {t("clock.on")} · <span className="tabular-nums">{elapsedLabel}</span>
-    </button>
+    </span>
   );
 }
 

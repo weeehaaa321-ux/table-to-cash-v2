@@ -34,6 +34,13 @@ export async function GET(request: NextRequest) {
 }
 
 // POST { staffId, action: "in" | "out" }
+//
+// Clock-out is intentionally not user-initiated: staff cannot leave
+// the floor mid-shift to game their hours, and floor managers cannot
+// pull someone off the clock either. The auto-clockout cron closes
+// every open shift 1 hour after its scheduled end time. Owner-driven
+// "End Shift" (which transfers tables and deactivates the staff row)
+// remains as the manual override path via /api/staff/end-shift.
 export async function POST(request: NextRequest) {
   const body = await request.json().catch(() => ({}));
   const { staffId, action } = body as { staffId?: string; action?: "in" | "out" };
@@ -41,32 +48,30 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "staffId and action=in|out required" }, { status: 400 });
   }
 
+  if (action === "out") {
+    return NextResponse.json(
+      {
+        error: "MANUAL_CLOCKOUT_DISABLED",
+        message: "Clock-out is automatic — the system will sign you out 1 hour after your shift ends.",
+      },
+      { status: 403 },
+    );
+  }
+
   const staff = await useCases.staffManagement.findById(staffId);
   if (!staff) return NextResponse.json({ error: "Staff not found" }, { status: 404 });
 
-  if (action === "in") {
-    const result = await useCases.clockInOut.clockIn(makeId<"Staff">(staffId));
-    if (!result.ok) {
-      return NextResponse.json(
-        { error: "ALREADY_CLOCKED_IN", openShiftId: result.openShiftId },
-        { status: 409 },
-      );
-    }
-    return NextResponse.json({
-      success: true,
-      id: result.shift.id,
-      clockIn: result.shift.clockIn.toISOString(),
-    });
+  const result = await useCases.clockInOut.clockIn(makeId<"Staff">(staffId));
+  if (!result.ok) {
+    return NextResponse.json(
+      { error: "ALREADY_CLOCKED_IN", openShiftId: result.openShiftId },
+      { status: 409 },
+    );
   }
-
-  const result = await useCases.clockInOut.clockOut(makeId<"Staff">(staffId));
-  if (!result.ok) return NextResponse.json({ error: "NOT_CLOCKED_IN" }, { status: 409 });
   return NextResponse.json({
     success: true,
     id: result.shift.id,
     clockIn: result.shift.clockIn.toISOString(),
-    clockOut: result.shift.clockOut!.toISOString(),
-    minutes: result.durationMinutes,
   });
 }
 

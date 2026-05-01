@@ -218,7 +218,6 @@ export function FloorManagerView({ staff }: { staff: LoggedInStaff }) {
             loadSummary={d.loadSummary}
             unassignedSessions={d.openSessions.filter((s) => s.status === "OPEN" && !s.waiterId && s.tableNumber != null)}
             onReassign={d.handleReassign}
-            onClockOut={d.handleClockOutStaff}
             onMessage={(staffId) => {
               d.setCommsTarget(staffId);
               commsInputRef.current?.focus();
@@ -1154,14 +1153,13 @@ function ClockBulb({ on }: { on: boolean }) {
 
 function StaffLivePanel({
   waiterMetrics, staffPresence, loadSummary, unassignedSessions,
-  onReassign, onClockOut, onMessage, onSelectWaiterTable,
+  onReassign, onMessage, onSelectWaiterTable,
 }: {
   waiterMetrics: WaiterMetric[];
   staffPresence: import("./types").StaffPresence[];
   loadSummary: { idle: number; busy: number; heavy: number; overloaded: number; total: number };
   unassignedSessions: SessionInfo[];
   onReassign: (sessionId: string, waiterId: string) => void;
-  onClockOut: (staffId: string) => void;
   onMessage: (staffId: string) => void;
   onSelectWaiterTable: (s: SessionInfo) => void;
 }) {
@@ -1312,7 +1310,6 @@ function StaffLivePanel({
               w={w}
               unassignedSessions={unassignedSessions}
               onReassign={onReassign}
-              onClockOut={onClockOut}
               onMessage={onMessage}
             />
           ))}
@@ -1427,12 +1424,11 @@ function AnomalyRow({
 }
 
 function WaiterRow({
-  w, unassignedSessions, onReassign, onClockOut, onMessage,
+  w, unassignedSessions, onReassign, onMessage,
 }: {
   w: WaiterMetric;
   unassignedSessions: SessionInfo[];
   onReassign: (sessionId: string, waiterId: string) => void;
-  onClockOut: (staffId: string) => void;
   onMessage: (staffId: string) => void;
 }) {
   const { t } = useLanguage();
@@ -1502,7 +1498,9 @@ function WaiterRow({
           </div>
         </div>
 
-        {/* Inline action icons — always visible, no expand */}
+        {/* Inline action icons — always visible, no expand. The clock-out
+            button used to live here; removed because the auto-clockout
+            cron is the only path that closes a shift now. */}
         <div className="flex items-center gap-1 flex-shrink-0">
           <button
             onClick={() => onMessage(w.id)}
@@ -1512,19 +1510,6 @@ function WaiterRow({
           >
             <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
               <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
-            </svg>
-          </button>
-          <button
-            onClick={() => { if (confirm(`${t("floor.confirmClockOut")} ${w.name}?`)) onClockOut(w.id); }}
-            disabled={!w.isClockedIn}
-            title={t("floor.clockOut")}
-            aria-label={t("floor.clockOut")}
-            className="w-9 h-9 rounded-lg bg-status-bad-50 hover:bg-status-bad-100 text-status-bad-600 flex items-center justify-center disabled:opacity-30 disabled:cursor-not-allowed active:scale-95 transition"
-          >
-            <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
-              <polyline points="16 17 21 12 16 7" />
-              <line x1="21" y1="12" x2="9" y2="12" />
             </svg>
           </button>
         </div>
