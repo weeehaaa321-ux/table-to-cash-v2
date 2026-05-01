@@ -47,7 +47,11 @@ async function maybeReassignSessions(realId: string, currentShift: number) {
   const backoff = reassignBackoffUntil.get(realId) || 0;
   if (Date.now() < backoff) return;
 
-  lastReassignShift.set(realId, currentShift);
+  // Don't mark this shift as "done" up-front. If the new-shift waiter
+  // hasn't clocked in yet, the run below will be a no-op AND we want
+  // the next snapshot poll to retry (otherwise stale-shift sessions
+  // stay glued to the previous shift's waiter — who's been auto-
+  // clocked-out an hour later — for the rest of the day).
 
   try {
     const [openSessions, shiftWaiters, openIds] = await Promise.all([
@@ -60,19 +64,30 @@ async function maybeReassignSessions(realId: string, currentShift: number) {
     // they aren't there to serve.
     const openSet = new Set(openIds);
     const newShiftWaiters = shiftWaiters.filter((w) => openSet.has(w.id));
+    const sessionsToReassign = openSessions.filter((s) => {
+      const w = s.waiter?.shift || 0;
+      return w !== 0 && w !== currentShift;
+    });
 
-    if (newShiftWaiters.length > 0) {
+    if (sessionsToReassign.length === 0) {
+      // Nothing was on the wrong shift in the first place — mark done,
+      // no need to keep checking until the next shift change.
+      lastReassignShift.set(realId, currentShift);
+    } else if (newShiftWaiters.length === 0) {
+      // Sessions need a new home but nobody is clocked in for the new
+      // shift yet. Leave lastReassignShift unset so the next snapshot
+      // poll retries — we'll keep checking until at least one shift
+      // waiter taps the gate.
+    } else {
       let assignIdx = 0;
-      for (const sess of openSessions) {
-        const waiterShift = sess.waiter?.shift || 0;
-        if (waiterShift !== 0 && waiterShift !== currentShift) {
-          const newWaiter = newShiftWaiters[assignIdx % newShiftWaiters.length];
-          await useCases.livePoll.assignWaiterToSession(sess.id, newWaiter.id).catch((err) => {
-            console.warn(`Skipped reassigning session ${sess.id}:`, err?.message || err);
-          });
-          assignIdx++;
-        }
+      for (const sess of sessionsToReassign) {
+        const newWaiter = newShiftWaiters[assignIdx % newShiftWaiters.length];
+        await useCases.livePoll.assignWaiterToSession(sess.id, newWaiter.id).catch((err) => {
+          console.warn(`Skipped reassigning session ${sess.id}:`, err?.message || err);
+        });
+        assignIdx++;
       }
+      lastReassignShift.set(realId, currentShift);
     }
     reassignBackoffUntil.delete(realId);
   } catch (err) {

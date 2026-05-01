@@ -28,8 +28,11 @@ export async function GET(request: NextRequest) {
 
     const shiftStart = getShiftStart(currentShift);
 
+    // Mirror of the maybeReassignSessions logic in /api/live-snapshot:
+    // only mark this shift as "done" once we've actually moved the
+    // sessions (or there was nothing to move). If new-shift waiters
+    // haven't clocked in yet, retry on the next poll.
     if (lastReassignShift.get(realId) !== currentShift) {
-      lastReassignShift.set(realId, currentShift);
       const [openSessions, shiftWaiters, openIds] = await Promise.all([
         useCases.sessions.listOpenWithWaiterShift(realId),
         useCases.sessions.listWaitersOnShifts(realId, [currentShift, 0]),
@@ -37,17 +40,23 @@ export async function GET(request: NextRequest) {
       ]);
       const openSet = new Set(openIds);
       const newShiftWaiters = shiftWaiters.filter((w) => openSet.has(w.id));
-      if (newShiftWaiters.length > 0) {
+      const sessionsToReassign = openSessions.filter((s) => {
+        const w = s.waiter?.shift || 0;
+        return w !== 0 && w !== currentShift;
+      });
+
+      if (sessionsToReassign.length === 0) {
+        lastReassignShift.set(realId, currentShift);
+      } else if (newShiftWaiters.length > 0) {
         let assignIdx = 0;
-        for (const sess of openSessions) {
-          const waiterShift = sess.waiter?.shift || 0;
-          if (waiterShift !== 0 && waiterShift !== currentShift) {
-            const newWaiter = newShiftWaiters[assignIdx % newShiftWaiters.length];
-            await useCases.sessions.assignWaiter(sess.id, newWaiter.id);
-            assignIdx++;
-          }
+        for (const sess of sessionsToReassign) {
+          const newWaiter = newShiftWaiters[assignIdx % newShiftWaiters.length];
+          await useCases.sessions.assignWaiter(sess.id, newWaiter.id);
+          assignIdx++;
         }
+        lastReassignShift.set(realId, currentShift);
       }
+      // else: leave lastReassignShift unset — retry next poll
     }
 
     const cairoNow = useCases.sessions.nowInTz();
