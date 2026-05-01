@@ -862,31 +862,50 @@ function CashierWallet({ cashCollected, cardCollected, totalOrders }: {
   totalOrders: number;
 }) {
   const { t } = useLanguage();
+  // Layout note: previously this was a 3-column grid with text-3xl
+  // numbers. As soon as the register hit 4+ digits the columns
+  // overflowed in the narrow desktop sidebar — `tabular-nums` keeps
+  // every digit the same width, so the wraps were ugly. Stacked
+  // rows (label left, value right) handle any digit count and let
+  // the grand total stand out as the hero in its own divider.
   return (
     <div className="bg-gradient-to-br from-status-wait-600 to-status-wait-800 rounded-2xl p-5 text-white shadow-lg">
-      <div className="flex items-center justify-between mb-5">
-        <div>
-          <div className="text-[10px] font-extrabold uppercase tracking-[0.2em] opacity-70">
-            {t("cashier.myRegister")}
-          </div>
+      <div className="flex items-center justify-between mb-4">
+        <div className="text-[10px] font-extrabold uppercase tracking-[0.2em] opacity-70">
+          {t("cashier.myRegister")}
         </div>
         <span className="text-[11px] font-extrabold bg-white/20 px-2.5 py-1 rounded-full uppercase tracking-widest">
           {totalOrders} {t("cashier.orders")}
         </span>
       </div>
-      <div className="grid grid-cols-3 gap-3">
-        <div>
-          <div className="text-[10px] font-extrabold uppercase tracking-widest opacity-70 mb-1">{t("cashier.cash")}</div>
-          <div className="text-3xl font-extrabold tabular-nums tracking-tight leading-none">{formatEGP(cashCollected)}</div>
+      <div className="space-y-2">
+        <div className="flex items-center justify-between gap-3">
+          <span className="text-[11px] font-extrabold uppercase tracking-widest opacity-80">
+            {t("cashier.cash")}
+          </span>
+          <span className="text-base sm:text-lg font-extrabold tabular-nums tracking-tight">
+            {formatEGP(cashCollected)}{" "}
+            <span className="text-[10px] font-bold opacity-70">EGP</span>
+          </span>
         </div>
-        <div>
-          <div className="text-[10px] font-extrabold uppercase tracking-widest opacity-70 mb-1">{t("cashier.cardDigital")}</div>
-          <div className="text-3xl font-extrabold tabular-nums tracking-tight leading-none">{formatEGP(cardCollected)}</div>
+        <div className="flex items-center justify-between gap-3">
+          <span className="text-[11px] font-extrabold uppercase tracking-widest opacity-80">
+            {t("cashier.cardDigital")}
+          </span>
+          <span className="text-base sm:text-lg font-extrabold tabular-nums tracking-tight">
+            {formatEGP(cardCollected)}{" "}
+            <span className="text-[10px] font-bold opacity-70">EGP</span>
+          </span>
         </div>
-        <div>
-          <div className="text-[10px] font-extrabold uppercase tracking-widest opacity-70 mb-1">{t("cashier.grandTotal")}</div>
-          <div className="text-3xl font-extrabold tabular-nums tracking-tight leading-none">{formatEGP(cashCollected + cardCollected)}</div>
-        </div>
+      </div>
+      <div className="mt-3 pt-3 border-t border-white/20 flex items-baseline justify-between gap-3">
+        <span className="text-[10px] font-extrabold uppercase tracking-[0.2em] opacity-80">
+          {t("cashier.grandTotal")}
+        </span>
+        <span className="text-2xl sm:text-3xl font-extrabold tabular-nums tracking-tight leading-none">
+          {formatEGP(cashCollected + cardCollected)}{" "}
+          <span className="text-xs font-bold opacity-70">EGP</span>
+        </span>
       </div>
     </div>
   );
