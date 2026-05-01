@@ -206,14 +206,23 @@ export class CronUseCases {
     const cashierIds = dueShifts.filter((d) => d.role === "CASHIER").map((d) => d.staffId);
 
     const [busyWaiters, busyCashiers] = await Promise.all([
-      // A waiter is "busy" only if they have a session with at least
-      // one order that's still in active waiter territory: not paid,
-      // no payment method requested yet, and not cancelled. A session
-      // whose only unpaid orders are sitting on cashier confirmation
-      // ISN'T waiter work — the waiter is done, the cashier is the
-      // bottleneck. Without this filter, a waiter who handed off the
-      // last order at 3:55 PM gets unfairly held on the clock just
-      // because the cashier hasn't confirmed yet.
+      // A waiter is "busy" if any of their open sessions has at least
+      // one order still in pre-served service: PENDING / CONFIRMED /
+      // PREPARING / READY. These are the statuses where the waiter
+      // still has something to do — kitchen will hand them food, and
+      // a READY order needs to be physically delivered and marked
+      // SERVED.
+      //
+      // Pre-served vs. payment-pending: a session closes only when
+      // BOTH all orders are SERVED (or CANCELLED) AND all are paid.
+      // Those two halves are independent — a guest can hit "Pay"
+      // before all food is delivered. So checking "is the order
+      // pay-requested?" is the wrong signal for waiter busyness.
+      // The right one is "is there food still in the pipeline that
+      // this waiter has to deliver?"
+      //
+      // SERVED-but-unpaid sessions don't make the waiter busy: the
+      // food's already at the table, the bill is the cashier's job.
       waiterIds.length === 0
         ? Promise.resolve<{ waiterId: string | null }[]>([])
         : db.tableSession.findMany({
@@ -222,9 +231,7 @@ export class CronUseCases {
               status: "OPEN",
               orders: {
                 some: {
-                  paidAt: null,
-                  paymentMethod: null,
-                  status: { not: "CANCELLED" },
+                  status: { in: ["PENDING", "CONFIRMED", "PREPARING", "READY"] },
                 },
               },
             },
