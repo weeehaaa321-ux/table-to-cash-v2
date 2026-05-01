@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { useCases } from "@/infrastructure/composition";
-import { sendPushToStaff } from "@/lib/web-push";
 import { maybeCloseSession } from "@/lib/queries";
 import { requireStaffAuth } from "@/lib/api-auth";
+import { notifyPaymentConfirmation } from "@/lib/payment-notify";
 
 // PATCH (confirm-and-PAID) is the actual revenue gate — only the
 // cashier should be able to close out money. POST (guest sends a pay
@@ -31,21 +31,24 @@ export async function POST(request: NextRequest) {
     await useCases.sessions.stampPendingPaymentMethod(sessionId, paymentMethod);
 
     const total = await useCases.sessions.sumOpenTotal(sessionId);
-    const cashiers = await useCases.sessions.listActiveCashiers(session.restaurant.id);
     const label =
       paymentMethod === "CASH"
         ? "Cash Payment Incoming"
         : paymentMethod === "CARD"
           ? "Card Payment Incoming"
           : "Payment Incoming";
-    for (const cashier of cashiers) {
-      sendPushToStaff(cashier.id, {
-        title: label,
-        body: `${session.table ? `Table ${session.table.number}` : "VIP"} — ${total} EGP (${paymentMethod})`,
-        tag: `pay-${sessionId}`,
-        url: "/cashier",
-      }).catch(() => {});
-    }
+    const tableLabel = session.table ? `Table ${session.table.number}` : "VIP";
+
+    // Targeted push: on-shift cashiers always get pinged (they're the
+    // assigned ones). If none of them is currently clocked in, the
+    // helper also escalates to the OWNER and FLOOR_MANAGER so the
+    // payment doesn't sit waiting until somebody happens to walk by.
+    await notifyPaymentConfirmation({
+      restaurantId: session.restaurant.id,
+      title: label,
+      body: `${tableLabel} — ${total} EGP (${paymentMethod})`,
+      tagBase: `pay-${sessionId}`,
+    }).catch(() => {});
 
     return NextResponse.json({ success: true, pending: true });
   } catch (err) {
