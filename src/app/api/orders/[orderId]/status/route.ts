@@ -83,8 +83,15 @@ export async function PATCH(
         const tableEn = fullOrder.table ? `Table ${fullOrder.table.number}` : "VIP";
         const tableAr = fullOrder.table ? `طاولة ${fullOrder.table.number}` : "VIP";
 
+        // Await all push sends so Vercel doesn't terminate the
+        // function with in-flight webpush HTTP requests still
+        // open. Same root cause as the messages-route slow-
+        // commands bug: fire-and-forget on serverless = some
+        // sends get dropped or stalled. Capped at 3s so a
+        // weird endpoint can't stall the route response.
+        const orderPushes: Promise<unknown>[] = [];
         if (status === "READY" && fullOrder.session?.waiterId && !isDelivery) {
-          sendPushToStaff(fullOrder.session.waiterId, {
+          orderPushes.push(sendPushToStaff(fullOrder.session.waiterId, {
             title: { en: "Order Ready", ar: "الطلب جاهز" },
             body: {
               en: `Order #${fullOrder.orderNumber} is ready — ${tableEn}`,
@@ -92,12 +99,12 @@ export async function PATCH(
             },
             tag: `order-ready-${orderId}`,
             url: "/waiter",
-          }).catch(() => {});
+          }).catch(() => {}));
         }
         if (status === "CONFIRMED" && restaurantId) {
           const targetRole = fullOrder.station === "BAR" ? "BAR" : "KITCHEN";
           const targetUrl = fullOrder.station === "BAR" ? "/bar" : "/kitchen";
-          sendPushToRole(targetRole, restaurantId, {
+          orderPushes.push(sendPushToRole(targetRole, restaurantId, {
             title: { en: "New Order", ar: "طلب جديد" },
             body: {
               en: `Order #${fullOrder.orderNumber} confirmed — ${tableEn}`,
@@ -105,7 +112,7 @@ export async function PATCH(
             },
             tag: `order-confirmed-${orderId}`,
             url: targetUrl,
-          }).catch(() => {});
+          }).catch(() => {}));
         }
 
         // Notify delivery driver on status changes
@@ -118,7 +125,7 @@ export async function PATCH(
                 ? { en: "Order is READY for pickup!", ar: "الطلب جاهز للاستلام!" }
                 : null;
           if (driverMsg) {
-            sendPushToStaff(fullOrder.deliveryDriver.id, {
+            orderPushes.push(sendPushToStaff(fullOrder.deliveryDriver.id, {
               title: status === "READY"
                 ? { en: "Ready for Pickup!", ar: "جاهز للاستلام!" }
                 : { en: `Order #${fullOrder.orderNumber}`, ar: `الطلب رقم ${fullOrder.orderNumber}` },
@@ -128,8 +135,15 @@ export async function PATCH(
               },
               tag: `delivery-status-${orderId}`,
               url: "/delivery",
-            }).catch(() => {});
+            }).catch(() => {}));
           }
+        }
+
+        if (orderPushes.length > 0) {
+          await Promise.race([
+            Promise.allSettled(orderPushes),
+            new Promise((resolve) => setTimeout(resolve, 3000)),
+          ]);
         }
 
         // Auto-assign unassigned delivery orders when they become READY

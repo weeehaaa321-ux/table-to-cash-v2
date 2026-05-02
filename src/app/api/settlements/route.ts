@@ -94,7 +94,7 @@ export async function POST(request: NextRequest) {
       restaurantId: realId,
     });
 
-    sendPushToStaff(waiterId, {
+    await sendPushToStaff(waiterId, {
       title: { en: "Cash Settlement Request", ar: "طلب تسوية نقدية" },
       body: {
         en: `Cashier ${cashier?.name || ""} requests you settle ${amount} EGP`,
@@ -157,7 +157,7 @@ export async function PATCH(request: NextRequest) {
   try {
     if (action === "accept") {
       const settlement = await useCases.cashier.acceptSettlement(settlementId);
-      sendPushToStaff(settlement.cashier.id, {
+      await sendPushToStaff(settlement.cashier.id, {
         title: { en: "Settlement Accepted", ar: "تم قبول التسوية" },
         body: {
           en: `${settlement.waiter.name} is bringing ${settlement.amount} EGP`,
@@ -171,7 +171,7 @@ export async function PATCH(request: NextRequest) {
 
     if (action === "confirm") {
       const settlement = await useCases.cashier.confirmSettlement(settlementId);
-      sendPushToStaff(settlement.waiter.id, {
+      await sendPushToStaff(settlement.waiter.id, {
         title: { en: "Cash Settled", ar: "تمت التسوية" },
         body: {
           en: `Cashier confirmed receipt of ${settlement.amount} EGP`,
