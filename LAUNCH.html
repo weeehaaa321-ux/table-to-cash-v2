@@ -602,12 +602,12 @@ nssm set TTC-PrintAgent AppRotateBytes 1048576</pre>
   </div>
 
   <!-- ════ STEP 3 ════════════════════════════════ -->
-  <div class="step" data-step="3" data-total="4">
+  <div class="step" data-step="3" data-total="3">
     <div class="step-head">
       <div class="step-num"><span>3</span></div>
       <div style="flex:1">
-        <div class="step-title">Cashier PC — never sleeps, browser auto-launches</div>
-        <div class="step-sub">A sleeping cashier PC stops accepting payments.</div>
+        <div class="step-title">Cashier PC — kiosk-mode the cashier app</div>
+        <div class="step-sub">Never sleeps. Auto-launches. No browser chrome to fumble with.</div>
       </div>
       <svg class="step-chevron" viewBox="0 0 20 20" fill="none"><path d="M5 8l5 5 5-5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
     </div>
@@ -616,40 +616,47 @@ nssm set TTC-PrintAgent AppRotateBytes 1048576</pre>
       <div class="substep" data-id="3-1">
         <div class="substep-check"></div>
         <div class="substep-body">
-          <b>Disable sleep + screen-off <span class="machine-tag cashier">cashier PC</span></b>
-          <p>Settings → System → Power → Screen and sleep → set <b>all 4 dropdowns to "Never"</b> (battery + plugged in, screen + sleep).</p>
+          <b>Disable all sleep + screen-off <span class="machine-tag cashier">cashier PC</span></b>
+          <p>Settings → System → Power & battery → Screen, sleep & hibernate timeouts → set <b>all dropdowns to "Never"</b> (screen, sleep — both on battery and plugged-in if it's a laptop).</p>
+          <p>This also covers the lock-screen timeout — Windows 11's "Lock screen → Screen timeout" panel is just a shortcut to the same setting, so doing it once here is enough.</p>
+          <p>While you're there: set <b>Power mode → "Best performance"</b> so the PC doesn't throttle into a power-saver state mid-shift.</p>
         </div>
       </div>
 
       <div class="substep" data-id="3-2">
         <div class="substep-check"></div>
         <div class="substep-body">
-          <b>Disable lock-screen timeout <span class="machine-tag cashier">cashier PC</span></b>
-          <p>Right-click desktop → Personalize → Lock screen → Screen timeout settings → all dropdowns set to <b>Never</b>.</p>
+          <b>Install the cashier as a desktop app <span class="machine-tag cashier">cashier PC</span></b>
+          <p>Edge has an "Install as app" mode that opens the cashier page <b>fullscreen, with no browser chrome, address bar, or other tabs</b> — no way for a busy staff member to accidentally close it or click into the URL bar.</p>
+          <ol>
+            <li>Open <b>Microsoft Edge</b> on the cashier PC</li>
+            <li>Go to the cashier URL:
+              <div class="code">
+                <button class="copy-btn">Copy</button>
+                <pre data-tpl="{{URL}}/cashier">{{URL}}/cashier</pre>
+              </div>
+            </li>
+            <li>Log in with the cashier PIN</li>
+            <li>Click the <b>⋯</b> menu (top-right) → <b>Apps</b> → <b>"Install this site as an app"</b></li>
+            <li>Name it <b>Cashier</b> → click <b>Install</b></li>
+            <li>Edge then asks: pin to taskbar / pin to Start / create desktop shortcut / <b>auto-start on device login</b> → tick all four, especially the last one</li>
+            <li>The app launches fullscreen — already logged in, just the cashier UI</li>
+          </ol>
+          <div class="warn">If you're using Chrome instead of Edge: ⋮ menu → "Cast, save, and share" → "Install page as app" → same dialog. Either browser works — Edge is just one fewer click on Windows.</div>
         </div>
       </div>
 
       <div class="substep" data-id="3-3">
         <div class="substep-check"></div>
         <div class="substep-body">
-          <b>Log into the cashier UI, save the password <span class="machine-tag cashier">cashier PC</span></b>
-          <div class="code">
-            <button class="copy-btn">Copy</button>
-            <pre data-tpl="{{URL}}/cashier">{{URL}}/cashier</pre>
-          </div>
-          <p>Open in Edge or Chrome → log in with the cashier PIN → if browser asks "save password?" → accept.</p>
-        </div>
-      </div>
-
-      <div class="substep" data-id="3-4">
-        <div class="substep-check"></div>
-        <div class="substep-body">
-          <b>Auto-open the cashier URL on PC boot <span class="machine-tag cashier">cashier PC</span></b>
-          <ol>
-            <li>Press <code>Win + R</code> → type <code>shell:startup</code> → Enter. Folder opens.</li>
-            <li>From the browser address bar, drag the cashier-page tab into that folder. A shortcut appears.</li>
-            <li>Reboot to verify — the browser should auto-launch the cashier page on login.</li>
-          </ol>
+          <b>Reboot test — the cashier app opens itself, already logged in <span class="machine-tag cashier">cashier PC</span></b>
+          <p>Reboot the cashier PC. After Windows logs in:</p>
+          <ul>
+            <li>The Cashier app should open fullscreen on its own within ~10 seconds</li>
+            <li>It should already show the cashier dashboard (logged in from before — session cookie persists)</li>
+            <li>The screen should not dim or sleep, no matter how long you watch it</li>
+          </ul>
+          <div class="warn">If it doesn't auto-launch: open the Cashier app manually → ⋯ menu (top-right of the app window) → <b>App settings</b> → toggle <b>"Start this app when you sign in to your device"</b> on. Reboot again to verify.</div>
         </div>
       </div>
 
