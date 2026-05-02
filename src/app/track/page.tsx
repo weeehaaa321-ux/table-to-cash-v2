@@ -113,12 +113,15 @@ function TrackPage() {
   }
 
   const [paymentMethod, setPaymentMethod] = useState<"CASH" | "CARD" | "INSTAPAY" | null>(null);
-  // Cafe-level InstaPay handle, fetched once from /api/restaurant.
-  // When the guest picks INSTAPAY we surface this handle so they can
-  // transfer directly from their banking app. NULL = handle wasn't
-  // configured for this restaurant; UI falls back to "head to cashier".
+  // Cafe-level InstaPay contact info, fetched once from /api/restaurant.
+  // The guest can transfer to either the alias or the phone — both are
+  // shown so they pick whichever their banking app supports best. If
+  // neither is configured, the UI nudges the guest to ask the cashier
+  // (rather than dead-end as "head to cashier", which is the wrong
+  // copy for an InstaPay flow).
   const [instapayHandle, setInstapayHandle] = useState<string | null>(null);
-  const [instapayCopied, setInstapayCopied] = useState(false);
+  const [instapayPhone, setInstapayPhone] = useState<string | null>(null);
+  const [copiedField, setCopiedField] = useState<"handle" | "phone" | null>(null);
   const [isPaying, setIsPaying] = useState(false);
   const [isPaid, setIsPaid] = useState(false);
   const [cashPending, setCashPending] = useState(false);
@@ -233,8 +236,11 @@ function TrackPage() {
         if (typeof data.instapayHandle === "string" && data.instapayHandle.trim()) {
           setInstapayHandle(data.instapayHandle.trim());
         }
+        if (typeof data.instapayPhone === "string" && data.instapayPhone.trim()) {
+          setInstapayPhone(data.instapayPhone.trim());
+        }
       })
-      .catch(() => { /* fail silent — UI falls back to head-to-cashier */ });
+      .catch(() => { /* fail silent — UI shows ask-the-cashier fallback */ });
     return () => { active = false; };
   }, [restaurant]);
 
@@ -1254,11 +1260,13 @@ function TrackPage() {
                     </div>
                   ) : cashPending ? (
                     <div className="text-center py-4">
-                      {paymentMethod === "INSTAPAY" && instapayHandle ? (
-                        // InstaPay flow: show the cafe's handle so the
-                        // guest can transfer directly from their banking
-                        // app. The cashier still has to confirm receipt
-                        // once the bank notification arrives.
+                      {paymentMethod === "INSTAPAY" ? (
+                        // InstaPay flow always renders contact info +
+                        // "waiting for cashier confirmation" — never
+                        // falls back to "head to cashier" since that's
+                        // the wrong instruction for a digital transfer.
+                        // If both handle and phone are unset, prompt
+                        // the guest to ask the cashier for the alias.
                         <>
                           <motion.div
                             className="w-14 h-14 rounded-full bg-ocean-50 flex items-center justify-center mx-auto mb-3 border border-ocean-100"
@@ -1272,38 +1280,87 @@ function TrackPage() {
                               ? `حوّل ${invoiceTotal + tipAmount} ج.م عبر إنستا باي`
                               : `Send ${invoiceTotal + tipAmount} EGP via InstaPay`}
                           </p>
-                          <p className="text-xs text-text-muted mb-3">
-                            {lang === "ar"
-                              ? "افتح تطبيق البنك واستخدم العنوان التالي"
-                              : "Open your banking app and send to"}
-                          </p>
-                          <div className="bg-sand-50 border-2 border-sand-200 rounded-2xl px-4 py-3 mx-auto max-w-xs flex items-center justify-between gap-3 mb-3">
-                            <code className="text-sm font-bold text-text-primary flex-1 text-left truncate" dir="ltr">
-                              {instapayHandle}
-                            </code>
-                            <button
-                              onClick={async () => {
-                                try {
-                                  await navigator.clipboard.writeText(instapayHandle);
-                                  setInstapayCopied(true);
-                                  setTimeout(() => setInstapayCopied(false), 1500);
-                                } catch { /* clipboard blocked — guest can long-press to copy */ }
-                              }}
-                              className={`flex-shrink-0 px-3 py-1.5 rounded-lg text-[11px] font-bold uppercase tracking-wider transition ${
-                                instapayCopied
-                                  ? "bg-status-good-500 text-white"
-                                  : "bg-sand-900 text-white"
-                              }`}
-                            >
-                              {instapayCopied
-                                ? (lang === "ar" ? "تم" : "Copied")
-                                : (lang === "ar" ? "نسخ" : "Copy")}
-                            </button>
-                          </div>
+                          {instapayHandle || instapayPhone ? (
+                            <>
+                              <p className="text-xs text-text-muted mb-3">
+                                {lang === "ar"
+                                  ? "افتح تطبيق البنك وحوّل إلى:"
+                                  : "Open your banking app and send to:"}
+                              </p>
+                              <div className="space-y-2 mx-auto max-w-xs mb-3">
+                                {instapayHandle && (
+                                  <div className="bg-sand-50 border-2 border-sand-200 rounded-2xl px-4 py-3 flex items-center justify-between gap-3">
+                                    <div className="flex-1 min-w-0 text-left" dir="ltr">
+                                      <p className="text-[10px] font-bold text-text-muted uppercase tracking-wider mb-0.5">
+                                        {lang === "ar" ? "العنوان" : "Alias"}
+                                      </p>
+                                      <code className="text-sm font-bold text-text-primary truncate block">
+                                        {instapayHandle}
+                                      </code>
+                                    </div>
+                                    <button
+                                      onClick={async () => {
+                                        try {
+                                          await navigator.clipboard.writeText(instapayHandle);
+                                          setCopiedField("handle");
+                                          setTimeout(() => setCopiedField(null), 1500);
+                                        } catch { /* long-press fallback */ }
+                                      }}
+                                      className={`flex-shrink-0 px-3 py-1.5 rounded-lg text-[11px] font-bold uppercase tracking-wider transition ${
+                                        copiedField === "handle"
+                                          ? "bg-status-good-500 text-white"
+                                          : "bg-sand-900 text-white"
+                                      }`}
+                                    >
+                                      {copiedField === "handle"
+                                        ? (lang === "ar" ? "تم" : "Copied")
+                                        : (lang === "ar" ? "نسخ" : "Copy")}
+                                    </button>
+                                  </div>
+                                )}
+                                {instapayPhone && (
+                                  <div className="bg-sand-50 border-2 border-sand-200 rounded-2xl px-4 py-3 flex items-center justify-between gap-3">
+                                    <div className="flex-1 min-w-0 text-left" dir="ltr">
+                                      <p className="text-[10px] font-bold text-text-muted uppercase tracking-wider mb-0.5">
+                                        {lang === "ar" ? "أو الموبايل" : "Or phone"}
+                                      </p>
+                                      <code className="text-sm font-bold text-text-primary truncate block">
+                                        {instapayPhone}
+                                      </code>
+                                    </div>
+                                    <button
+                                      onClick={async () => {
+                                        try {
+                                          await navigator.clipboard.writeText(instapayPhone);
+                                          setCopiedField("phone");
+                                          setTimeout(() => setCopiedField(null), 1500);
+                                        } catch { /* long-press fallback */ }
+                                      }}
+                                      className={`flex-shrink-0 px-3 py-1.5 rounded-lg text-[11px] font-bold uppercase tracking-wider transition ${
+                                        copiedField === "phone"
+                                          ? "bg-status-good-500 text-white"
+                                          : "bg-sand-900 text-white"
+                                      }`}
+                                    >
+                                      {copiedField === "phone"
+                                        ? (lang === "ar" ? "تم" : "Copied")
+                                        : (lang === "ar" ? "نسخ" : "Copy")}
+                                    </button>
+                                  </div>
+                                )}
+                              </div>
+                            </>
+                          ) : (
+                            <p className="text-xs text-text-muted mb-3">
+                              {lang === "ar"
+                                ? "اطلب عنوان إنستا باي من الكاشير"
+                                : "Ask the cashier for the InstaPay details"}
+                            </p>
+                          )}
                           <p className="text-[11px] text-text-muted">
                             {lang === "ar"
                               ? "سيؤكد الكاشير الدفع فور وصول التحويل"
-                              : "Cashier will confirm once the transfer arrives"}
+                              : "Waiting for cashier confirmation once the transfer arrives"}
                           </p>
                         </>
                       ) : (

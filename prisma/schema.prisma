@@ -30,6 +30,7 @@ model Restaurant {
   kitchenConfig    Json?
   waiterCapacity   Int      @default(15)
   instapayHandle   String?
+  instapayPhone    String?
   createdAt        DateTime @default(now())
 }
 

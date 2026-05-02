@@ -30,6 +30,7 @@ export async function GET(request: NextRequest) {
         waiterCapacity: restaurant.waiterCapacity,
         kitchenConfig: restaurant.kitchenConfig,
         instapayHandle: restaurant.instapayHandle ?? null,
+        instapayPhone: restaurant.instapayPhone ?? null,
         createdAt: restaurant.createdAt,
       },
       { headers: SWR_CONFIG },

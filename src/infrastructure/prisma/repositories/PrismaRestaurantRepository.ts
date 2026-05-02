@@ -24,6 +24,7 @@ export class PrismaRestaurantRepository implements RestaurantRepository {
       waiterCapacity: row.waiterCapacity,
       kitchenConfig: (row.kitchenConfig as Record<string, unknown> | null) ?? null,
       instapayHandle: row.instapayHandle ?? null,
+      instapayPhone: row.instapayPhone ?? null,
       createdAt: row.createdAt,
     });
     return cached;

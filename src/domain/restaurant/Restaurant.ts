@@ -28,6 +28,7 @@ export class Restaurant {
     public readonly waiterCapacity: number,
     public readonly kitchenConfig: Record<string, unknown> | null,
     public readonly instapayHandle: string | null,
+    public readonly instapayPhone: string | null,
     public readonly createdAt: Date,
   ) {}
 
@@ -41,6 +42,7 @@ export class Restaurant {
     waiterCapacity: number;
     kitchenConfig: Record<string, unknown> | null;
     instapayHandle: string | null;
+    instapayPhone: string | null;
     createdAt: Date;
   }): Restaurant {
     return new Restaurant(
@@ -53,6 +55,7 @@ export class Restaurant {
       props.waiterCapacity,
       props.kitchenConfig,
       props.instapayHandle,
+      props.instapayPhone,
       props.createdAt,
     );
   }
