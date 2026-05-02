@@ -630,18 +630,18 @@ nssm set TTC-PrintAgent AppRotateBytes 1048576</pre>
           <p>Edge has an "Install as app" mode that opens the cashier page <b>fullscreen, with no browser chrome, address bar, or other tabs</b> — no way for a busy staff member to accidentally close it or click into the URL bar.</p>
           <ol>
             <li>Open <b>Microsoft Edge</b> on the cashier PC</li>
-            <li>Go to the cashier URL:
+            <li>Go to the cashier URL — <b>don't log in</b>, just stop at the PIN screen:
               <div class="code">
                 <button class="copy-btn">Copy</button>
                 <pre data-tpl="{{URL}}/cashier">{{URL}}/cashier</pre>
               </div>
             </li>
-            <li>Log in with the cashier PIN</li>
             <li>Click the <b>⋯</b> menu (top-right) → <b>Apps</b> → <b>"Install this site as an app"</b></li>
             <li>Name it <b>Cashier</b> → click <b>Install</b></li>
             <li>Edge then asks: pin to taskbar / pin to Start / create desktop shortcut / <b>auto-start on device login</b> → tick all four, especially the last one</li>
-            <li>The app launches fullscreen — already logged in, just the cashier UI</li>
+            <li>The app launches fullscreen showing the PIN screen. Leave it there — each cashier will type their own PIN at start of shift.</li>
           </ol>
+          <div class="hint"><strong>Why no login?</strong> Whoever you log in as becomes "the cashier" for every payment confirmation and audit-trail entry until they log out. On a shared cashier PC, each shift's cashier should type their own PIN so the system records who actually handled each payment.</div>
           <div class="warn">If you're using Chrome instead of Edge: ⋮ menu → "Cast, save, and share" → "Install page as app" → same dialog. Either browser works — Edge is just one fewer click on Windows.</div>
         </div>
       </div>
@@ -649,11 +649,11 @@ nssm set TTC-PrintAgent AppRotateBytes 1048576</pre>
       <div class="substep" data-id="3-3">
         <div class="substep-check"></div>
         <div class="substep-body">
-          <b>Reboot test — the cashier app opens itself, already logged in <span class="machine-tag cashier">cashier PC</span></b>
+          <b>Reboot test — the cashier app opens itself to the PIN screen <span class="machine-tag cashier">cashier PC</span></b>
           <p>Reboot the cashier PC. After Windows logs in:</p>
           <ul>
             <li>The Cashier app should open fullscreen on its own within ~10 seconds</li>
-            <li>It should already show the cashier dashboard (logged in from before — session cookie persists)</li>
+            <li>It should show the <b>PIN entry screen</b> ready for the on-shift cashier to type their PIN</li>
             <li>The screen should not dim or sleep, no matter how long you watch it</li>
           </ul>
           <div class="warn">If it doesn't auto-launch: open the Cashier app manually → ⋯ menu (top-right of the app window) → <b>App settings</b> → toggle <b>"Start this app when you sign in to your device"</b> on. Reboot again to verify.</div>
