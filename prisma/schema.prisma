@@ -29,6 +29,7 @@ model Restaurant {
   schedules ShiftSchedule[]
   kitchenConfig    Json?
   waiterCapacity   Int      @default(15)
+  instapayHandle   String?
   createdAt        DateTime @default(now())
 }
 

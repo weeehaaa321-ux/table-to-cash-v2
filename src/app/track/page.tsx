@@ -113,6 +113,12 @@ function TrackPage() {
   }
 
   const [paymentMethod, setPaymentMethod] = useState<"CASH" | "CARD" | "INSTAPAY" | null>(null);
+  // Cafe-level InstaPay handle, fetched once from /api/restaurant.
+  // When the guest picks INSTAPAY we surface this handle so they can
+  // transfer directly from their banking app. NULL = handle wasn't
+  // configured for this restaurant; UI falls back to "head to cashier".
+  const [instapayHandle, setInstapayHandle] = useState<string | null>(null);
+  const [instapayCopied, setInstapayCopied] = useState(false);
   const [isPaying, setIsPaying] = useState(false);
   const [isPaid, setIsPaid] = useState(false);
   const [cashPending, setCashPending] = useState(false);
@@ -213,6 +219,24 @@ function TrackPage() {
       localStorage.setItem(`ttc_rounds_${sessionId}`, JSON.stringify(liveRounds));
     } catch { /* silent */ }
   }, [sessionId, liveRounds]);
+
+  // Pull the cafe's InstaPay handle once on mount so we can show it
+  // when the guest picks INSTAPAY. /api/restaurant is SWR-cached at
+  // the edge, so this is essentially free for repeat loads.
+  useEffect(() => {
+    if (!restaurant) return;
+    let active = true;
+    fetch(`/api/restaurant?slug=${encodeURIComponent(restaurant)}`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (!active || !data) return;
+        if (typeof data.instapayHandle === "string" && data.instapayHandle.trim()) {
+          setInstapayHandle(data.instapayHandle.trim());
+        }
+      })
+      .catch(() => { /* fail silent — UI falls back to head-to-cashier */ });
+    return () => { active = false; };
+  }, [restaurant]);
 
   // Reset the local tip entry every time a new round is settled. The
   // tip that was chosen for round 1 has already been captured and
@@ -1230,23 +1254,81 @@ function TrackPage() {
                     </div>
                   ) : cashPending ? (
                     <div className="text-center py-4">
-                      <motion.div
-                        className="w-14 h-14 rounded-full bg-status-warn-50 flex items-center justify-center mx-auto mb-3 border border-status-warn-100"
-                        animate={{ scale: [1, 1.05, 1] }}
-                        transition={{ repeat: Infinity, duration: 2 }}
-                      >
-                        <span className="text-2xl">🏪</span>
-                      </motion.div>
-                      <p className="text-sm font-bold text-text-primary mb-1">
-                        {paymentMethod === "CASH"
-                          ? (lang === "ar" ? "توجه للكاشير" : "Please head to the cashier")
-                          : (lang === "ar" ? "في انتظار تأكيد الكاشير" : "Waiting for cashier confirmation")}
-                      </p>
-                      <p className="text-xs text-text-muted">
-                        {paymentMethod === "CASH"
-                          ? (lang === "ar" ? "ادفع فاتورتك عند الكاشير" : "Pay your invoice at the reception")
-                          : (lang === "ar" ? "سيقوم الكاشير بتأكيد الدفع قريباً" : "The cashier will confirm your payment shortly")}
-                      </p>
+                      {paymentMethod === "INSTAPAY" && instapayHandle ? (
+                        // InstaPay flow: show the cafe's handle so the
+                        // guest can transfer directly from their banking
+                        // app. The cashier still has to confirm receipt
+                        // once the bank notification arrives.
+                        <>
+                          <motion.div
+                            className="w-14 h-14 rounded-full bg-ocean-50 flex items-center justify-center mx-auto mb-3 border border-ocean-100"
+                            animate={{ scale: [1, 1.05, 1] }}
+                            transition={{ repeat: Infinity, duration: 2 }}
+                          >
+                            <span className="text-2xl">📱</span>
+                          </motion.div>
+                          <p className="text-sm font-bold text-text-primary mb-1">
+                            {lang === "ar"
+                              ? `حوّل ${invoiceTotal + tipAmount} ج.م عبر إنستا باي`
+                              : `Send ${invoiceTotal + tipAmount} EGP via InstaPay`}
+                          </p>
+                          <p className="text-xs text-text-muted mb-3">
+                            {lang === "ar"
+                              ? "افتح تطبيق البنك واستخدم العنوان التالي"
+                              : "Open your banking app and send to"}
+                          </p>
+                          <div className="bg-sand-50 border-2 border-sand-200 rounded-2xl px-4 py-3 mx-auto max-w-xs flex items-center justify-between gap-3 mb-3">
+                            <code className="text-sm font-bold text-text-primary flex-1 text-left truncate" dir="ltr">
+                              {instapayHandle}
+                            </code>
+                            <button
+                              onClick={async () => {
+                                try {
+                                  await navigator.clipboard.writeText(instapayHandle);
+                                  setInstapayCopied(true);
+                                  setTimeout(() => setInstapayCopied(false), 1500);
+                                } catch { /* clipboard blocked — guest can long-press to copy */ }
+                              }}
+                              className={`flex-shrink-0 px-3 py-1.5 rounded-lg text-[11px] font-bold uppercase tracking-wider transition ${
+                                instapayCopied
+                                  ? "bg-status-good-500 text-white"
+                                  : "bg-sand-900 text-white"
+                              }`}
+                            >
+                              {instapayCopied
+                                ? (lang === "ar" ? "تم" : "Copied")
+                                : (lang === "ar" ? "نسخ" : "Copy")}
+                            </button>
+                          </div>
+                          <p className="text-[11px] text-text-muted">
+                            {lang === "ar"
+                              ? "سيؤكد الكاشير الدفع فور وصول التحويل"
+                              : "Cashier will confirm once the transfer arrives"}
+                          </p>
+                        </>
+                      ) : (
+                        // CASH and CARD both require physically going to
+                        // the cashier — cash to hand over notes, card to
+                        // tap the cafe's terminal. Same instructional
+                        // copy for both.
+                        <>
+                          <motion.div
+                            className="w-14 h-14 rounded-full bg-status-warn-50 flex items-center justify-center mx-auto mb-3 border border-status-warn-100"
+                            animate={{ scale: [1, 1.05, 1] }}
+                            transition={{ repeat: Infinity, duration: 2 }}
+                          >
+                            <span className="text-2xl">🏪</span>
+                          </motion.div>
+                          <p className="text-sm font-bold text-text-primary mb-1">
+                            {lang === "ar" ? "توجه للكاشير" : "Please head to the cashier"}
+                          </p>
+                          <p className="text-xs text-text-muted">
+                            {paymentMethod === "CARD"
+                              ? (lang === "ar" ? "ادفع بالكارت عند الكاشير" : "Pay by card at the cashier")
+                              : (lang === "ar" ? "ادفع فاتورتك عند الكاشير" : "Pay your invoice at the cashier")}
+                          </p>
+                        </>
+                      )}
                       <button
                         onClick={async () => {
                           if (isPaying) return;

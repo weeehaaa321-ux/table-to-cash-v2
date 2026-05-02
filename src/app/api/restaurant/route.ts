@@ -29,6 +29,7 @@ export async function GET(request: NextRequest) {
         timezone: restaurant.timezone,
         waiterCapacity: restaurant.waiterCapacity,
         kitchenConfig: restaurant.kitchenConfig,
+        instapayHandle: restaurant.instapayHandle ?? null,
         createdAt: restaurant.createdAt,
       },
       { headers: SWR_CONFIG },

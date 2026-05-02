@@ -27,6 +27,7 @@ export class Restaurant {
     public readonly timezone: string,
     public readonly waiterCapacity: number,
     public readonly kitchenConfig: Record<string, unknown> | null,
+    public readonly instapayHandle: string | null,
     public readonly createdAt: Date,
   ) {}
 
@@ -39,6 +40,7 @@ export class Restaurant {
     timezone: string;
     waiterCapacity: number;
     kitchenConfig: Record<string, unknown> | null;
+    instapayHandle: string | null;
     createdAt: Date;
   }): Restaurant {
     return new Restaurant(
@@ -50,6 +52,7 @@ export class Restaurant {
       props.timezone,
       props.waiterCapacity,
       props.kitchenConfig,
+      props.instapayHandle,
       props.createdAt,
     );
   }
