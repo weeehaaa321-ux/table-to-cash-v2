@@ -1106,38 +1106,46 @@ function CashierSystem({ staff, onLogout }: { staff: LoggedInStaff; onLogout: ()
   // up hundreds of pending fetches, and when the cashier returned the
   // stacked re-renders locked the main thread hard enough that the
   // tab couldn't even open devtools.
-  useEffect(() => {
-    let currentAbort: AbortController | null = null;
-    const fetch_ = async () => {
-      currentAbort?.abort();
-      const ctrl = new AbortController();
-      currentAbort = ctrl;
-      try {
-        const res = await fetch(`/api/sessions/all?restaurantId=${restaurantSlug}`, { signal: ctrl.signal, headers: { "x-staff-id": staff.id } });
-        // Any response (even 500) means the network is alive — reset watchdog
-        markApiOk();
-        if (res.ok) {
-          failCountRef.current = 0;
-          setConnectionLost(false);
-          const data = await res.json();
-          const allSessions: SessionInfo[] = data.sessions || [];
-          setSessions(allSessions);
-          const closed = allSessions.filter((s) => s.status === "CLOSED" && (s.orderTotal || 0) > 0);
-          setRecentlyPaid(closed.slice(0, 5).map((s) => ({ id: s.id, tableNumber: s.tableNumber, orderType: s.orderType, vipGuestName: s.vipGuestName, total: s.orderTotal || 0 })));
-        } else {
-          failCountRef.current += 1;
-          if (failCountRef.current >= 3) setConnectionLost(true);
-        }
-      } catch (err) {
-        if ((err as Error)?.name === "AbortError") return;
+  //
+  // refreshSessions is exposed via ref so the payment confirm path can
+  // trigger an immediate refetch on error, without waiting for the next
+  // poll tick. Used by handleAcceptPayment to trust server state instead
+  // of rolling back optimistically — see the long comment there.
+  const sessionsAbortRef = useRef<AbortController | null>(null);
+  const refreshSessions = useCallback(async () => {
+    sessionsAbortRef.current?.abort();
+    const ctrl = new AbortController();
+    sessionsAbortRef.current = ctrl;
+    try {
+      const res = await fetch(`/api/sessions/all?restaurantId=${restaurantSlug}`, {
+        signal: ctrl.signal,
+        headers: { "x-staff-id": staff.id },
+      });
+      markApiOk();
+      if (res.ok) {
+        failCountRef.current = 0;
+        setConnectionLost(false);
+        const data = await res.json();
+        const allSessions: SessionInfo[] = data.sessions || [];
+        setSessions(allSessions);
+        const closed = allSessions.filter((s) => s.status === "CLOSED" && (s.orderTotal || 0) > 0);
+        setRecentlyPaid(closed.slice(0, 5).map((s) => ({ id: s.id, tableNumber: s.tableNumber, orderType: s.orderType, vipGuestName: s.vipGuestName, total: s.orderTotal || 0 })));
+      } else {
         failCountRef.current += 1;
         if (failCountRef.current >= 3) setConnectionLost(true);
       }
-    };
-    fetch_();
-    const stop = startPoll(fetch_, 20000);
-    return () => { stop(); currentAbort?.abort(); };
-  }, [restaurantSlug, markApiOk]);
+    } catch (err) {
+      if ((err as Error)?.name === "AbortError") return;
+      failCountRef.current += 1;
+      if (failCountRef.current >= 3) setConnectionLost(true);
+    }
+  }, [restaurantSlug, staff.id, markApiOk]);
+
+  useEffect(() => {
+    refreshSessions();
+    const stop = startPoll(refreshSessions, 20000);
+    return () => { stop(); sessionsAbortRef.current?.abort(); };
+  }, [refreshSessions]);
 
   // Poll cashout data for revenue — same treatment
   useEffect(() => {
@@ -1207,40 +1215,58 @@ function CashierSystem({ staff, onLogout }: { staff: LoggedInStaff; onLogout: ()
   // 'Accept Payment' into 'Paid · Kitchen in Progress' immediately,
   // without waiting for the next 5s poll.
   //
-  // We snapshot the prior unpaidTotal before zeroing it so we can roll
-  // back on a server error. unpaidTotal drives the openSessions filter
-  // (not paymentReceived anymore), so forgetting to clear it would leave
-  // the row stuck for up to 5s after a successful settle — the cashier
-  // would see the check come back and assume the confirm failed.
+  // Optimistically zero the row so the cashier sees the bill leave the
+  // "Accept Payment" list immediately, without waiting for the next
+  // 20s poll.
+  //
+  // CRITICAL: do NOT roll back optimistically on error.
+  //
+  // The earlier rollback path was a real money risk. Sequence:
+  //   T=0   cashier taps Yes received
+  //   T=0   server commits confirmPayRound (orders are PAID in DB)
+  //   T=30s Vercel times out the response (502 / network drop)
+  //   UI    saw !res.ok, rolled back unpaidTotal to prior
+  //   T=30s cashier sees the row reappear, taps Accept again
+  //   T=30s second call hits the noop branch (orders already paid),
+  //         returns confirmedTotal:0
+  //   UI    "0 EGP confirmed" toast — cashier panics
+  //   maybe cashier taps Reverse → erases real revenue from books
+  //
+  // Instead: keep the optimistic state and trust the server. Trigger
+  // an immediate refetch so the UI converges to truth in <1s. If the
+  // server actually failed (rare DB-level error), the next poll
+  // restores unpaidTotal honestly and the cashier sees the row again
+  // — same outcome as the rollback path, without the timeout footgun.
   const handleAcceptPayment = useCallback(async (
     sessionId: string,
     method: PaymentMethodChoice,
     tip: number,
   ): Promise<{ confirmedTotal: number } | null> => {
-    let priorUnpaid = 0;
-    setSessions((prev) => prev.map((s) => {
-      if (s.id !== sessionId) return s;
-      priorUnpaid = s.unpaidTotal || 0;
-      return { ...s, paymentReceived: true, unpaidTotal: 0 };
-    }));
+    setSessions((prev) => prev.map((s) =>
+      s.id === sessionId ? { ...s, paymentReceived: true, unpaidTotal: 0 } : s,
+    ));
     try {
       const res = await staffFetch(staff.id, "/api/sessions/pay", {
         method: "PATCH",
         body: JSON.stringify({ sessionId, paymentMethod: method, tip }),
       });
       if (!res.ok) {
-        setSessions((prev) => prev.map((s) => (s.id === sessionId ? { ...s, paymentReceived: false, unpaidTotal: priorUnpaid } : s)));
-        console.error("Payment failed:", await res.text());
+        const text = await res.text();
+        console.error("Payment failed:", text);
+        // Don't roll back — refetch and let server state win.
+        await refreshSessions();
         return null;
       }
       const data = await res.json();
       return { confirmedTotal: typeof data.confirmedTotal === "number" ? data.confirmedTotal : 0 };
     } catch (err) {
-      setSessions((prev) => prev.map((s) => (s.id === sessionId ? { ...s, paymentReceived: false, unpaidTotal: priorUnpaid } : s)));
       console.error("Payment failed:", err);
+      // Same: refetch instead of rolling back. A timeout-after-commit
+      // is the worst case we're protecting against here.
+      await refreshSessions();
       return null;
     }
-  }, []);
+  }, [staff.id, refreshSessions]);
 
   // Reverse a just-settled payment. Kept separate from handleAcceptPayment
   // because the optimistic model is different — we don't zero the unpaid
