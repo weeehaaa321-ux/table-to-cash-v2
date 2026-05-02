@@ -45,7 +45,15 @@ async function sendToSubscription(
     await webpush.sendNotification(
       { endpoint: sub.endpoint, keys: { p256dh: sub.p256dh, auth: sub.auth } },
       JSON.stringify(resolved),
-      { TTL: 3600 }
+      {
+        TTL: 3600,
+        // urgency=high forces FCM to wake the device + bypass
+        // some Android Doze / battery-saving suppression that was
+        // silently dropping our default-priority pushes. Without
+        // this, pushes were being delivered and showing only when
+        // Chrome happened to be foregrounded.
+        urgency: "high",
+      }
     );
   } catch (err: unknown) {
     const statusCode = (err as { statusCode?: number }).statusCode;

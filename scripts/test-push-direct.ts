@@ -46,7 +46,7 @@ async function main() {
           tag: `test-${Date.now()}`,
           url: "/waiter",
         }),
-        { TTL: 60 },
+        { TTL: 60, urgency: "high" },
       );
       console.log(`  ✓ ${name}: ${res.statusCode} ${res.statusText || ""}`);
     } catch (err: unknown) {

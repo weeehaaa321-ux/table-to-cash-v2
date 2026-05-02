@@ -1,23 +1,33 @@
 // Service Worker for Table-to-Cash push notifications
 // Handles both Web Push (background) and postMessage (foreground) notifications
+//
+// Build version below changes on every commit-bump so devices that
+// have an older sw.js cached detect a content change and install
+// the new SW. Without a content change browsers leave stale SWs
+// active for up to 24 hours.
+const SW_VERSION = "2026-05-02-v3";
 
 self.addEventListener("install", (event) => {
+  console.log("[sw] installing", SW_VERSION);
   self.skipWaiting();
 });
 
 self.addEventListener("activate", (event) => {
+  console.log("[sw] activated", SW_VERSION);
   event.waitUntil(self.clients.claim());
 });
 
 // Web Push — fires even when the phone is sleeping / app is closed
 self.addEventListener("push", (event) => {
-  if (!event.data) return;
+  console.log("[sw] push event fired");
 
-  let payload;
-  try {
-    payload = event.data.json();
-  } catch {
-    payload = { title: "Table to Cash", body: event.data.text() };
+  let payload = { title: "Table to Cash", body: "" };
+  if (event.data) {
+    try {
+      payload = event.data.json();
+    } catch {
+      payload = { title: "Table to Cash", body: event.data.text() };
+    }
   }
 
   const options = {
@@ -27,10 +37,21 @@ self.addEventListener("push", (event) => {
     badge: "/icon-192.png",
     vibrate: [200, 100, 200],
     requireInteraction: true,
+    renotify: true,
+    silent: false,
     data: { url: payload.url || "/waiter" },
   };
 
-  event.waitUntil(self.registration.showNotification(payload.title || "Table to Cash", options));
+  // Don't return-early on missing data — Chrome will show the
+  // generic title-only notification, which is better than silently
+  // dropping. Plus opportunistically refresh the SW so any deployed
+  // sw.js fix lands the moment we're alive in the background.
+  event.waitUntil(
+    Promise.all([
+      self.registration.showNotification(payload.title || "Table to Cash", options),
+      self.registration.update().catch(() => {}),
+    ])
+  );
 });
 
 // Foreground messages from the main thread
