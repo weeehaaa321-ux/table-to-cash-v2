@@ -1,0 +1,983 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Neom Launch — Developer Setup</title>
+<style>
+  :root {
+    --bg: #f7f5f1;
+    --card: #ffffff;
+    --ink: #1a1f2c;
+    --ink-soft: #4a5160;
+    --ink-mute: #8a91a0;
+    --line: #e8e3d9;
+    --line-strong: #d6cfbf;
+    --ocean: #2a6f97;
+    --ocean-soft: #e6f0f7;
+    --good: #2f855a;
+    --good-soft: #e7f5ee;
+    --warn: #b45309;
+    --warn-soft: #fdf2dc;
+    --code-bg: #1a1f2c;
+    --code-ink: #f0e9d9;
+    --shadow: 0 1px 2px rgba(20,30,55,.04), 0 8px 24px rgba(20,30,55,.05);
+    --shadow-lift: 0 2px 4px rgba(20,30,55,.06), 0 16px 40px rgba(20,30,55,.08);
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    font: 15px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", "Helvetica Neue", system-ui, sans-serif;
+    color: var(--ink);
+    background: var(--bg);
+    padding: 0 0 120px;
+  }
+  .wrap { max-width: 760px; margin: 0 auto; padding: 0 20px; }
+
+  header {
+    padding: 56px 20px 36px;
+    background: linear-gradient(180deg, #fbfaf6 0%, var(--bg) 100%);
+    border-bottom: 1px solid var(--line);
+    margin-bottom: 32px;
+  }
+  header .wrap { padding: 0; }
+  header h1 {
+    font-size: 32px; font-weight: 800; letter-spacing: -0.02em;
+    margin: 0 0 6px;
+  }
+  header p.sub { color: var(--ink-soft); margin: 0 0 24px; font-size: 15px; }
+  header .role-tag {
+    display: inline-block;
+    padding: 4px 10px;
+    background: var(--ocean-soft);
+    color: var(--ocean);
+    border-radius: 6px;
+    font-size: 11px; font-weight: 800;
+    text-transform: uppercase; letter-spacing: .08em;
+    margin-bottom: 12px;
+  }
+
+  .progress-shell {
+    background: white;
+    border: 1px solid var(--line);
+    border-radius: 16px;
+    padding: 18px 20px;
+    box-shadow: var(--shadow);
+  }
+  .progress-row { display: flex; align-items: center; gap: 14px; }
+  .progress-bar {
+    flex: 1; height: 8px;
+    background: var(--line); border-radius: 999px; overflow: hidden;
+  }
+  .progress-fill {
+    height: 100%;
+    background: linear-gradient(90deg, var(--ocean), #5ba3c9);
+    border-radius: 999px;
+    transition: width .35s ease;
+  }
+  .progress-count {
+    font-weight: 800; font-size: 16px; color: var(--ink);
+    font-variant-numeric: tabular-nums; min-width: 64px; text-align: right;
+  }
+
+  .config {
+    background: white;
+    border: 1px solid var(--line);
+    border-radius: 16px;
+    padding: 18px 20px;
+    margin-bottom: 24px;
+    box-shadow: var(--shadow);
+  }
+  .config h3 {
+    margin: 0 0 4px; font-size: 13px; font-weight: 800;
+    text-transform: uppercase; letter-spacing: .08em;
+    color: var(--ink-mute);
+  }
+  .config p { margin: 0 0 14px; color: var(--ink-soft); font-size: 13px; }
+  .config-grid {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 12px;
+  }
+  @media (max-width: 580px) { .config-grid { grid-template-columns: 1fr; } }
+  .config label {
+    display: block; font-size: 11px; font-weight: 700; color: var(--ink-mute);
+    text-transform: uppercase; letter-spacing: .06em; margin-bottom: 4px;
+  }
+  .config input {
+    width: 100%; padding: 9px 12px;
+    font: inherit;
+    border: 1px solid var(--line-strong);
+    border-radius: 10px;
+    background: #fbfaf6;
+    color: var(--ink);
+    transition: border-color .15s, background .15s;
+  }
+  .config input:focus {
+    outline: none; border-color: var(--ocean); background: white;
+  }
+
+  .step {
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: 16px;
+    margin-bottom: 14px;
+    overflow: hidden;
+    transition: box-shadow .2s, border-color .2s;
+  }
+  .step.active { border-color: var(--ocean); box-shadow: var(--shadow-lift); }
+  .step.done { opacity: .68; }
+
+  .step-head {
+    display: flex; align-items: center; gap: 14px;
+    padding: 18px 20px;
+    cursor: pointer;
+    user-select: none;
+  }
+  .step-num {
+    flex-shrink: 0; width: 36px; height: 36px;
+    border-radius: 10px;
+    display: flex; align-items: center; justify-content: center;
+    font-weight: 800; font-size: 15px;
+    background: #f1ede4; color: var(--ink-soft);
+    transition: background .2s, color .2s;
+  }
+  .step.active .step-num { background: var(--ocean); color: white; }
+  .step.done .step-num { background: var(--good); color: white; }
+  .step.done .step-num::after { content: "✓"; font-size: 18px; }
+  .step.done .step-num span { display: none; }
+  .step-title {
+    flex: 1;
+    font-weight: 700; font-size: 16px; line-height: 1.3;
+  }
+  .step-sub {
+    color: var(--ink-mute); font-size: 12px; font-weight: 500;
+    margin-top: 2px;
+  }
+  .step.printer .step-num { background: #e6f0f7; }
+  .step.printer.active .step-num { background: var(--ocean); color: white; }
+  .step.printer .step-title::after {
+    content: "★ critical";
+    display: inline-block;
+    margin-left: 8px;
+    padding: 2px 6px;
+    background: var(--warn-soft);
+    color: var(--warn);
+    border-radius: 4px;
+    font-size: 10px; font-weight: 800;
+    text-transform: uppercase; letter-spacing: .06em;
+    vertical-align: middle;
+  }
+  .step-chevron {
+    flex-shrink: 0; width: 20px; height: 20px;
+    color: var(--ink-mute);
+    transform: rotate(0deg); transition: transform .2s;
+  }
+  .step.expanded .step-chevron { transform: rotate(180deg); }
+
+  .step-body {
+    max-height: 0; overflow: hidden;
+    transition: max-height .25s ease;
+  }
+  .step.expanded .step-body { max-height: 99999px; }
+
+  .step-body-inner {
+    padding: 4px 20px 22px 70px;
+    border-top: 1px solid var(--line);
+    margin-top: 0;
+  }
+
+  .substep {
+    display: flex; gap: 12px; align-items: flex-start;
+    padding: 12px 0;
+    border-bottom: 1px solid var(--line);
+  }
+  .substep:last-child { border-bottom: none; }
+  .substep-check {
+    flex-shrink: 0; width: 22px; height: 22px;
+    border: 2px solid var(--line-strong);
+    border-radius: 7px;
+    display: flex; align-items: center; justify-content: center;
+    cursor: pointer;
+    transition: background .15s, border-color .15s;
+    margin-top: 1px;
+    background: white;
+  }
+  .substep-check:hover { border-color: var(--ocean); }
+  .substep-check.checked {
+    background: var(--good); border-color: var(--good);
+  }
+  .substep-check.checked::after {
+    content: ""; width: 6px; height: 11px;
+    border-right: 2.5px solid white; border-bottom: 2.5px solid white;
+    transform: rotate(45deg) translate(-1px, -1px);
+  }
+  .substep-body { flex: 1; min-width: 0; }
+  .substep.checked .substep-body > b { color: var(--ink-mute); text-decoration: line-through; }
+
+  .machine-tag {
+    display: inline-block;
+    margin-left: 8px;
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-size: 10px; font-weight: 800;
+    text-transform: uppercase; letter-spacing: .06em;
+    vertical-align: middle;
+  }
+  .machine-tag.cashier { background: #fef0e7; color: #c2410c; }
+  .machine-tag.tablet { background: #ebf6ed; color: #166534; }
+  .machine-tag.laptop { background: #ede9fe; color: #6b21a8; }
+  .machine-tag.phone { background: #fef0f9; color: #be185d; }
+  .machine-tag.printer { background: #e6f0f7; color: var(--ocean); }
+
+  .hint {
+    background: var(--ocean-soft);
+    border-left: 3px solid var(--ocean);
+    padding: 8px 12px;
+    border-radius: 0 8px 8px 0;
+    font-size: 13px; color: #1a4866;
+    margin: 8px 0 4px;
+  }
+  .hint strong { color: var(--ocean); }
+  .warn {
+    background: var(--warn-soft);
+    border-left: 3px solid var(--warn);
+    padding: 8px 12px;
+    border-radius: 0 8px 8px 0;
+    font-size: 13px; color: #6b3a06;
+    margin: 8px 0 4px;
+  }
+
+  code {
+    background: #f3efe5;
+    padding: 1px 6px;
+    border-radius: 4px;
+    font-family: "SF Mono", Menlo, Consolas, monospace;
+    font-size: 12.5px;
+    color: var(--ink);
+  }
+
+  .code {
+    position: relative;
+    margin: 10px 0;
+    background: var(--code-bg);
+    border-radius: 10px;
+    overflow: hidden;
+  }
+  .code pre {
+    margin: 0; padding: 14px 16px;
+    color: var(--code-ink);
+    font: 12.5px/1.55 "SF Mono", Menlo, Consolas, monospace;
+    overflow-x: auto;
+    white-space: pre;
+  }
+  .copy-btn {
+    position: absolute; top: 8px; right: 8px;
+    background: rgba(255,255,255,.08);
+    color: var(--code-ink);
+    border: 1px solid rgba(255,255,255,.12);
+    padding: 4px 10px;
+    border-radius: 6px;
+    font: 600 11px/1 -apple-system, system-ui, sans-serif;
+    text-transform: uppercase; letter-spacing: .06em;
+    cursor: pointer;
+    transition: background .15s;
+  }
+  .copy-btn:hover { background: rgba(255,255,255,.15); }
+  .copy-btn.copied { background: var(--good); border-color: var(--good); color: white; }
+
+  .step-body-inner p { margin: 8px 0; color: var(--ink-soft); font-size: 14px; }
+  .step-body-inner ol, .step-body-inner ul { margin: 8px 0; padding-left: 22px; color: var(--ink-soft); }
+  .step-body-inner li { margin: 4px 0; }
+  .step-body-inner b, .step-body-inner strong { color: var(--ink); }
+
+  .victory {
+    display: none;
+    text-align: center;
+    padding: 60px 24px;
+    background: linear-gradient(180deg, #fbfaf6 0%, var(--good-soft) 100%);
+    border: 1px solid var(--good);
+    border-radius: 20px;
+    margin: 32px 0;
+  }
+  .victory.show { display: block; animation: rise .6s cubic-bezier(.2,.7,.3,1); }
+  @keyframes rise {
+    from { opacity: 0; transform: translateY(20px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+  .victory .check-circle {
+    width: 80px; height: 80px;
+    background: var(--good);
+    border-radius: 50%;
+    display: inline-flex; align-items: center; justify-content: center;
+    margin: 0 auto 20px;
+    box-shadow: 0 6px 20px rgba(47,133,90,.3);
+  }
+  .victory .check-circle::after {
+    content: ""; width: 22px; height: 38px;
+    border-right: 5px solid white; border-bottom: 5px solid white;
+    transform: rotate(45deg) translate(-2px, -2px);
+  }
+  .victory h2 {
+    font-size: 28px; font-weight: 800; margin: 0 0 8px;
+    color: var(--ink);
+  }
+  .victory p { font-size: 15px; color: var(--ink-soft); margin: 0 0 6px; }
+
+  .reset {
+    text-align: center; margin: 28px 0 0; font-size: 12px; color: var(--ink-mute);
+  }
+  .reset button {
+    background: none; border: none; color: var(--ink-mute);
+    cursor: pointer; text-decoration: underline; font: inherit;
+  }
+  .reset button:hover { color: var(--warn); }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="wrap">
+    <span class="role-tag">Developer · setup tonight</span>
+    <h1>Neom Launch — Developer Setup</h1>
+    <p class="sub">Everything you do at the cafe tonight before walking away. Staff onboarding (their phones, their PWAs) is a separate task you'll hand off to the cafe owner — not in this list.</p>
+    <div class="progress-shell">
+      <div class="progress-row">
+        <div class="progress-bar"><div class="progress-fill" id="bar"></div></div>
+        <div class="progress-count"><span id="count">0</span> / 8</div>
+      </div>
+    </div>
+  </div>
+</header>
+
+<div class="wrap">
+
+  <div class="config">
+    <h3>Your values</h3>
+    <p>Paste these once — they fill the commands and the emergency card below automatically. Saved on this device.</p>
+    <div class="config-grid">
+      <div>
+        <label for="cfg-ip">Printer IP (Xprinter XB-80T)</label>
+        <input id="cfg-ip" type="text" placeholder="192.168.1.87" />
+      </div>
+      <div>
+        <label for="cfg-url">v2 Vercel URL</label>
+        <input id="cfg-url" type="text" placeholder="https://table-to-cash-v2.vercel.app" />
+      </div>
+      <div>
+        <label for="cfg-phone">Support contact phone</label>
+        <input id="cfg-phone" type="text" placeholder="+20 100 000 0000" />
+      </div>
+      <div>
+        <label for="cfg-cafe">Cafe name</label>
+        <input id="cfg-cafe" type="text" value="Neom" />
+      </div>
+    </div>
+  </div>
+
+  <!-- ════ STEP 1 ════════════════════════════════ -->
+  <div class="step" data-step="1" data-total="2">
+    <div class="step-head">
+      <div class="step-num"><span>1</span></div>
+      <div style="flex:1">
+        <div class="step-title">Database migrations applied</div>
+        <div class="step-sub">Already done — confirm and tick.</div>
+      </div>
+      <svg class="step-chevron" viewBox="0 0 20 20" fill="none"><path d="M5 8l5 5 5-5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+    </div>
+    <div class="step-body"><div class="step-body-inner">
+      <div class="substep" data-id="1-1">
+        <div class="substep-check"></div>
+        <div class="substep-body">
+          <b>Vercel build log says "No pending migrations to apply" <span class="machine-tag laptop">laptop</span></b>
+          <div class="hint">You already verified this — both <code>guestName</code> and <code>smart_category_sort</code> migrations are live.</div>
+        </div>
+      </div>
+      <div class="substep" data-id="1-2">
+        <div class="substep-check"></div>
+        <div class="substep-body">
+          <b>Scan a table QR — name prompt appears, savory food on top <span class="machine-tag phone">your phone</span></b>
+          <div class="hint">If breakfast/salads/mains show before desserts → ✅. If desserts is still first or no name prompt, the deploy isn't live yet — wait a minute and refresh.</div>
+        </div>
+      </div>
+    </div></div>
+  </div>
+
+  <!-- ════ STEP 2 — PRINTER ═════════════════════ -->
+  <div class="step printer" data-step="2" data-total="11">
+    <div class="step-head">
+      <div class="step-num"><span>2</span></div>
+      <div style="flex:1">
+        <div class="step-title">Receipt printer — Xprinter XB-80T as a Windows service</div>
+        <div class="step-sub">The most important step. When this is right, the cafe runs without you.</div>
+      </div>
+      <svg class="step-chevron" viewBox="0 0 20 20" fill="none"><path d="M5 8l5 5 5-5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+    </div>
+    <div class="step-body"><div class="step-body-inner">
+
+      <p>Goal: a Windows service called <code>TTC-PrintAgent</code> running on the cashier PC. It bridges the cashier's browser → printer over the LAN, auto-starts on boot, auto-restarts on crash. No PowerShell window left open. Survives reboots forever.</p>
+
+      <div class="warn">All commands in this step run on the <b>cashier PC</b>, in <b>PowerShell as Administrator</b>. Open it once: Start → type <code>powershell</code> → right-click → "Run as administrator". Keep it open through every sub-step (or reopen as Admin after Chocolatey, where noted).</div>
+
+      <div class="substep" data-id="2-1">
+        <div class="substep-check"></div>
+        <div class="substep-body">
+          <b>Get the printer's IP <span class="machine-tag printer">printer</span></b>
+          <p>Power off the Xprinter XB-80T (switch on the side). Hold the small <b>FEED</b> button on top. Power back on while still holding FEED. After ~3 seconds, release. A self-test page prints.</p>
+          <p>Find the line <code>IP Address: x.x.x.x</code>. Type it into the <b>Printer IP</b> field at the top of this page — every later command auto-fills with it.</p>
+          <div class="hint">This is non-destructive — the existing print system reconnects automatically. Nothing breaks.</div>
+        </div>
+      </div>
+
+      <div class="substep" data-id="2-2">
+        <div class="substep-check"></div>
+        <div class="substep-body">
+          <b>Verify the cashier PC can reach the printer <span class="machine-tag cashier">cashier PC</span></b>
+          <div class="code">
+            <button class="copy-btn">Copy</button>
+            <pre data-tpl="ping {{IP}}">ping {{IP}}</pre>
+          </div>
+          <p>"Reply from..." → ✅. "Request timed out" → cashier PC and printer aren't on the same LAN. Check both Ethernet cables go to the same router.</p>
+        </div>
+      </div>
+
+      <div class="substep" data-id="2-3">
+        <div class="substep-check"></div>
+        <div class="substep-body">
+          <b>Install Node.js LTS <span class="machine-tag cashier">cashier PC</span></b>
+          <p>First check if it's already installed:</p>
+          <div class="code">
+            <button class="copy-btn">Copy</button>
+            <pre>node --version</pre>
+          </div>
+          <p>If it prints <code>v18.x</code>, <code>v20.x</code>, or <code>v22.x</code> → already installed, skip the rest. Otherwise:</p>
+          <ol>
+            <li>Open browser on cashier PC → <code>https://nodejs.org</code></li>
+            <li>Click the green <b>LTS</b> button → run the downloaded <code>.msi</code></li>
+            <li>Click Next through every screen → Install → Finish</li>
+            <li>Close PowerShell, open a fresh Admin PowerShell (PATH only updates in new shells)</li>
+            <li>Run <code>node --version</code> again — should now print a version</li>
+          </ol>
+        </div>
+      </div>
+
+      <div class="substep" data-id="2-4">
+        <div class="substep-check"></div>
+        <div class="substep-body">
+          <b>Install Chocolatey <span class="machine-tag cashier">cashier PC</span></b>
+          <p>Skip if <code>choco --version</code> already prints a number.</p>
+          <div class="code">
+            <button class="copy-btn">Copy</button>
+            <pre>Set-ExecutionPolicy Bypass -Scope Process -Force; iwr https://chocolatey.org/install.ps1 -UseBasicParsing | iex</pre>
+          </div>
+          <div class="hint">After it finishes, <b>close PowerShell and reopen as Admin</b> — Chocolatey added a PATH variable that needs a fresh shell.</div>
+        </div>
+      </div>
+
+      <div class="substep" data-id="2-5">
+        <div class="substep-check"></div>
+        <div class="substep-body">
+          <b>Install NSSM (the service wrapper) <span class="machine-tag cashier">cashier PC</span></b>
+          <div class="code">
+            <button class="copy-btn">Copy</button>
+            <pre>choco install nssm -y</pre>
+          </div>
+        </div>
+      </div>
+
+      <div class="substep" data-id="2-6">
+        <div class="substep-check"></div>
+        <div class="substep-body">
+          <b>Download <code>print-agent.mjs</code> to Desktop <span class="machine-tag cashier">cashier PC</span></b>
+          <div class="code">
+            <button class="copy-btn">Copy</button>
+            <pre>Invoke-WebRequest -Uri "https://raw.githubusercontent.com/weeehaaa321-ux/table-to-cash-v2/master/scripts/print-agent.mjs" -OutFile "$env:USERPROFILE\Desktop\print-agent.mjs"</pre>
+          </div>
+          <p>Verify it landed:</p>
+          <div class="code">
+            <button class="copy-btn">Copy</button>
+            <pre>Test-Path "$env:USERPROFILE\Desktop\print-agent.mjs"</pre>
+          </div>
+          <p>Should print <code>True</code>.</p>
+        </div>
+      </div>
+
+      <div class="substep" data-id="2-7">
+        <div class="substep-check"></div>
+        <div class="substep-body">
+          <b>Install the service <span class="machine-tag cashier">cashier PC</span></b>
+          <div class="code">
+            <button class="copy-btn">Copy</button>
+            <pre>nssm install TTC-PrintAgent "C:\Program Files\nodejs\node.exe" "$env:USERPROFILE\Desktop\print-agent.mjs"</pre>
+          </div>
+        </div>
+      </div>
+
+      <div class="substep" data-id="2-8">
+        <div class="substep-check"></div>
+        <div class="substep-body">
+          <b>Set printer IP and Vercel URL on the service <span class="machine-tag cashier">cashier PC</span></b>
+          <div class="code">
+            <button class="copy-btn">Copy</button>
+            <pre data-tpl="nssm set TTC-PrintAgent AppEnvironmentExtra &quot;PRINTER_IP={{IP}}&quot; &quot;APP_URL={{URL}}&quot;">nssm set TTC-PrintAgent AppEnvironmentExtra "PRINTER_IP={{IP}}" "APP_URL={{URL}}"</pre>
+          </div>
+          <div class="warn" id="cfg-missing-2-8" style="display:none">⚠ Fill in <b>Printer IP</b> and <b>v2 Vercel URL</b> at the top of this page first — the command above is using placeholders.</div>
+        </div>
+      </div>
+
+      <div class="substep" data-id="2-9">
+        <div class="substep-check"></div>
+        <div class="substep-body">
+          <b>Start the service <span class="machine-tag cashier">cashier PC</span></b>
+          <div class="code">
+            <button class="copy-btn">Copy</button>
+            <pre>nssm start TTC-PrintAgent</pre>
+          </div>
+          <p>Confirm it's running:</p>
+          <div class="code">
+            <button class="copy-btn">Copy</button>
+            <pre>Get-Service TTC-PrintAgent</pre>
+          </div>
+          <p>Should show <code>Running</code>. If <code>Stopped</code>, env vars are wrong — rerun sub-step 2-8 with the correct values, then start again.</p>
+        </div>
+      </div>
+
+      <div class="substep" data-id="2-10">
+        <div class="substep-check"></div>
+        <div class="substep-body">
+          <b>Test print from the cashier UI <span class="machine-tag cashier">cashier PC</span></b>
+          <ol>
+            <li>Open the cashier URL in a browser on the cashier PC</li>
+            <li>Log in with the cashier PIN</li>
+            <li>If there are no open bills, scan a QR from your phone and place a small test order</li>
+            <li>Click the <b>🖨</b> button on the bill</li>
+            <li>Receipt prints within ~2 seconds</li>
+          </ol>
+        </div>
+      </div>
+
+      <div class="substep" data-id="2-11">
+        <div class="substep-check"></div>
+        <div class="substep-body">
+          <b>Reboot test — the truth test <span class="machine-tag cashier">cashier PC</span></b>
+          <p>Reboot the cashier PC. After it boots back up, open the cashier UI → click 🖨 on any bill → receipt prints.</p>
+          <p>If yes, the service is properly auto-starting. <b>This is what lets you walk away.</b></p>
+          <div class="warn">If it fails after reboot: <code>Get-Service TTC-PrintAgent</code> in Admin PowerShell. If "Stopped", run <code>nssm start TTC-PrintAgent</code>. If still failing, run <code>nssm edit TTC-PrintAgent</code> and verify the path to <code>node.exe</code> and <code>print-agent.mjs</code> are correct.</div>
+        </div>
+      </div>
+
+    </div></div>
+  </div>
+
+  <!-- ════ STEP 3 ════════════════════════════════ -->
+  <div class="step" data-step="3" data-total="4">
+    <div class="step-head">
+      <div class="step-num"><span>3</span></div>
+      <div style="flex:1">
+        <div class="step-title">Cashier PC — never sleeps, browser auto-launches</div>
+        <div class="step-sub">A sleeping cashier PC stops accepting payments.</div>
+      </div>
+      <svg class="step-chevron" viewBox="0 0 20 20" fill="none"><path d="M5 8l5 5 5-5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+    </div>
+    <div class="step-body"><div class="step-body-inner">
+
+      <div class="substep" data-id="3-1">
+        <div class="substep-check"></div>
+        <div class="substep-body">
+          <b>Disable sleep + screen-off <span class="machine-tag cashier">cashier PC</span></b>
+          <p>Settings → System → Power → Screen and sleep → set <b>all 4 dropdowns to "Never"</b> (battery + plugged in, screen + sleep).</p>
+        </div>
+      </div>
+
+      <div class="substep" data-id="3-2">
+        <div class="substep-check"></div>
+        <div class="substep-body">
+          <b>Disable lock-screen timeout <span class="machine-tag cashier">cashier PC</span></b>
+          <p>Right-click desktop → Personalize → Lock screen → Screen timeout settings → all dropdowns set to <b>Never</b>.</p>
+        </div>
+      </div>
+
+      <div class="substep" data-id="3-3">
+        <div class="substep-check"></div>
+        <div class="substep-body">
+          <b>Log into the cashier UI, save the password <span class="machine-tag cashier">cashier PC</span></b>
+          <div class="code">
+            <button class="copy-btn">Copy</button>
+            <pre data-tpl="{{URL}}/cashier">{{URL}}/cashier</pre>
+          </div>
+          <p>Open in Edge or Chrome → log in with the cashier PIN → if browser asks "save password?" → accept.</p>
+        </div>
+      </div>
+
+      <div class="substep" data-id="3-4">
+        <div class="substep-check"></div>
+        <div class="substep-body">
+          <b>Auto-open the cashier URL on PC boot <span class="machine-tag cashier">cashier PC</span></b>
+          <ol>
+            <li>Press <code>Win + R</code> → type <code>shell:startup</code> → Enter. Folder opens.</li>
+            <li>From the browser address bar, drag the cashier-page tab into that folder. A shortcut appears.</li>
+            <li>Reboot to verify — the browser should auto-launch the cashier page on login.</li>
+          </ol>
+        </div>
+      </div>
+
+    </div></div>
+  </div>
+
+  <!-- ════ STEP 4 ════════════════════════════════ -->
+  <div class="step" data-step="4" data-total="3">
+    <div class="step-head">
+      <div class="step-num"><span>4</span></div>
+      <div style="flex:1">
+        <div class="step-title">Kitchen tablet — never sleeps, PWA installed</div>
+        <div class="step-sub">Push notifications only fire from the home-screen icon, not a browser tab.</div>
+      </div>
+      <svg class="step-chevron" viewBox="0 0 20 20" fill="none"><path d="M5 8l5 5 5-5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+    </div>
+    <div class="step-body"><div class="step-body-inner">
+
+      <div class="substep" data-id="4-1">
+        <div class="substep-check"></div>
+        <div class="substep-body">
+          <b>Disable sleep + plug into wall power <span class="machine-tag tablet">kitchen tablet</span></b>
+          <p>Settings → Display → Sleep / Screen timeout → <b>Never</b>. Plug the tablet's charger into a wall outlet so the battery never dies.</p>
+        </div>
+      </div>
+
+      <div class="substep" data-id="4-2">
+        <div class="substep-check"></div>
+        <div class="substep-body">
+          <b>Open the kitchen URL → install as PWA <span class="machine-tag tablet">kitchen tablet</span></b>
+          <div class="code">
+            <button class="copy-btn">Copy</button>
+            <pre data-tpl="{{URL}}/kitchen">{{URL}}/kitchen</pre>
+          </div>
+          <p>Log in with the kitchen PIN → Allow notifications when prompted → browser menu (⋮ on Android, Share on iOS) → <b>Install app</b> / <b>Add to Home Screen</b>.</p>
+        </div>
+      </div>
+
+      <div class="substep" data-id="4-3">
+        <div class="substep-check"></div>
+        <div class="substep-body">
+          <b>Open from the home-screen icon (not the browser tab) <span class="machine-tag tablet">kitchen tablet</span></b>
+          <div class="warn">Push notifications only fire when the page was opened from the installed icon. A regular browser tab gets nothing once the screen locks. Verify by: lock the tablet → place a test order from your phone → tablet must vibrate / show notification within ~5 seconds.</div>
+        </div>
+      </div>
+
+    </div></div>
+  </div>
+
+  <!-- ════ STEP 5 ════════════════════════════════ -->
+  <div class="step" data-step="5" data-total="3">
+    <div class="step-head">
+      <div class="step-num"><span>5</span></div>
+      <div style="flex:1">
+        <div class="step-title">Print + place table QR codes</div>
+        <div class="step-sub">One per table, taped where guests can see them.</div>
+      </div>
+      <svg class="step-chevron" viewBox="0 0 20 20" fill="none"><path d="M5 8l5 5 5-5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+    </div>
+    <div class="step-body"><div class="step-body-inner">
+
+      <div class="substep" data-id="5-1">
+        <div class="substep-check"></div>
+        <div class="substep-body">
+          <b>Print the QRs <span class="machine-tag cashier">cashier PC</span></b>
+          <div class="code">
+            <button class="copy-btn">Copy</button>
+            <pre data-tpl="{{URL}}/dashboard">{{URL}}/dashboard</pre>
+          </div>
+          <p>Log in as owner → QR Codes panel → click <b>Print</b>. The thermal printer prints one ESC/POS QR per table.</p>
+        </div>
+      </div>
+
+      <div class="substep" data-id="5-2">
+        <div class="substep-check"></div>
+        <div class="substep-body">
+          <b>Tape one QR to each table</b>
+          <p>Solid clear surface. Eye-level when seated. Not under a flower vase or behind a sugar bowl.</p>
+        </div>
+      </div>
+
+      <div class="substep" data-id="5-3">
+        <div class="substep-check"></div>
+        <div class="substep-body">
+          <b>Test one QR with your phone <span class="machine-tag phone">your phone</span></b>
+          <p>Scan it. You should land on the name prompt. Cancel — don't actually start a session.</p>
+        </div>
+      </div>
+
+    </div></div>
+  </div>
+
+  <!-- ════ STEP 6 ════════════════════════════════ -->
+  <div class="step" data-step="6" data-total="6">
+    <div class="step-head">
+      <div class="step-num"><span>6</span></div>
+      <div style="flex:1">
+        <div class="step-title">End-to-end smoke test</div>
+        <div class="step-sub">One real order through the whole pipeline. Proves the system works.</div>
+      </div>
+      <svg class="step-chevron" viewBox="0 0 20 20" fill="none"><path d="M5 8l5 5 5-5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+    </div>
+    <div class="step-body"><div class="step-body-inner">
+
+      <div class="substep" data-id="6-1">
+        <div class="substep-check"></div>
+        <div class="substep-body">
+          <b>Place an order from a table phone <span class="machine-tag phone">your phone</span></b>
+          <p>Scan a QR → enter name "TEST" → add 1 cheap item → place order.</p>
+        </div>
+      </div>
+      <div class="substep" data-id="6-2">
+        <div class="substep-check"></div>
+        <div class="substep-body">
+          <b>Kitchen tablet pings + shows the order <span class="machine-tag tablet">kitchen tablet</span></b>
+          <div class="hint">If no ping, kitchen tablet wasn't opened from the home-screen icon. Redo Step 4-3.</div>
+        </div>
+      </div>
+      <div class="substep" data-id="6-3">
+        <div class="substep-check"></div>
+        <div class="substep-body">
+          <b>Mark order Ready on kitchen tab <span class="machine-tag tablet">kitchen tablet</span></b>
+        </div>
+      </div>
+      <div class="substep" data-id="6-4">
+        <div class="substep-check"></div>
+        <div class="substep-body">
+          <b>Tap Pay on the guest phone → cashier sees pending bill <span class="machine-tag phone">your phone</span> + <span class="machine-tag cashier">cashier PC</span></b>
+        </div>
+      </div>
+      <div class="substep" data-id="6-5">
+        <div class="substep-check"></div>
+        <div class="substep-body">
+          <b>Cashier confirms → receipt prints from the Xprinter <span class="machine-tag cashier">cashier PC</span></b>
+          <p>Receipt should show: cafe name, table, "TEST" guest name, item, total, payment method.</p>
+        </div>
+      </div>
+      <div class="substep" data-id="6-6">
+        <div class="substep-check"></div>
+        <div class="substep-body">
+          <b>Reverse the test payment <span class="machine-tag cashier">cashier PC</span></b>
+          <p>In the cashier's "Recently paid" list → click <b>Reverse</b> → reason "smoke test" → confirm. Keeps day-1 totals clean.</p>
+        </div>
+      </div>
+
+    </div></div>
+  </div>
+
+  <!-- ════ STEP 7 ════════════════════════════════ -->
+  <div class="step" data-step="7" data-total="2">
+    <div class="step-head">
+      <div class="step-num"><span>7</span></div>
+      <div style="flex:1">
+        <div class="step-title">Paper roll fresh + spares ready</div>
+        <div class="step-sub">Most common silent failure on day 1 is paper running out.</div>
+      </div>
+      <svg class="step-chevron" viewBox="0 0 20 20" fill="none"><path d="M5 8l5 5 5-5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+    </div>
+    <div class="step-body"><div class="step-body-inner">
+
+      <div class="substep" data-id="7-1">
+        <div class="substep-check"></div>
+        <div class="substep-body">
+          <b>Load a fresh paper roll <span class="machine-tag printer">printer</span></b>
+          <p>Push the lever, drop the roll in (paper feeds from the bottom of the roll), close. Tear off the loose end straight.</p>
+        </div>
+      </div>
+      <div class="substep" data-id="7-2">
+        <div class="substep-check"></div>
+        <div class="substep-body">
+          <b>Tape 2 spare rolls right next to the printer</b>
+          <p>Visible. Reachable without bending. The next staff member must be able to swap with zero instructions.</p>
+        </div>
+      </div>
+
+    </div></div>
+  </div>
+
+  <!-- ════ STEP 8 ════════════════════════════════ -->
+  <div class="step" data-step="8" data-total="2">
+    <div class="step-head">
+      <div class="step-num"><span>8</span></div>
+      <div style="flex:1">
+        <div class="step-title">Emergency card on the cashier PC</div>
+        <div class="step-sub">For the human at 2am when something breaks.</div>
+      </div>
+      <svg class="step-chevron" viewBox="0 0 20 20" fill="none"><path d="M5 8l5 5 5-5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+    </div>
+    <div class="step-body"><div class="step-body-inner">
+
+      <div class="substep" data-id="8-1">
+        <div class="substep-check"></div>
+        <div class="substep-body">
+          <b>Print this card on A4 <span class="machine-tag cashier">cashier PC</span></b>
+          <p>Copy the text into Notepad → File → Print. Make the font big enough to read across the bar.</p>
+          <div class="code">
+            <button class="copy-btn">Copy</button>
+            <pre data-tpl="{{CAFE}} — IF SOMETHING BREAKS
+
+Printer stops printing
+  → Replace paper roll. Push lever, drop new roll, close.
+
+Cashier screen blank or frozen
+  → Press F5 (top row) to reload.
+
+Receipts won't print after reload
+  → Reboot the cashier PC. The print service auto-restarts.
+
+Guest can't scan the QR
+  → Ask them to use their phone's camera app, not a separate QR app.
+
+Anything else
+  → Call: {{PHONE}}">{{CAFE}} — IF SOMETHING BREAKS
+
+Printer stops printing
+  → Replace paper roll. Push lever, drop new roll, close.
+
+Cashier screen blank or frozen
+  → Press F5 (top row) to reload.
+
+Receipts won't print after reload
+  → Reboot the cashier PC. The print service auto-restarts.
+
+Guest can't scan the QR
+  → Ask them to use their phone's camera app, not a separate QR app.
+
+Anything else
+  → Call: {{PHONE}}</pre>
+          </div>
+        </div>
+      </div>
+
+      <div class="substep" data-id="8-2">
+        <div class="substep-check"></div>
+        <div class="substep-body">
+          <b>Tape it next to the cashier monitor</b>
+          <p>Eye-level. Where any new staff member sees it before they panic.</p>
+        </div>
+      </div>
+
+    </div></div>
+  </div>
+
+  <!-- ════ VICTORY ═══════════════════════════════ -->
+  <div class="victory" id="victory">
+    <div class="check-circle"></div>
+    <h2>Setup complete. Walk away.</h2>
+    <p>Print agent runs as a service — survives reboots, restarts on crash.</p>
+    <p>Cashier PC stays awake, browser auto-launches the cashier page on boot.</p>
+    <p>Kitchen tablet receives push notifications even when locked.</p>
+    <p>Emergency card on the cashier PC tells anyone what to do at 2am.</p>
+    <p style="margin-top:18px"><b>Close the laptop. Go home. Sleep.</b></p>
+  </div>
+
+  <div class="reset">
+    <button onclick="if(confirm('Clear all checkboxes and saved values?')){localStorage.clear();location.reload()}">Reset checklist</button>
+  </div>
+
+</div>
+
+<script>
+(function(){
+  const KEY = "ttc_launch_dev_v1";
+  const state = JSON.parse(localStorage.getItem(KEY) || "{}");
+  state.checks = state.checks || {};
+  state.cfg = state.cfg || {};
+
+  const cfgFields = ["ip", "url", "phone", "cafe"];
+  cfgFields.forEach(f => {
+    const el = document.getElementById("cfg-" + f);
+    if (state.cfg[f]) el.value = state.cfg[f];
+    else if (el.value && !state.cfg[f]) state.cfg[f] = el.value;
+    el.addEventListener("input", () => {
+      state.cfg[f] = el.value.trim();
+      save(); renderTemplates();
+    });
+  });
+
+  function val(k, fallback) {
+    const v = (state.cfg[k] || "").trim();
+    return v || fallback;
+  }
+  function renderTemplates() {
+    document.querySelectorAll("pre[data-tpl]").forEach(pre => {
+      const tpl = pre.getAttribute("data-tpl");
+      const out = tpl
+        .replace(/{{IP}}/g, val("ip", "<PRINTER_IP>"))
+        .replace(/{{URL}}/g, val("url", "<VERCEL_URL>").replace(/\/$/, ""))
+        .replace(/{{PHONE}}/g, val("phone", "<SUPPORT_PHONE>"))
+        .replace(/{{CAFE}}/g, val("cafe", "Neom"));
+      pre.textContent = out;
+    });
+    const w = document.getElementById("cfg-missing-2-8");
+    if (w) {
+      const missing = !val("ip", "") || !val("url", "");
+      w.style.display = missing ? "block" : "none";
+    }
+  }
+
+  document.querySelectorAll(".substep").forEach(sub => {
+    const id = sub.getAttribute("data-id");
+    const check = sub.querySelector(".substep-check");
+    if (state.checks[id]) { sub.classList.add("checked"); check.classList.add("checked"); }
+    check.addEventListener("click", () => {
+      const next = !check.classList.contains("checked");
+      check.classList.toggle("checked", next);
+      sub.classList.toggle("checked", next);
+      state.checks[id] = next;
+      save(); recompute();
+    });
+  });
+
+  document.querySelectorAll(".step").forEach(step => {
+    const head = step.querySelector(".step-head");
+    head.addEventListener("click", () => { step.classList.toggle("expanded"); });
+  });
+
+  function recompute() {
+    let doneSteps = 0;
+    let firstUnfinished = null;
+    document.querySelectorAll(".step").forEach(step => {
+      const total = parseInt(step.getAttribute("data-total"), 10);
+      let checked = 0;
+      step.querySelectorAll(".substep").forEach(s => {
+        if (state.checks[s.getAttribute("data-id")]) checked++;
+      });
+      const done = checked === total;
+      step.classList.toggle("done", done);
+      step.classList.remove("active");
+      if (done) doneSteps++;
+      else if (!firstUnfinished) firstUnfinished = step;
+    });
+    if (firstUnfinished) {
+      firstUnfinished.classList.add("active");
+      if (!firstUnfinished.dataset.autoExpanded) {
+        firstUnfinished.classList.add("expanded");
+        firstUnfinished.dataset.autoExpanded = "1";
+      }
+    }
+    document.getElementById("count").textContent = doneSteps;
+    document.getElementById("bar").style.width = (doneSteps / 8 * 100) + "%";
+    const v = document.getElementById("victory");
+    v.classList.toggle("show", doneSteps === 8);
+    if (doneSteps === 8) v.scrollIntoView({ behavior: "smooth", block: "center" });
+  }
+
+  document.querySelectorAll(".copy-btn").forEach(btn => {
+    btn.addEventListener("click", () => {
+      const pre = btn.parentElement.querySelector("pre");
+      navigator.clipboard.writeText(pre.textContent).then(() => {
+        btn.textContent = "Copied";
+        btn.classList.add("copied");
+        setTimeout(() => { btn.textContent = "Copy"; btn.classList.remove("copied"); }, 1400);
+      });
+    });
+  });
+
+  function save() { localStorage.setItem(KEY, JSON.stringify(state)); }
+
+  renderTemplates();
+  recompute();
+})();
+</script>
+</body>
+</html>

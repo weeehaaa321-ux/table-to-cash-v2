@@ -1,0 +1,14 @@
+{
+  "name": "Neom Cashier",
+  "short_name": "Cashier",
+  "description": "Cashier — accept payments and print receipts",
+  "start_url": "/cashier",
+  "scope": "/cashier",
+  "display": "standalone",
+  "background_color": "#fefdfb",
+  "theme_color": "#fefdfb",
+  "icons": [
+    { "src": "/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png" }
+  ]
+}

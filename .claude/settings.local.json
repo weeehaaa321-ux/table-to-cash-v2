@@ -29,7 +29,8 @@
       "Bash(curl -s -X POST https://table-to-cash-v2.vercel.app/api/push/test -H \"Content-Type: application/json\" -d '{\"staffId\":\"cmnzpnfnc000104kybnyguhlc\"}')",
       "Bash(curl -s -X POST https://table-to-cash-v2.vercel.app/api/messages -H 'Content-Type: application/json' -d '{ *)",
       "Bash(awk 'NR<=920 && /^function|useLanguage/' /e/table-to-cash-v2/src/app/kitchen/page.tsx)",
-      "Bash(grep -rn \"guestNumber\\\\|Guest #\\\\|Guest \\\\${.*}\\\\|guest.*name\\\\|guestName\" /e/table-to-cash-v2/src --include=\"*.tsx\" --include=\"*.ts\")"
+      "Bash(grep -rn \"guestNumber\\\\|Guest #\\\\|Guest \\\\${.*}\\\\|guest.*name\\\\|guestName\" /e/table-to-cash-v2/src --include=\"*.tsx\" --include=\"*.ts\")",
+      "Bash(curl -sI https://raw.githubusercontent.com/weeehaaa321-ux/table-to-cash-v2/master/scripts/print-agent.mjs)"
     ]
   }
 }
