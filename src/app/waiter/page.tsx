@@ -4,7 +4,6 @@ import { useEffect, useState, useCallback, useRef, useMemo } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useLanguage } from "@/lib/use-language";
 import { LanguageToggle } from "@/presentation/components/ui/LanguageToggle";
-import { NotificationBadge } from "@/presentation/components/ui/NotificationBadge";
 import {
   usePerception,
   type LiveOrder,
@@ -2689,8 +2688,6 @@ function StaffSystem({ loggedInStaff, onLogout }: { loggedInStaff: LoggedInStaff
               </p>
             </div>
 
-            {/* Notifications always visible (waiter's lifeline) */}
-            <NotificationBadge staffId={loggedInStaff.id} role="WAITER" />
             <ClockButton staffId={loggedInStaff.id} name={loggedInStaff.name} role={loggedInStaff.role} />
             {/* Always-visible language toggle: compact size so the
                 mobile header doesn't overflow alongside the clock pill
