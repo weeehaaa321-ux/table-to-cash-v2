@@ -2332,9 +2332,46 @@ function StaffSystem({ loggedInStaff, onLogout }: { loggedInStaff: LoggedInStaff
 
   const isOnShift = loggedInStaff.shift === 0 || shiftInfo.isOnShift;
 
-  // Request notification permission on mount
+  // Eagerly register the service worker on mount, regardless of
+  // notification-permission state. Without this, the SW only
+  // installed if the user tapped "Allow" on the permission prompt
+  // — and if they dismissed it, the SW never installed and no
+  // background pushes could land on the lock screen. With eager
+  // registration, the SW is alive in the browser and ready to
+  // handle `push` events as soon as the subscription succeeds.
   useEffect(() => {
+    import("@/lib/notifications").then(({ registerSWEager }) => {
+      registerSWEager().catch(() => {});
+    });
     requestNotificationPermission();
+  }, []);
+
+  // Push subscription health-check. Polls every 60s so a waiter
+  // who lost their subscription (browser cleared storage, SW was
+  // unregistered, etc.) sees the indicator flip and knows to
+  // re-grant. A red pill in the header means new orders / owner
+  // commands won't reach the lock screen — which is the bug
+  // pattern that previously went undetected for hours.
+  const [pushHealthy, setPushHealthy] = useState<boolean | null>(null);
+  useEffect(() => {
+    let active = true;
+    async function check() {
+      if (typeof navigator === "undefined" || !("serviceWorker" in navigator)) {
+        if (active) setPushHealthy(false);
+        return;
+      }
+      try {
+        const reg = await navigator.serviceWorker.getRegistration();
+        if (!reg) { if (active) setPushHealthy(false); return; }
+        const sub = await reg.pushManager.getSubscription();
+        if (active) setPushHealthy(!!sub && Notification.permission === "granted");
+      } catch {
+        if (active) setPushHealthy(false);
+      }
+    }
+    check();
+    const id = setInterval(check, 60_000);
+    return () => { active = false; clearInterval(id); };
   }, []);
 
   // Live data hook — polls /api/live-snapshot
@@ -2759,6 +2796,78 @@ function StaffSystem({ loggedInStaff, onLogout }: { loggedInStaff: LoggedInStaff
           </div>
         </div>
       </header>
+
+      {/* Push-notification health banner. Shows when the device hasn't
+          subscribed to web push (no SW, permission not granted, or
+          subscription was lost). Without this banner, a waiter could
+          go a whole shift not receiving lock-screen alerts and only
+          notice when they happen to open Chrome. */}
+      {pushHealthy === false && (
+        <div className="bg-status-bad-50 border-b-2 border-status-bad-300 px-3 sm:px-4 py-2.5">
+          <div className="max-w-[1600px] mx-auto flex items-center gap-3">
+            <div className="w-9 h-9 rounded-xl bg-status-bad-500 text-white flex items-center justify-center text-lg shrink-0">🔕</div>
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-bold text-status-bad-900">
+                {lang === "ar" ? "إشعارات قفل الشاشة معطّلة" : "Lock-screen notifications are off"}
+              </p>
+              <p className="text-[11px] text-status-bad-700 font-semibold">
+                {lang === "ar"
+                  ? "لن تصلك تنبيهات الطلبات الجديدة أو رسائل المدير وأنت بعيد عن التطبيق."
+                  : "You won't get alerted to new orders or owner commands while the app is in the background."}
+              </p>
+            </div>
+            <button
+              onClick={async () => {
+                const ok = await requestNotificationPermission();
+                if (ok) {
+                  const { subscribeToPush } = await import("@/lib/push-client");
+                  const restaurantSlug = process.env.NEXT_PUBLIC_RESTAURANT_SLUG || "neom-dahab";
+                  await subscribeToPush(loggedInStaff.id, loggedInStaff.role, restaurantSlug, lang as "en" | "ar");
+                  setPushHealthy(true);
+                }
+              }}
+              className="px-4 py-2 rounded-xl bg-status-bad-600 text-white text-xs font-bold active:scale-95 shrink-0"
+            >
+              {lang === "ar" ? "فعّل" : "Enable"}
+            </button>
+          </div>
+        </div>
+      )}
+      {pushHealthy === true && (
+        <div className="bg-status-good-50 border-b border-status-good-200 px-3 sm:px-4 py-1.5">
+          <div className="max-w-[1600px] mx-auto flex items-center gap-2 justify-between">
+            <span className="flex items-center gap-1.5 text-[11px] font-bold text-status-good-700">
+              <span className="w-1.5 h-1.5 rounded-full bg-status-good-500 animate-pulse" />
+              {lang === "ar" ? "إشعارات قفل الشاشة فعّالة" : "Lock-screen notifications active"}
+            </span>
+            <button
+              onClick={async () => {
+                try {
+                  const res = await fetch("/api/push/test", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ staffId: loggedInStaff.id }),
+                  });
+                  const data = await res.json().catch(() => ({}));
+                  if (res.ok) {
+                    alert(lang === "ar"
+                      ? "تم إرسال إشعار تجريبي. تحقق من شاشة القفل خلال ثوانٍ."
+                      : "Test notification sent. Check your lock screen within a few seconds.");
+                  } else {
+                    alert(`Test failed: ${data.message || data.error || res.statusText}`);
+                  }
+                } catch (err) {
+                  alert(`Test failed: ${(err as Error).message}`);
+                }
+              }}
+              className="text-[10px] font-bold text-status-good-700 underline underline-offset-2 active:opacity-60"
+            >
+              {lang === "ar" ? "اختبر" : "Test"}
+            </button>
+          </div>
+        </div>
+      )}
+
       {showSchedule && <SchedulePopup staffId={loggedInStaff.id} role={loggedInStaff.role} onClose={() => setShowSchedule(false)} />}
       {showHistory && <OrderHistoryDrawer orders={orders} role="waiter" onClose={() => setShowHistory(false)} />}
 

@@ -6,11 +6,45 @@ let swRegistration: ServiceWorkerRegistration | null = null;
 export async function registerServiceWorker(): Promise<boolean> {
   if (typeof window === "undefined" || !("serviceWorker" in navigator)) return false;
   try {
-    swRegistration = await navigator.serviceWorker.register("/sw.js");
+    // updateViaCache: "none" forces the browser to always check for a
+    // fresh sw.js on registration instead of trusting its HTTP cache.
+    // Without this, an old sw.js can stay installed indefinitely after
+    // a deploy that ships fixes to push-event handling.
+    swRegistration = await navigator.serviceWorker.register("/sw.js", {
+      updateViaCache: "none",
+    });
+    // Force the active SW to upgrade if a newer one is waiting — the
+    // skipWaiting() in sw.js handles install, but registration needs
+    // to nudge it.
+    if (swRegistration.waiting) swRegistration.waiting.postMessage({ type: "SKIP_WAITING" });
     return true;
   } catch {
     return false;
   }
+}
+
+/**
+ * Register the SW eagerly on page load — independent of whether the
+ * user has granted notification permission yet. Without this, the SW
+ * was only being registered after the user tapped "Allow" on the
+ * permission prompt; if they dismissed the prompt or Chrome was
+ * killed before they tapped, the SW never installed and no pushes
+ * could be delivered. The SW registration itself does NOT require
+ * permission — only `Notification.requestPermission()` does.
+ */
+export async function registerSWEager(): Promise<boolean> {
+  if (typeof window === "undefined" || !("serviceWorker" in navigator)) return false;
+  // If something already registered the SW (e.g. a previous mount),
+  // re-use it. ServiceWorker registration is idempotent at the
+  // browser level but skipping the call avoids a noisy network hit.
+  try {
+    const existing = await navigator.serviceWorker.getRegistration();
+    if (existing) {
+      swRegistration = existing;
+      return true;
+    }
+  } catch { /* fall through and register fresh */ }
+  return registerServiceWorker();
 }
 
 export async function requestNotificationPermission(): Promise<boolean> {

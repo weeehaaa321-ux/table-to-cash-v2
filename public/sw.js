@@ -35,6 +35,13 @@ self.addEventListener("push", (event) => {
 
 // Foreground messages from the main thread
 self.addEventListener("message", (event) => {
+  // Allow the page to force this SW to upgrade if a newer build is
+  // waiting. Without this, a deployed fix to push-event handling
+  // can sit dormant behind an old SW until the next browser restart.
+  if (event.data && event.data.type === "SKIP_WAITING") {
+    self.skipWaiting();
+    return;
+  }
   if (event.data && event.data.type === "SHOW_NOTIFICATION") {
     const { title, body, tag, data } = event.data;
     self.registration.showNotification(title, {
