@@ -1,0 +1,35 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npx tsc *)",
+      "Bash(grep -v \"//\")",
+      "Bash(npx next *)",
+      "Bash(npx eslint *)",
+      "Bash(git add *)",
+      "Bash(git commit -m ' *)",
+      "Bash(git push *)",
+      "Bash(vercel env *)",
+      "Bash(vercel ls *)",
+      "Bash(npx dotenv-cli *)",
+      "Bash(npx prisma *)",
+      "PowerShell(Get-ChildItem -Path E:\\\\table-to-cash-v2\\\\src\\\\app -Force -Recurse -Depth 3 | Where-Object { $_.PSIsContainer } | Select-Object FullName | Format-Table -AutoSize)",
+      "PowerShell(npx tsc --noEmit 2>&1 | Select-Object -Last 80)",
+      "PowerShell(Remove-Item *)",
+      "Read(//tmp/**)",
+      "Bash(git commit *)",
+      "Bash(git stash *)",
+      "Bash(git reset *)",
+      "Bash(npx tsx *)",
+      "Bash(grep -v \"SECURITY WARNING\\\\|next major\\\\|To prepare\\\\|If you want\\\\|See https\\\\|libpq SSL\\\\|Use \\\\`node\")",
+      "Bash(awk '/KEYWORD_RULES/,/^]/' /e/table-to-cash-v2/scripts/regenerate-menu-images.ts)",
+      "WebFetch(domain:unsplash.com)",
+      "Read(//e/table-to-cash/src/app/api/push//**)",
+      "Read(//e/table-to-cash/public//**)",
+      "WebFetch(domain:table-to-cash-v2.vercel.app)",
+      "Bash(curl -s -X POST https://table-to-cash-v2.vercel.app/api/push/test -H \"Content-Type: application/json\" -d '{\"staffId\":\"cmnzpnfnc000104kybnyguhlc\"}')",
+      "Bash(curl -s -X POST https://table-to-cash-v2.vercel.app/api/messages -H 'Content-Type: application/json' -d '{ *)",
+      "Bash(awk 'NR<=920 && /^function|useLanguage/' /e/table-to-cash-v2/src/app/kitchen/page.tsx)",
+      "Bash(grep -rn \"guestNumber\\\\|Guest #\\\\|Guest \\\\${.*}\\\\|guest.*name\\\\|guestName\" /e/table-to-cash-v2/src --include=\"*.tsx\" --include=\"*.ts\")"
+    ]
+  }
+}

@@ -435,14 +435,23 @@ function TrackPage() {
   }, [sessionId, tableNumber, restaurant, isSessionOwner, guestNumber, orderId, cashPending, setHasPaymentAuthority]);
 
   useEffect(() => {
-    // Clear session storage only after the session itself has closed
+    // Clear all session-scoped browser state once the session closes
     // server-side. isPaid alone isn't enough — a refresh mid-round
-    // needs the sessionId to reattach.
+    // needs the sessionId to reattach. We clear both storage tiers so a
+    // future QR scan on the same browser starts cleanly: a fresh
+    // session on a different table won't accidentally inherit owner /
+    // member / guest-number flags from a closed session.
     if (sessionClosed && sessionId) {
       try {
         sessionStorage.removeItem("ttc_sessionId");
         sessionStorage.removeItem(`ttc_owner_${sessionId}`);
+        sessionStorage.removeItem(`ttc_member_${sessionId}`);
+        sessionStorage.removeItem("ttc_guestNumber");
         localStorage.removeItem("ttc_sessionId");
+        localStorage.removeItem(`ttc_owner_${sessionId}`);
+        localStorage.removeItem(`ttc_member_${sessionId}`);
+        localStorage.removeItem(`ttc_guestNumber_${sessionId}`);
+        localStorage.removeItem(`ttc_guestName_${sessionId}`);
       } catch { /* silent */ }
     }
   }, [sessionClosed, sessionId]);

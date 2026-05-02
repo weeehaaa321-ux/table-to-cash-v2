@@ -44,14 +44,21 @@ type CartStore = {
   itemIds: () => string[];
 };
 
-// Hydrate persisted session state
-// sessionId: localStorage (shared across tabs so menu links work)
-// isSessionOwner: sessionStorage (per-tab — prevents other tabs/guests from inheriting owner rights)
+// Hydrate persisted session state.
+//
+// sessionId, owner flag, guestNumber and guestName all live in
+// localStorage scoped by sessionId — same browser scanning the same
+// QR (or opening a 2nd tab) walks back into the exact same identity
+// they had before. Per-tab sessionStorage was the previous home for
+// the owner flag, but it punished the common "guest closed the tab,
+// reopened it" path with a fresh join request and a lost identity.
+// Session-scoping the keys (e.g. ttc_owner_<sid>) means a brand-new
+// session on a different table still gets a clean slate.
 function getPersistedSession(): { sessionId: string | null; isSessionOwner: boolean } {
   if (typeof window === "undefined") return { sessionId: null, isSessionOwner: false };
   try {
-    const sessionId = sessionStorage.getItem("ttc_sessionId") || localStorage.getItem("ttc_sessionId") || null;
-    const isOwner = sessionId ? sessionStorage.getItem(`ttc_owner_${sessionId}`) === "1" : false;
+    const sessionId = localStorage.getItem("ttc_sessionId") || sessionStorage.getItem("ttc_sessionId") || null;
+    const isOwner = sessionId ? localStorage.getItem(`ttc_owner_${sessionId}`) === "1" : false;
     return { sessionId, isSessionOwner: isOwner };
   } catch { return { sessionId: null, isSessionOwner: false }; }
 }
@@ -62,11 +69,19 @@ export const useCart = create<CartStore>((set, get) => ({
   restaurantId: null,
   sessionId: getPersistedSession().sessionId,
   isSessionOwner: getPersistedSession().isSessionOwner,
-  guestNumber: typeof window !== "undefined" ? parseInt(sessionStorage.getItem("ttc_guestNumber") || "0", 10) : 0,
+  guestNumber: (() => {
+    if (typeof window === "undefined") return 0;
+    try {
+      const sid = localStorage.getItem("ttc_sessionId") || sessionStorage.getItem("ttc_sessionId");
+      if (!sid) return 0;
+      const v = parseInt(localStorage.getItem(`ttc_guestNumber_${sid}`) || "0", 10);
+      return Number.isFinite(v) ? v : 0;
+    } catch { return 0; }
+  })(),
   guestName: (() => {
     if (typeof window === "undefined") return null;
     try {
-      const sid = sessionStorage.getItem("ttc_sessionId") || localStorage.getItem("ttc_sessionId");
+      const sid = localStorage.getItem("ttc_sessionId") || sessionStorage.getItem("ttc_sessionId");
       if (!sid) return null;
       // Session-scoped key so a name from a past table doesn't leak
       // into a brand-new session when the same browser scans a
@@ -97,12 +112,15 @@ export const useCart = create<CartStore>((set, get) => ({
     set({ isSessionOwner });
     if (typeof window !== "undefined") try {
       const sid = get().sessionId;
-      if (sid) sessionStorage.setItem(`ttc_owner_${sid}`, isSessionOwner ? "1" : "0");
+      if (sid) localStorage.setItem(`ttc_owner_${sid}`, isSessionOwner ? "1" : "0");
     } catch {}
   },
   setGuestNumber: (guestNumber) => {
     set({ guestNumber });
-    if (typeof window !== "undefined") try { sessionStorage.setItem("ttc_guestNumber", String(guestNumber)); } catch {}
+    if (typeof window !== "undefined") try {
+      const sid = get().sessionId;
+      if (sid) localStorage.setItem(`ttc_guestNumber_${sid}`, String(guestNumber));
+    } catch {}
   },
   setGuestName: (guestName) => {
     // Trim and cap at 30 chars so the receipt thermal-printer width

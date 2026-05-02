@@ -78,14 +78,18 @@ function ScanPage() {
             setExistingSession(true);
 
             // Check if this browser is the session owner OR an already-approved
-            // joiner. Without the member check, a guest 2+ who presses back
-            // after being approved would re-trigger a join request and have
-            // to be re-approved by the owner — very bad UX.
+            // joiner. Stored in localStorage (not sessionStorage) so closing
+            // the tab and reopening — or opening a 2nd tab — walks straight
+            // back in with the same identity instead of re-triggering a
+            // join request to the owner. Keys are session-scoped so a new
+            // session on a different QR still gets a clean slate.
             let wasOwner = false;
             let wasMember = false;
             try {
-              wasOwner = sessionStorage.getItem(`ttc_owner_${data.session.id}`) === "1";
-              wasMember = sessionStorage.getItem(`ttc_member_${data.session.id}`) === "1";
+              wasOwner = localStorage.getItem(`ttc_owner_${data.session.id}`) === "1"
+                || sessionStorage.getItem(`ttc_owner_${data.session.id}`) === "1";
+              wasMember = localStorage.getItem(`ttc_member_${data.session.id}`) === "1"
+                || sessionStorage.getItem(`ttc_member_${data.session.id}`) === "1";
             } catch {}
 
             if (wasOwner) {
@@ -103,16 +107,26 @@ function ScanPage() {
 
             if (wasMember) {
               // Previously-approved joiner returning — restore their state
-              // without hitting the join-request flow again.
-              const savedGuestNumber = parseInt(
-                sessionStorage.getItem("ttc_guestNumber") || "0",
-                10
-              );
+              // without hitting the join-request flow again. Guest number
+              // is session-scoped in localStorage now, so a 2nd tab / fresh
+              // tab pulls back the exact same number this guest had before
+              // (instead of re-incrementing or stealing another guest's
+              // number from un-scoped sessionStorage).
+              let savedGuestNumber = 0;
+              try {
+                savedGuestNumber = parseInt(
+                  localStorage.getItem(`ttc_guestNumber_${data.session.id}`)
+                    || sessionStorage.getItem("ttc_guestNumber")
+                    || "0",
+                  10,
+                );
+              } catch {}
               setTable(tableNumber, restaurantSlug);
               setSessionId(data.session.id);
               setIsSessionOwner(false);
               setGuestNumber(savedGuestNumber > 1 ? savedGuestNumber : (data.session.guestCount || 2));
               setHasPaymentAuthority(false);
+              try { localStorage.setItem(`ttc_member_${data.session.id}`, "1"); } catch {}
               localStorage.setItem("ttc_tableNumber", tableNumber);
               setMenuTarget(`/menu?table=${tableNumber}&restaurant=${restaurantSlug}&session=${data.session.id}`);
               gateOnName(data.session.id);
@@ -144,7 +158,7 @@ function ScanPage() {
             setIsSessionOwner(false);
             setGuestNumber(data.session.guestCount || 2);
             setHasPaymentAuthority(false);
-            try { sessionStorage.setItem(`ttc_member_${data.session.id}`, "1"); } catch {}
+            try { localStorage.setItem(`ttc_member_${data.session.id}`, "1"); } catch {}
             localStorage.setItem("ttc_tableNumber", tableNumber);
             setMenuTarget(`/menu?table=${tableNumber}&restaurant=${restaurantSlug}&session=${data.session.id}`);
             gateOnName(data.session.id);
@@ -190,7 +204,7 @@ function ScanPage() {
           setIsSessionOwner(true);
           setGuestNumber(1);
           setHasPaymentAuthority(true);
-          try { sessionStorage.setItem(`ttc_owner_${session.id}`, "1"); } catch {}
+          try { localStorage.setItem(`ttc_owner_${session.id}`, "1"); } catch {}
           localStorage.setItem("ttc_tableNumber", tableNumber);
           setMenuTarget(`/menu?table=${tableNumber}&restaurant=${restaurantSlug}&session=${session.id}`);
           gateOnName(session.id);
@@ -230,8 +244,11 @@ function ScanPage() {
           setSessionId(pendingSessionId);
           setIsSessionOwner(false);
           // Mark this browser as an approved member so a back-button return
-          // to /scan recognizes them and skips the join-request flow.
-          try { sessionStorage.setItem(`ttc_member_${pendingSessionId}`, "1"); } catch {}
+          // to /scan — or a fresh tab on the same browser — recognizes
+          // them and skips the join-request flow. localStorage (not
+          // sessionStorage) so closing the tab and reopening preserves
+          // membership on the same browser.
+          try { localStorage.setItem(`ttc_member_${pendingSessionId}`, "1"); } catch {}
           // Fetch current guest count to assign guest number
           try {
             const sessRes = await fetch(`/api/sessions?tableNumber=${tableNumber}&restaurantId=${restaurantSlug}`);
