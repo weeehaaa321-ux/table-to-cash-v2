@@ -159,6 +159,50 @@ function sendToPrinter(bytes) {
   });
 }
 
+// Real-time status query — ESC/POS "DLE EOT 4" (paper sensor status).
+// The printer responds with one byte whose bits encode paper state.
+// Without this check sendToPrinter returns "ok" even when the printer
+// is jammed, out of paper, or offline (TCP write succeeds at the OS
+// level, the printer silently drops the bytes). We catch those here
+// before claiming a receipt was printed.
+//
+// Bit decode for DLE EOT 4:
+//   bit 5,6 = paper end sensor   (both set → no paper at all)
+//   bit 2,3 = paper near-end     (both set → roll almost gone)
+// Other bits are reserved and should match a magic prefix.
+function queryPaperStatus() {
+  return new Promise((resolve) => {
+    const socket = new net.Socket();
+    let firstByte = null;
+    socket.setTimeout(2000);
+    socket.once("error", () => {
+      socket.destroy();
+      resolve({ ok: false, error: "unreachable" });
+    });
+    socket.once("timeout", () => {
+      socket.destroy();
+      // No response in 2s — printer may not support the query, or
+      // it's offline. Treat as unknown (UI should warn but not block).
+      resolve({ ok: false, error: "no_response" });
+    });
+    socket.connect(PRINTER_PORT, PRINTER_IP, () => {
+      socket.write(Buffer.from([0x10, 0x04, 0x04]));
+    });
+    socket.on("data", (chunk) => {
+      if (firstByte === null && chunk.length > 0) {
+        firstByte = chunk[0];
+        socket.end();
+      }
+    });
+    socket.once("close", () => {
+      if (firstByte === null) return; // already resolved via timeout/error
+      const paperOut = (firstByte & 0x60) === 0x60;
+      const paperLow = (firstByte & 0x0c) === 0x0c;
+      resolve({ ok: true, paperOut, paperLow, raw: firstByte });
+    });
+  });
+}
+
 async function fetchInvoice(sessionId) {
   const res = await fetch(`${APP_URL}/api/invoice?sessionId=${encodeURIComponent(sessionId)}`);
   if (!res.ok) throw new Error(`invoice fetch ${res.status}`);
@@ -173,8 +217,26 @@ const server = http.createServer(async (req, res) => {
   if (req.method === "OPTIONS") { res.writeHead(204); res.end(); return; }
 
   if (req.method === "GET" && req.url === "/health") {
+    // Probe the printer with a status query. If it doesn't respond,
+    // the cashier UI shows an offline banner — saves the "no
+    // receipts printed for the entire night" failure mode.
+    const status = await queryPaperStatus();
+    if (!status.ok) {
+      res.writeHead(503, { "content-type": "application/json" });
+      res.end(JSON.stringify({
+        ok: false,
+        printer: `${PRINTER_IP}:${PRINTER_PORT}`,
+        error: status.error,
+      }));
+      return;
+    }
     res.writeHead(200, { "content-type": "application/json" });
-    res.end(JSON.stringify({ ok: true, printer: `${PRINTER_IP}:${PRINTER_PORT}` }));
+    res.end(JSON.stringify({
+      ok: true,
+      printer: `${PRINTER_IP}:${PRINTER_PORT}`,
+      paperOut: status.paperOut,
+      paperLow: status.paperLow,
+    }));
     return;
   }
 
@@ -185,6 +247,24 @@ const server = http.createServer(async (req, res) => {
       try {
         const { sessionId } = JSON.parse(body || "{}");
         if (!sessionId) throw new Error("sessionId required");
+
+        // Pre-flight: ask the printer if it's actually able to print.
+        // We don't FAIL on a "no_response" from the status query —
+        // some older Xprinter firmware doesn't reply, and we'd block
+        // the receipt over a missing feature. We only block on the
+        // explicit "paper out" signal, which is unambiguous.
+        const status = await queryPaperStatus();
+        if (status.ok && status.paperOut) {
+          res.writeHead(503, { "content-type": "application/json" });
+          res.end(JSON.stringify({ ok: false, reason: "paper_out" }));
+          return;
+        }
+        if (!status.ok && status.error === "unreachable") {
+          res.writeHead(503, { "content-type": "application/json" });
+          res.end(JSON.stringify({ ok: false, reason: "printer_unreachable" }));
+          return;
+        }
+
         const inv = await fetchInvoice(sessionId);
         const current = inv.rounds?.[inv.rounds.length - 1];
         const bytes = buildInvoice({
@@ -201,11 +281,14 @@ const server = http.createServer(async (req, res) => {
         });
         await sendToPrinter(bytes);
         res.writeHead(200, { "content-type": "application/json" });
-        res.end(JSON.stringify({ ok: true }));
+        res.end(JSON.stringify({
+          ok: true,
+          paperLow: status.ok ? !!status.paperLow : false,
+        }));
       } catch (err) {
         console.error("print failed:", err);
         res.writeHead(500, { "content-type": "application/json" });
-        res.end(JSON.stringify({ ok: false, error: String(err.message || err) }));
+        res.end(JSON.stringify({ ok: false, reason: "agent_error", error: String(err.message || err) }));
       }
     });
     return;

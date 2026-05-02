@@ -132,25 +132,69 @@ async function fetchInvoice(sessionId: string, staffId?: string): Promise<Invoic
 // thermal printing; fall back to the browser print dialog if the
 // agent isn't running. The cashier sets the agent URL via
 // localStorage.cashier_print_agent (default http://localhost:9911).
-async function tryAgentPrint(sessionId: string): Promise<boolean> {
+//
+// Returns a structured outcome instead of a bare boolean — the
+// cashier UI surfaces this so the operator knows when receipts
+// silently failed to print (paper out, agent down, etc). The old
+// "fire and forget, popup window as fallback" path was the bug
+// behind "30 cash payments confirmed, no receipts printed all
+// night, discovered next morning at cash-up".
+type PrintAgentOutcome = {
+  ok: boolean;
+  reason?: "paper_out" | "printer_unreachable" | "agent_unreachable" | "agent_error" | "unknown";
+  paperLow?: boolean;
+};
+
+async function tryAgentPrint(sessionId: string): Promise<PrintAgentOutcome> {
+  const agentUrl =
+    (typeof localStorage !== "undefined" && localStorage.getItem("cashier_print_agent")) ||
+    "http://localhost:9911";
   try {
-    const agentUrl =
-      (typeof localStorage !== "undefined" && localStorage.getItem("cashier_print_agent")) ||
-      "http://localhost:9911";
     const res = await fetch(`${agentUrl}/print`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ sessionId }),
     });
-    if (!res.ok) return false;
     const json = await res.json().catch(() => ({}));
-    return !!json.ok;
+    if (!res.ok || !json.ok) {
+      return {
+        ok: false,
+        reason: (json.reason as PrintAgentOutcome["reason"]) || "unknown",
+      };
+    }
+    return { ok: true, paperLow: !!json.paperLow };
   } catch {
-    return false;
+    // Most often: agent process not running on the cashier PC.
+    return { ok: false, reason: "agent_unreachable" };
   }
 }
 
-function printInvoice(inv: InvoiceData) {
+async function probeAgentHealth(): Promise<PrintAgentOutcome> {
+  const agentUrl =
+    (typeof localStorage !== "undefined" && localStorage.getItem("cashier_print_agent")) ||
+    "http://localhost:9911";
+  try {
+    const res = await fetch(`${agentUrl}/health`);
+    const json = await res.json().catch(() => ({}));
+    if (!res.ok || !json.ok) {
+      // Agent ran the probe and reported a problem (paperOut /
+      // printer_unreachable / etc).
+      const reason = json.error === "unreachable"
+        ? "printer_unreachable"
+        : json.paperOut
+          ? "paper_out"
+          : "unknown";
+      return { ok: false, reason: reason as PrintAgentOutcome["reason"] };
+    }
+    return { ok: true, paperLow: !!json.paperLow };
+  } catch {
+    return { ok: false, reason: "agent_unreachable" };
+  }
+}
+
+// Returns true if the print window opened (popup wasn't blocked); false
+// if the browser refused (popup blocker is the most common cause).
+function printInvoice(inv: InvoiceData): boolean {
   // RECEIPT POLICY: print order items + their TOTAL only. Never show a
   // tip line. Tip is a private cashier↔guest matter and stays in the
   // app; the printed paper is for the customer's records of what they
@@ -284,10 +328,15 @@ function printInvoice(inv: InvoiceData) {
 </html>`;
 
   const win = window.open("", "_blank", "width=350,height=600");
-  if (win) {
-    win.document.write(html);
-    win.document.close();
+  if (!win) {
+    // Browser blocked the popup — caller surfaces this so the
+    // cashier knows to reprint manually instead of silently
+    // moving on with no paper trail.
+    return false;
   }
+  win.document.write(html);
+  win.document.close();
+  return true;
 }
 
 // ═══════════════════════════════════════════════
@@ -440,6 +489,36 @@ function AcceptPaymentPanel({ sessions, onAcceptPayment, onReversePayment, recen
   } | null>(null);
   const [reverseReason, setReverseReason] = useState("");
   const [reverseBusy, setReverseBusy] = useState(false);
+  // Print failure banner. Persistent until the cashier dismisses it —
+  // a fading toast wasn't enough to catch the "30 receipts failed,
+  // discovered next morning" scenario. Also surfaces paper-low
+  // warnings (printer can still print but the roll is almost out).
+  const [printAlert, setPrintAlert] = useState<{
+    kind: "fail" | "low";
+    reason?: PrintAgentOutcome["reason"];
+    sessionId?: string;
+  } | null>(null);
+
+  // Run a print attempt and surface the outcome. Tries the local
+  // thermal agent first; falls back to the browser's print window;
+  // only declares success when one of those actually worked.
+  const runPrint = async (sessionId: string) => {
+    const agent = await tryAgentPrint(sessionId);
+    if (agent.ok) {
+      if (agent.paperLow) setPrintAlert({ kind: "low" });
+      return;
+    }
+    // Agent path failed — try the browser fallback.
+    const inv = await fetchInvoice(sessionId, staffId);
+    if (inv && printInvoice(inv)) {
+      // Popup opened — receipt may still print, but we still warn
+      // because the agent path is the supported one.
+      setPrintAlert({ kind: "fail", reason: agent.reason, sessionId });
+      return;
+    }
+    // Neither path worked.
+    setPrintAlert({ kind: "fail", reason: agent.reason || "unknown", sessionId });
+  };
 
   // Tell the reliability hook we're mid-transaction — no reloads allowed
   // while a confirm modal is open or a settle is in flight. A reload
@@ -453,12 +532,9 @@ function AcceptPaymentPanel({ sessions, onAcceptPayment, onReversePayment, recen
     setPrinting(sessionId);
     // Prefer the thermal print agent on the cashier PC — silent, no
     // print dialog. Falls back to the browser print window if the
-    // agent isn't reachable (remote work, agent crashed, etc.).
-    const agentPrinted = await tryAgentPrint(sessionId);
-    if (!agentPrinted) {
-      const inv = await fetchInvoice(sessionId, staffId);
-      if (inv) printInvoice(inv);
-    }
+    // agent isn't reachable. runPrint surfaces failures and paper-low
+    // warnings via the printAlert banner.
+    await runPrint(sessionId);
     setPrinting(null);
   };
 
@@ -508,17 +584,71 @@ function AcceptPaymentPanel({ sessions, onAcceptPayment, onReversePayment, recen
       setJustPaid({ tableNumber, orderType: pendingConfirm.orderType, vipGuestName: pendingConfirm.vipGuestName, method, total: result.confirmedTotal });
       setTimeout(() => setJustPaid(null), 4000);
     }
-    setTimeout(async () => {
-      const agentPrinted = await tryAgentPrint(sessionId);
-      if (!agentPrinted) {
-        const inv = await fetchInvoice(sessionId, staffId);
-        if (inv) printInvoice(inv);
-      }
-    }, 1500);
+    setTimeout(() => { runPrint(sessionId); }, 1500);
   };
 
   return (
     <div className="space-y-3">
+      {/* Print failure banner — sticks until dismissed so the cashier
+          knows that a receipt didn't print, instead of finding out at
+          end-of-shift reconciliation. Paper-low is the gentle warning;
+          fail is the loud one. */}
+      {printAlert && (
+        <div className={`rounded-2xl border-2 p-4 flex items-start gap-3 ${
+          printAlert.kind === "fail"
+            ? "bg-status-bad-50 border-status-bad-300"
+            : "bg-status-warn-50 border-status-warn-300"
+        }`}>
+          <div className={`w-9 h-9 rounded-xl flex items-center justify-center text-lg shrink-0 ${
+            printAlert.kind === "fail" ? "bg-status-bad-500 text-white" : "bg-status-warn-500 text-white"
+          }`}>
+            {printAlert.kind === "fail" ? "🖨" : "⚠"}
+          </div>
+          <div className="flex-1 min-w-0">
+            <p className={`text-sm font-bold ${
+              printAlert.kind === "fail" ? "text-status-bad-900" : "text-status-warn-900"
+            }`}>
+              {printAlert.kind === "fail"
+                ? t("cashier.printFailedTitle")
+                : t("cashier.paperLowTitle")}
+            </p>
+            <p className={`text-[11px] font-semibold ${
+              printAlert.kind === "fail" ? "text-status-bad-700" : "text-status-warn-700"
+            }`}>
+              {printAlert.kind === "low"
+                ? t("cashier.paperLowDesc")
+                : printAlert.reason === "paper_out"
+                  ? t("cashier.printFailPaperOut")
+                  : printAlert.reason === "printer_unreachable"
+                    ? t("cashier.printFailPrinterUnreachable")
+                    : printAlert.reason === "agent_unreachable"
+                      ? t("cashier.printFailAgentUnreachable")
+                      : t("cashier.printFailGeneric")}
+            </p>
+          </div>
+          <div className="flex flex-col gap-1.5 shrink-0">
+            {printAlert.kind === "fail" && printAlert.sessionId && (
+              <button
+                onClick={() => { if (printAlert.sessionId) runPrint(printAlert.sessionId); }}
+                className="px-3 py-1.5 rounded-lg bg-status-bad-600 text-white text-[11px] font-bold active:scale-95"
+              >
+                {t("cashier.retryPrint")}
+              </button>
+            )}
+            <button
+              onClick={() => setPrintAlert(null)}
+              className={`px-3 py-1.5 rounded-lg text-[11px] font-bold active:scale-95 ${
+                printAlert.kind === "fail"
+                  ? "bg-white text-status-bad-700 border border-status-bad-300"
+                  : "bg-white text-status-warn-700 border border-status-warn-300"
+              }`}
+            >
+              {t("cashier.dismiss")}
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Final confirmation modal — guards against accidental settles AND
           makes the walk-up case (guest never tapped pay) an explicit action. */}
       {pendingConfirm && (
