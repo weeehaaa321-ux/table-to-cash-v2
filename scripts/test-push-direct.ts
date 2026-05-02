@@ -49,6 +49,8 @@ async function main() {
         { TTL: 60, urgency: "high" },
       );
       console.log(`  ✓ ${name}: ${res.statusCode} ${res.statusText || ""}`);
+      console.log(`     headers: ${JSON.stringify(res.headers || {}).slice(0, 400)}`);
+      console.log(`     body: ${(res.body || "").toString().slice(0, 400)}`);
     } catch (err: unknown) {
       const e = err as { statusCode?: number; body?: string; message?: string };
       console.log(`  ✗ ${name}: status=${e.statusCode ?? "?"} message=${e.message ?? ""}`);
