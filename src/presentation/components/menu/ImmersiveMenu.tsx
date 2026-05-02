@@ -763,31 +763,62 @@ export function ImmersiveMenu({ tableNumber, restaurantSlug, sessionId }: { tabl
           </button>
         </div>
 
-        {/* Category tabs */}
-        <div ref={categoryBarRef} className="flex gap-1 overflow-x-auto no-scrollbar px-4 py-2" style={{ touchAction: "pan-x" }}>
-          <button
-            onClick={() => scrollToCategory("all")}
-            className={`flex-shrink-0 px-4 py-2 rounded-full text-xs font-bold transition-all ${
-              activeCategory === "all" && !searchQuery
-                ? "bg-sand-900 text-white shadow-sm"
-                : "bg-sand-100 text-text-secondary"
-            }`}
-          >
-            {lang === "ar" ? "الكل" : "All"}
-          </button>
-          {filteredCategories.map((cat) => (
-            <button
-              key={cat.slug}
-              onClick={() => scrollToCategory(cat.slug)}
-              className={`flex-shrink-0 px-4 py-2 rounded-full text-xs font-bold transition-all whitespace-nowrap ${
-                activeCategory === cat.slug && !searchQuery
-                  ? "bg-sand-900 text-white shadow-sm"
-                  : "bg-sand-100 text-text-secondary"
-              }`}
-            >
-              {cat.icon ? `${cat.icon} ` : ""}{getLocalizedName(cat, lang as "en" | "ar")}
-            </button>
-          ))}
+        {/* Category tiles — horizontally scrolling, icon-on-top.
+            Each tile is a self-contained card (rounded, padded, with
+            depth) so the menu reads like a navigable storefront
+            instead of a strip of bare buttons. Min-width keeps tiles
+            from squishing when category names are long. */}
+        <div
+          ref={categoryBarRef}
+          className="flex gap-2.5 overflow-x-auto no-scrollbar px-4 pt-2 pb-3"
+          style={{ touchAction: "pan-x" }}
+        >
+          {(() => {
+            const tiles: { slug: string; icon: string; label: string; count: number }[] = [
+              {
+                slug: "all",
+                icon: superCategory === "food" ? "🍽️" : "🥤",
+                label: lang === "ar" ? "الكل" : "All",
+                count: filteredItems.filter((i) => i.available).length,
+              },
+              ...filteredCategories.map((cat) => ({
+                slug: cat.slug,
+                icon: cat.icon || "•",
+                label: getLocalizedName(cat, lang as "en" | "ar"),
+                // categorizedItems is search-filtered; raw section count
+                // is the honest "how many items live in this bucket".
+                count: filteredItems.filter((i) => i.categoryId === cat.id && i.available).length,
+              })),
+            ];
+            return tiles.map((tile) => {
+              const isActive = activeCategory === tile.slug && !searchQuery;
+              return (
+                <button
+                  key={tile.slug}
+                  onClick={() => scrollToCategory(tile.slug)}
+                  className={`flex-shrink-0 w-20 rounded-2xl border transition-all flex flex-col items-center justify-center gap-1 py-3 px-2 active:scale-95 ${
+                    isActive
+                      ? "bg-sand-900 border-sand-900 text-white shadow-lg shadow-sand-900/20"
+                      : "bg-white border-sand-200 text-text-primary hover:border-sand-300"
+                  }`}
+                >
+                  <span className="text-2xl leading-none">{tile.icon}</span>
+                  <span className="text-[10px] font-bold leading-tight text-center line-clamp-2 px-0.5">
+                    {tile.label}
+                  </span>
+                  {tile.count > 0 && (
+                    <span
+                      className={`text-[9px] font-bold tabular-nums leading-none ${
+                        isActive ? "text-white/60" : "text-text-muted"
+                      }`}
+                    >
+                      {tile.count}
+                    </span>
+                  )}
+                </button>
+              );
+            });
+          })()}
         </div>
       </div>
 
