@@ -46,6 +46,7 @@ function toLiveOrder(raw: {
   vipGuestName?: string | null;
   deliveryStatus?: string | null;
   guestNumber?: number | null;
+  guestName?: string | null;
 }): LiveOrder {
   const createdAt = new Date(raw.createdAt).getTime();
   const statusMap: Record<string, LiveOrder["status"]> = {
@@ -94,6 +95,7 @@ function toLiveOrder(raw: {
     vipGuestName: raw.vipGuestName ?? null,
     deliveryStatus: raw.deliveryStatus ?? null,
     guestNumber: raw.guestNumber ?? null,
+    guestName: raw.guestName ?? null,
   };
 }
 

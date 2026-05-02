@@ -20,24 +20,28 @@ type Item = {
   addOns?: { name: string; price: number }[];
 };
 
+// Slug → sortOrder mapping must stay in sync with the
+// 20260502130000_smart_category_sort migration. Numbering uses 10-step
+// gaps so a new "burritos" category can land at e.g. 105 between
+// Burgers (100) and Sandwiches (110) without renumbering everything.
 const categories: Cat[] = [
-  { name: "Breakfast Platters", nameAr: "فطور", slug: "breakfast", sortOrder: 1, icon: "🥐", station: "KITCHEN" },
-  { name: "Egg Dishes", nameAr: "أطباق البيض", slug: "eggs", sortOrder: 2, icon: "🍳", station: "KITCHEN" },
-  { name: "Chef's Special", nameAr: "سبيشال الشيف", slug: "chefs-special", sortOrder: 3, icon: "🍞", station: "KITCHEN" },
-  { name: "Fresh Juices", nameAr: "عصائر طازجة", slug: "fresh-juices", sortOrder: 4, icon: "🧃", station: "BAR" },
-  { name: "Soft Drinks", nameAr: "مشروبات غازية", slug: "soft-drinks", sortOrder: 5, icon: "🥤", station: "BAR" },
-  { name: "Ice Cream", nameAr: "آيس كريم", slug: "ice-cream", sortOrder: 6, icon: "🍦", station: "BAR" },
-  { name: "Milkshakes", nameAr: "ميلك شيك", slug: "milkshakes", sortOrder: 7, icon: "🥤", station: "BAR" },
-  { name: "Desserts", nameAr: "حلويات", slug: "desserts", sortOrder: 8, icon: "🧇", station: "KITCHEN" },
-  { name: "Cocktails", nameAr: "كوكتيلات", slug: "cocktails", sortOrder: 9, icon: "🍹", station: "BAR" },
-  { name: "Energy Drinks", nameAr: "مشروبات طاقة", slug: "energy-drinks", sortOrder: 10, icon: "⚡", station: "BAR" },
-  { name: "Smoothies", nameAr: "سموذي", slug: "smoothies", sortOrder: 11, icon: "🥤", station: "BAR" },
-  { name: "Coffee", nameAr: "قهوة", slug: "coffee", sortOrder: 12, icon: "☕", station: "BAR" },
-  { name: "Iced Coffee", nameAr: "قهوة مثلجة", slug: "iced-coffee", sortOrder: 13, icon: "🧊", station: "BAR" },
-  { name: "Iced Drinks & Teas", nameAr: "مشروبات مثلجة وشاي", slug: "iced-drinks", sortOrder: 14, icon: "🧋", station: "BAR" },
-  { name: "Tea & Herbs", nameAr: "شاي وأعشاب", slug: "tea-herbs", sortOrder: 15, icon: "🌿", station: "BAR" },
-  { name: "Sahlab", nameAr: "سحلب", slug: "sahlab", sortOrder: 16, icon: "🥛", station: "BAR" },
-  { name: "Extras", nameAr: "إضافات", slug: "extras", sortOrder: 17, icon: "➕", station: "BAR" },
+  { name: "Breakfast Platters", nameAr: "فطور", slug: "breakfast", sortOrder: 10, icon: "🥐", station: "KITCHEN" },
+  { name: "Egg Dishes", nameAr: "أطباق البيض", slug: "eggs", sortOrder: 20, icon: "🍳", station: "KITCHEN" },
+  { name: "Chef's Special", nameAr: "سبيشال الشيف", slug: "chefs-special", sortOrder: 30, icon: "🍞", station: "KITCHEN" },
+  { name: "Desserts", nameAr: "حلويات", slug: "desserts", sortOrder: 120, icon: "🧇", station: "KITCHEN" },
+  { name: "Ice Cream", nameAr: "آيس كريم", slug: "ice-cream", sortOrder: 130, icon: "🍦", station: "BAR" },
+  { name: "Fresh Juices", nameAr: "عصائر طازجة", slug: "fresh-juices", sortOrder: 140, icon: "🧃", station: "BAR" },
+  { name: "Soft Drinks", nameAr: "مشروبات غازية", slug: "soft-drinks", sortOrder: 150, icon: "🥤", station: "BAR" },
+  { name: "Coffee", nameAr: "قهوة", slug: "coffee", sortOrder: 160, icon: "☕", station: "BAR" },
+  { name: "Iced Coffee", nameAr: "قهوة مثلجة", slug: "iced-coffee", sortOrder: 170, icon: "🧊", station: "BAR" },
+  { name: "Iced Drinks & Teas", nameAr: "مشروبات مثلجة وشاي", slug: "iced-drinks", sortOrder: 180, icon: "🧋", station: "BAR" },
+  { name: "Tea & Herbs", nameAr: "شاي وأعشاب", slug: "tea-herbs", sortOrder: 190, icon: "🌿", station: "BAR" },
+  { name: "Sahlab", nameAr: "سحلب", slug: "sahlab", sortOrder: 200, icon: "🥛", station: "BAR" },
+  { name: "Smoothies", nameAr: "سموذي", slug: "smoothies", sortOrder: 210, icon: "🥤", station: "BAR" },
+  { name: "Milkshakes", nameAr: "ميلك شيك", slug: "milkshakes", sortOrder: 220, icon: "🥤", station: "BAR" },
+  { name: "Energy Drinks", nameAr: "مشروبات طاقة", slug: "energy-drinks", sortOrder: 230, icon: "⚡", station: "BAR" },
+  { name: "Cocktails", nameAr: "كوكتيلات", slug: "cocktails", sortOrder: 240, icon: "🍹", station: "BAR" },
+  { name: "Extras", nameAr: "إضافات", slug: "extras", sortOrder: 999, icon: "➕", station: "BAR" },
 ];
 
 const items: Item[] = [

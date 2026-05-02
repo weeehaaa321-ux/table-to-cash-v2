@@ -68,6 +68,7 @@ export type LiveOrder = {
   vipGuestName?: string | null;
   deliveryStatus?: string | null;
   guestNumber?: number | null;
+  guestName?: string | null;
 };
 
 export type RevenueSegment = {

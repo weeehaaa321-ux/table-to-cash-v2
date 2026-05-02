@@ -102,7 +102,11 @@ export function PaidRoundsCard({
                         <div key={o.orderNumber} className="pt-2">
                           <p className="text-[10px] font-bold text-text-secondary uppercase tracking-wider mb-1">
                             {lang === "ar" ? `طلب #${o.orderNumber}` : `Order #${o.orderNumber}`}
-                            {o.guestNumber && o.guestNumber > 0 ? `  ·  G${o.guestNumber}` : ""}
+                            {o.guestName && o.guestName.trim()
+                              ? `  ·  ${o.guestName}`
+                              : o.guestNumber && o.guestNumber > 0
+                                ? `  ·  ${lang === "ar" ? `ضيف ${o.guestNumber}` : `G${o.guestNumber}`}`
+                                : ""}
                           </p>
                           <div className="space-y-1">
                             {o.items.map((it, i) => (
@@ -181,6 +185,7 @@ export function computePaidRounds(
     orderNumber: number;
     total: number;
     guestNumber?: number | null;
+    guestName?: string | null;
     paidAt?: string | null;
     paymentMethod?: string | null;
     status?: string;
@@ -204,6 +209,7 @@ export function computePaidRounds(
         orderNumber: o.orderNumber,
         total: o.total,
         guestNumber: o.guestNumber ?? null,
+        guestName: o.guestName ?? null,
         items: o.items,
       })),
       subtotal: group.reduce((s, o) => s + o.total, 0),

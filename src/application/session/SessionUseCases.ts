@@ -138,7 +138,7 @@ export class SessionUseCases {
         waiter: { select: { id: true, name: true } },
         vipGuest: { select: { name: true } },
         orders: {
-          select: { id: true, orderNumber: true, total: true, status: true, paymentMethod: true, paidAt: true, tip: true },
+          select: { id: true, orderNumber: true, total: true, status: true, paymentMethod: true, paidAt: true, tip: true, guestNumber: true, guestName: true },
           orderBy: { createdAt: "asc" },
         },
       },

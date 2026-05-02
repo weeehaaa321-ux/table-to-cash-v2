@@ -807,6 +807,7 @@ function CartPage() {
   const tableId = useCart((s) => s.tableId);
   const restaurantId = useCart((s) => s.restaurantId);
   const guestNumber = useCart((s) => s.guestNumber);
+  const guestName = useCart((s) => s.guestName);
   const clearCart = useCart((s) => s.clearCart);
   const orderType = useCart((s) => s.orderType);
   const vipGuestId = useCart((s) => s.vipGuestId);
@@ -865,6 +866,7 @@ function CartPage() {
           total: grandTotal,
           language: "en",
           guestNumber: guestNumber > 0 ? guestNumber : undefined,
+          guestName: guestName || undefined,
           clientRequestId: submitKeyRef.current,
           ...(orderType !== "TABLE" ? {
             orderType,

@@ -19,15 +19,16 @@ type Item = {
   prepTime?: number; bestSeller?: boolean;
 };
 
+// Numbers must agree with 20260502130000_smart_category_sort.
 const categories: Cat[] = [
-  { name: "Salads", slug: "salads", sortOrder: 20, icon: "🥗", station: "KITCHEN" },
-  { name: "Starters & Snacks", slug: "starters", sortOrder: 21, icon: "🍽️", station: "KITCHEN" },
-  { name: "Soups", slug: "soups", sortOrder: 22, icon: "🍲", station: "KITCHEN" },
-  { name: "Italian Pasta", slug: "pasta", sortOrder: 23, icon: "🍝", station: "KITCHEN" },
-  { name: "Burgers", slug: "burgers", sortOrder: 24, icon: "🍔", station: "KITCHEN" },
-  { name: "Italian Pizza", slug: "pizza", sortOrder: 25, icon: "🍕", station: "KITCHEN" },
-  { name: "Sandwiches", slug: "sandwiches", sortOrder: 26, icon: "🥪", station: "KITCHEN" },
-  { name: "Main Course", slug: "main-course", sortOrder: 27, icon: "🥩", station: "KITCHEN" },
+  { name: "Salads", slug: "salads", sortOrder: 40, icon: "🥗", station: "KITCHEN" },
+  { name: "Soups", slug: "soups", sortOrder: 50, icon: "🍲", station: "KITCHEN" },
+  { name: "Starters & Snacks", slug: "starters", sortOrder: 60, icon: "🍽️", station: "KITCHEN" },
+  { name: "Main Course", slug: "main-course", sortOrder: 70, icon: "🥩", station: "KITCHEN" },
+  { name: "Italian Pasta", slug: "pasta", sortOrder: 80, icon: "🍝", station: "KITCHEN" },
+  { name: "Italian Pizza", slug: "pizza", sortOrder: 90, icon: "🍕", station: "KITCHEN" },
+  { name: "Burgers", slug: "burgers", sortOrder: 100, icon: "🍔", station: "KITCHEN" },
+  { name: "Sandwiches", slug: "sandwiches", sortOrder: 110, icon: "🥪", station: "KITCHEN" },
 ];
 
 const items: Item[] = [

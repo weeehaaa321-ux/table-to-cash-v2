@@ -27,10 +27,12 @@ function ScanPage() {
   const setSessionId = useCart((s) => s.setSessionId);
   const setIsSessionOwner = useCart((s) => s.setIsSessionOwner);
   const setGuestNumber = useCart((s) => s.setGuestNumber);
+  const setGuestName = useCart((s) => s.setGuestName);
   const setHasPaymentAuthority = useCart((s) => s.setHasPaymentAuthority);
 
   const { lang, toggleLang, t, dir } = useLanguage();
-  const [status, setStatus] = useState<"checking" | "entering" | "branding" | "blocked" | "waiting_approval" | "rejected">("checking");
+  const [status, setStatus] = useState<"checking" | "entering" | "branding" | "blocked" | "waiting_approval" | "rejected" | "name_prompt">("checking");
+  const [nameInput, setNameInput] = useState("");
   const [existingSession, setExistingSession] = useState(false);
   const [blockedTable, setBlockedTable] = useState<string | null>(null);
   const [joinRequestId, setJoinRequestId] = useState<string | null>(null);
@@ -95,8 +97,7 @@ function ScanPage() {
               setHasPaymentAuthority(true);
               localStorage.setItem("ttc_tableNumber", tableNumber);
               setMenuTarget(`/menu?table=${tableNumber}&restaurant=${restaurantSlug}&session=${data.session.id}`);
-              setStatus("entering");
-              setTimeout(() => setStatus("branding"), 800);
+              gateOnName(data.session.id);
               return;
             }
 
@@ -114,8 +115,7 @@ function ScanPage() {
               setHasPaymentAuthority(false);
               localStorage.setItem("ttc_tableNumber", tableNumber);
               setMenuTarget(`/menu?table=${tableNumber}&restaurant=${restaurantSlug}&session=${data.session.id}`);
-              setStatus("entering");
-              setTimeout(() => setStatus("branding"), 800);
+              gateOnName(data.session.id);
               return;
             }
 
@@ -147,8 +147,7 @@ function ScanPage() {
             try { sessionStorage.setItem(`ttc_member_${data.session.id}`, "1"); } catch {}
             localStorage.setItem("ttc_tableNumber", tableNumber);
             setMenuTarget(`/menu?table=${tableNumber}&restaurant=${restaurantSlug}&session=${data.session.id}`);
-            setStatus("entering");
-            setTimeout(() => setStatus("branding"), 800);
+            gateOnName(data.session.id);
             return;
           }
         }
@@ -157,6 +156,23 @@ function ScanPage() {
       }
       // No existing session — auto-create, no button needed
       autoStart();
+    }
+
+    function gateOnName(sessionId: string) {
+      // If the guest already typed their name on a previous visit
+      // to this same session, skip the prompt and go straight to
+      // the entering animation. Otherwise show the name input.
+      // Optional — they can submit empty / "Skip" and the rest of
+      // the system falls back to "Guest #N".
+      let stored: string | null = null;
+      try { stored = localStorage.getItem(`ttc_guestName_${sessionId}`); } catch {}
+      if (stored) {
+        setGuestName(stored);
+        setStatus("entering");
+        setTimeout(() => setStatus("branding"), 800);
+      } else {
+        setStatus("name_prompt");
+      }
     }
 
     async function autoStart() {
@@ -177,7 +193,7 @@ function ScanPage() {
           try { sessionStorage.setItem(`ttc_owner_${session.id}`, "1"); } catch {}
           localStorage.setItem("ttc_tableNumber", tableNumber);
           setMenuTarget(`/menu?table=${tableNumber}&restaurant=${restaurantSlug}&session=${session.id}`);
-          setStatus("branding");
+          gateOnName(session.id);
           return;
         }
         // Non-ok response — show error
@@ -188,7 +204,7 @@ function ScanPage() {
     }
 
     checkSession();
-  }, [tableNumber, restaurantSlug, router, setTable, setSessionId, setIsSessionOwner, setGuestNumber, setHasPaymentAuthority]);
+  }, [tableNumber, restaurantSlug, router, setTable, setSessionId, setIsSessionOwner, setGuestNumber, setGuestName, setHasPaymentAuthority]);
 
   // Poll for join request approval
   useEffect(() => {
@@ -229,8 +245,16 @@ function ScanPage() {
           setHasPaymentAuthority(false);
           localStorage.setItem("ttc_tableNumber", tableNumber);
           setMenuTarget(`/menu?table=${tableNumber}&restaurant=${restaurantSlug}&session=${pendingSessionId}`);
-          setStatus("entering");
-          setTimeout(() => setStatus("branding"), 800);
+          // Same name-gate as the other entry paths.
+          let stored: string | null = null;
+          try { stored = localStorage.getItem(`ttc_guestName_${pendingSessionId}`); } catch {}
+          if (stored) {
+            setGuestName(stored);
+            setStatus("entering");
+            setTimeout(() => setStatus("branding"), 800);
+          } else {
+            setStatus("name_prompt");
+          }
         } else if (data.status === "rejected") {
           clearInterval(interval);
           clearTimeout(timeout);
@@ -408,6 +432,79 @@ function ScanPage() {
                 >
                   Go to Table {blockedTable}
                 </button>
+              </motion.div>
+            )}
+
+            {status === "name_prompt" && (
+              <motion.div
+                key="name_prompt"
+                className="flex-1 flex flex-col items-center justify-center text-center px-6"
+                initial={{ opacity: 0, y: 12 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0 }}
+                transition={{ duration: 0.3 }}
+              >
+                <div className="w-14 h-14 rounded-full bg-white/10 border-2 border-white/15 flex items-center justify-center mb-5">
+                  <span className="text-2xl">👋</span>
+                </div>
+                <h2 className="text-xl font-extrabold text-white mb-2 tracking-tight">
+                  {lang === "ar" ? "ما اسمك؟" : "What's your name?"}
+                </h2>
+                <p className="text-white/50 text-xs leading-relaxed mb-6 max-w-xs">
+                  {lang === "ar"
+                    ? "سيظهر اسمك على الفاتورة وعلى شاشة النادل عند الطلب."
+                    : "Shown on your receipt and the waiter's screen when you order."}
+                </p>
+                <input
+                  type="text"
+                  value={nameInput}
+                  onChange={(e) => setNameInput(e.target.value.slice(0, 30))}
+                  placeholder={lang === "ar" ? "اسمك" : "Your name"}
+                  autoFocus
+                  className="w-full max-w-xs mb-3 px-4 py-3 rounded-xl bg-white/10 border-2 border-white/15 text-white text-center font-bold placeholder-white/30 focus:outline-none focus:border-ocean-400"
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && nameInput.trim().length > 0) {
+                      const sid = useCart.getState().sessionId;
+                      setGuestName(nameInput);
+                      if (sid && nameInput.trim()) {
+                        try { localStorage.setItem(`ttc_guestName_${sid}`, nameInput.trim().slice(0, 30)); } catch {}
+                      }
+                      setStatus("entering");
+                      setTimeout(() => setStatus("branding"), 800);
+                    }
+                  }}
+                />
+                <div className="flex gap-2 w-full max-w-xs">
+                  <button
+                    onClick={() => {
+                      setStatus("entering");
+                      setTimeout(() => setStatus("branding"), 800);
+                    }}
+                    className="flex-1 py-3 rounded-xl bg-white/5 border border-white/10 text-white/60 text-sm font-bold active:scale-95 transition"
+                  >
+                    {lang === "ar" ? "تخطّي" : "Skip"}
+                  </button>
+                  <button
+                    onClick={() => {
+                      if (nameInput.trim().length === 0) return;
+                      const sid = useCart.getState().sessionId;
+                      setGuestName(nameInput);
+                      if (sid) {
+                        try { localStorage.setItem(`ttc_guestName_${sid}`, nameInput.trim().slice(0, 30)); } catch {}
+                      }
+                      setStatus("entering");
+                      setTimeout(() => setStatus("branding"), 800);
+                    }}
+                    disabled={nameInput.trim().length === 0}
+                    className={`flex-1 py-3 rounded-xl font-extrabold text-sm uppercase tracking-wider active:scale-95 transition ${
+                      nameInput.trim().length === 0
+                        ? "bg-white/10 text-white/30 cursor-not-allowed"
+                        : "bg-ocean-500 text-white shadow-lg shadow-ocean-500/30"
+                    }`}
+                  >
+                    {lang === "ar" ? "تابع" : "Continue"}
+                  </button>
+                </div>
               </motion.div>
             )}
 

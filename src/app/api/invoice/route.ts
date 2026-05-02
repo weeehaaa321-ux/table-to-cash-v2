@@ -40,6 +40,8 @@ export async function GET(request: NextRequest) {
       paymentMethod: string | null;
       items: InvoiceItem[];
       subtotal: number;
+      guestNumber: number | null;
+      guestName: string | null;
     };
 
     // Group by paidAt — one round per settlement event.
@@ -74,12 +76,23 @@ export async function GET(request: NextRequest) {
             });
           }
         }
+        // A round is the set of orders settled together (same paidAt).
+        // For guest-by-guest pay, all orders in one round will share
+        // the same guestNumber / guestName because the cashier confirms
+        // one guest at a time. Take the first non-null value for each.
+        const guestNumber =
+          group.find((o) => o.guestNumber != null)?.guestNumber ?? null;
+        const guestName =
+          group.find((o) => (o as { guestName?: string | null }).guestName)
+            ?.guestName ?? null;
         return {
           index: i + 1,
           paidAt,
           paymentMethod: group[0].paymentMethod ?? null,
           items,
           subtotal: Math.round(subtotal),
+          guestNumber,
+          guestName,
         };
       });
 

@@ -12,6 +12,8 @@ export type SessionRound = {
   paymentMethod: string | null;
   subtotal: number;
   orderCount: number;
+  guestNumber: number | null;
+  guestName: string | null;
 };
 
 export function computeSessionRounds(
@@ -20,6 +22,8 @@ export function computeSessionRounds(
     status: string;
     paymentMethod: string | null;
     paidAt: Date | null;
+    guestNumber?: number | null;
+    guestName?: string | null;
   }[]
 ): SessionRound[] {
   const paid = orders.filter((o) => o.paidAt && o.status !== "CANCELLED");
@@ -37,5 +41,7 @@ export function computeSessionRounds(
       paymentMethod: group[0].paymentMethod ?? null,
       subtotal: Math.round(group.reduce((s, o) => s + o.total, 0)),
       orderCount: group.length,
+      guestNumber: group.find((o) => o.guestNumber != null)?.guestNumber ?? null,
+      guestName: group.find((o) => o.guestName)?.guestName ?? null,
     }));
 }

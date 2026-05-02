@@ -8,6 +8,7 @@ export type ReceiptOrder = {
   orderNumber: number;
   total: number;
   guestNumber?: number | null;
+  guestName?: string | null;
   items: ReceiptOrderItem[];
 };
 
@@ -36,16 +37,22 @@ export function downloadReceiptImage(data: MultiRoundReceiptData) {
   const L = (en: string, ar: string) => (isAr ? ar : en);
 
   // Per-guest breakdown across every round so split-check dinners can
-  // see who owes what at a glance. Guest 0 = unassigned.
-  const perGuestMap = new Map<number, number>();
+  // see who owes what at a glance. Guest 0 = unassigned. Names take
+  // precedence over numbers when both exist (later-bound names from a
+  // single guest still aggregate by their guestNumber, so we just
+  // remember the first non-empty name seen for that number).
+  const perGuestMap = new Map<number, { total: number; name: string | null }>();
   for (const r of data.rounds) {
     for (const o of r.orders) {
       const g = o.guestNumber && o.guestNumber > 0 ? o.guestNumber : 0;
-      perGuestMap.set(g, (perGuestMap.get(g) ?? 0) + o.total);
+      const cur = perGuestMap.get(g) ?? { total: 0, name: null };
+      cur.total += o.total;
+      if (!cur.name && o.guestName && o.guestName.trim()) cur.name = o.guestName.trim();
+      perGuestMap.set(g, cur);
     }
   }
   const perGuest = Array.from(perGuestMap.entries())
-    .map(([guest, total]) => ({ guest, total }))
+    .map(([guest, v]) => ({ guest, total: v.total, name: v.name }))
     .sort((a, b) => a.guest - b.guest);
   const hasPerGuest = perGuest.length > 1 || (perGuest[0]?.guest ?? 0) > 0;
 
@@ -135,8 +142,13 @@ export function downloadReceiptImage(data: MultiRoundReceiptData) {
     for (const o of round.orders) {
       ctx.fillStyle = "#64748b";
       ctx.font = "800 11px -apple-system, system-ui, sans-serif";
+      const guestTag = o.guestName && o.guestName.trim()
+        ? o.guestName.trim()
+        : (o.guestNumber && o.guestNumber > 0
+          ? L(`G${o.guestNumber}`, `ضيف ${o.guestNumber}`)
+          : "");
       const header = L(`ORDER #${o.orderNumber}`, `طلب #${o.orderNumber}`)
-        + (o.guestNumber && o.guestNumber > 0 ? `   ·   G${o.guestNumber}` : "");
+        + (guestTag ? `   ·   ${guestTag}` : "");
       ctx.fillText(header.toUpperCase(), PAD, y + 8);
       y += 22;
 
@@ -189,10 +201,12 @@ export function downloadReceiptImage(data: MultiRoundReceiptData) {
     ctx.fillText(L("PER GUEST", "لكل ضيف"), PAD, y + 10);
     y += 18;
     ctx.font = "500 12px -apple-system, system-ui, sans-serif";
-    for (const { guest, total } of perGuest) {
-      const label = guest > 0
-        ? L(`Guest ${guest}`, `الضيف ${guest}`)
-        : L("Unassigned", "غير محدد");
+    for (const { guest, total, name } of perGuest) {
+      const label = name && name.trim()
+        ? name
+        : guest > 0
+          ? L(`Guest ${guest}`, `الضيف ${guest}`)
+          : L("Unassigned", "غير محدد");
       ctx.fillStyle = "#64748b";
       ctx.fillText(label, PAD + 8, y + 10);
       ctx.textAlign = "right";

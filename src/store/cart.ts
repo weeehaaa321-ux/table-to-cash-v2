@@ -10,6 +10,7 @@ type CartStore = {
   sessionId: string | null;
   isSessionOwner: boolean;
   guestNumber: number;
+  guestName: string | null;
   hasPaymentAuthority: boolean;
   language: string;
   orderType: "TABLE" | "VIP_DINE_IN" | "DELIVERY";
@@ -25,6 +26,7 @@ type CartStore = {
   setSessionId: (sessionId: string) => void;
   setIsSessionOwner: (isOwner: boolean) => void;
   setGuestNumber: (n: number) => void;
+  setGuestName: (name: string | null) => void;
   setHasPaymentAuthority: (has: boolean) => void;
   setLanguage: (lang: string) => void;
   setOrderType: (type: "TABLE" | "VIP_DINE_IN" | "DELIVERY") => void;
@@ -61,6 +63,17 @@ export const useCart = create<CartStore>((set, get) => ({
   sessionId: getPersistedSession().sessionId,
   isSessionOwner: getPersistedSession().isSessionOwner,
   guestNumber: typeof window !== "undefined" ? parseInt(sessionStorage.getItem("ttc_guestNumber") || "0", 10) : 0,
+  guestName: (() => {
+    if (typeof window === "undefined") return null;
+    try {
+      const sid = sessionStorage.getItem("ttc_sessionId") || localStorage.getItem("ttc_sessionId");
+      if (!sid) return null;
+      // Session-scoped key so a name from a past table doesn't leak
+      // into a brand-new session when the same browser scans a
+      // different QR.
+      return localStorage.getItem(`ttc_guestName_${sid}`) || null;
+    } catch { return null; }
+  })(),
   hasPaymentAuthority: false,
   language: "en",
   orderType: "TABLE",
@@ -90,6 +103,21 @@ export const useCart = create<CartStore>((set, get) => ({
   setGuestNumber: (guestNumber) => {
     set({ guestNumber });
     if (typeof window !== "undefined") try { sessionStorage.setItem("ttc_guestNumber", String(guestNumber)); } catch {}
+  },
+  setGuestName: (guestName) => {
+    // Trim and cap at 30 chars so the receipt thermal-printer width
+    // and floor-manager card layout stay consistent. Empty/whitespace
+    // becomes null which makes downstream UIs fall back to "Guest #N".
+    const cleaned = guestName ? guestName.trim().slice(0, 30) : "";
+    const next = cleaned.length > 0 ? cleaned : null;
+    set({ guestName: next });
+    if (typeof window !== "undefined") try {
+      const sid = get().sessionId;
+      if (sid) {
+        if (next) localStorage.setItem(`ttc_guestName_${sid}`, next);
+        else localStorage.removeItem(`ttc_guestName_${sid}`);
+      }
+    } catch {}
   },
   setHasPaymentAuthority: (hasPaymentAuthority) => set({ hasPaymentAuthority }),
   setLanguage: (language) => set({ language }),

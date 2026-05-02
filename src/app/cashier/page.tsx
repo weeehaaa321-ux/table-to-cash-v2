@@ -27,6 +27,8 @@ type PaidRoundInfo = {
   paymentMethod: string | null;
   subtotal: number;
   orderCount: number;
+  guestNumber?: number | null;
+  guestName?: string | null;
 };
 
 type SessionInfo = {
@@ -98,6 +100,8 @@ type InvoiceRound = {
   paymentMethod: string | null;
   items: InvoiceItem[];
   subtotal: number;
+  guestNumber?: number | null;
+  guestName?: string | null;
 };
 type InvoiceData = {
   restaurantName: string;
@@ -238,6 +242,18 @@ function printInvoice(inv: InvoiceData): boolean {
   const currentItems = current?.items ?? inv.items;
   const currentSubtotal = current?.subtotal ?? inv.total;
   const currentMethod = current?.paymentMethod ?? inv.paymentMethod;
+  // Per-round guest label — name when the guest entered one at scan
+  // time, fall back to "Guest N", or empty when neither is known
+  // (walk-in/owner-only). Stays on the printed paper alongside the
+  // payment method so a cashier with multiple rounds can match each
+  // receipt back to which guest paid for it.
+  const guestLabelFor = (r: { guestName?: string | null; guestNumber?: number | null } | undefined): string => {
+    if (!r) return "";
+    if (r.guestName && r.guestName.trim()) return r.guestName.trim();
+    if (r.guestNumber && r.guestNumber > 0) return `Guest ${r.guestNumber}`;
+    return "";
+  };
+  const currentGuest = guestLabelFor(current);
 
   const isMultiRound = rounds.length > 1;
   const roundLabel = isMultiRound
@@ -248,11 +264,15 @@ function printInvoice(inv: InvoiceData): boolean {
   <div class="divider"></div>
   <div style="font-size:10px;color:#444;margin:4px 0 2px;"><b>Previously paid on this table:</b></div>
   <table>
-    ${prior.map((r) => `
+    ${prior.map((r) => {
+      const g = guestLabelFor(r);
+      const meta = [r.paymentMethod, g].filter(Boolean).join(" · ");
+      return `
       <tr>
-        <td style="font-size:11px;text-align:left;padding:1px 0;">Round ${r.index}${r.paymentMethod ? ` · ${r.paymentMethod}` : ""}</td>
+        <td style="font-size:11px;text-align:left;padding:1px 0;">Round ${r.index}${meta ? ` · ${escapeHtml(meta)}` : ""}</td>
         <td style="font-size:11px;text-align:right;padding:1px 0;">${r.subtotal} ${inv.currency}</td>
-      </tr>`).join("")}
+      </tr>`;
+    }).join("")}
     <tr>
       <td style="font-size:11px;text-align:left;padding-top:3px;border-top:1px dashed #999;"><b>Lifetime total</b></td>
       <td style="font-size:11px;text-align:right;padding-top:3px;border-top:1px dashed #999;"><b>${inv.total} ${inv.currency}</b></td>
@@ -312,6 +332,7 @@ function printInvoice(inv: InvoiceData): boolean {
       <td style="text-align:right;">${currentSubtotal} ${inv.currency}</td>
     </tr>
     ${currentMethod ? `<tr><td style="font-size:11px;text-align:left;padding-top:4px;">Paid by</td><td style="font-size:11px;text-align:right;padding-top:4px;">${currentMethod}</td></tr>` : ""}
+    ${currentGuest ? `<tr><td style="font-size:11px;text-align:left;padding-top:2px;">Guest</td><td style="font-size:11px;text-align:right;padding-top:2px;">${escapeHtml(currentGuest)}</td></tr>` : ""}
   </table>
 
   ${priorBlock}

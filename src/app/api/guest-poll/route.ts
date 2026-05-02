@@ -124,6 +124,7 @@ export async function GET(request: NextRequest) {
         paymentMethod: o.paymentMethod || null,
         paidAt: o.paidAt ? o.paidAt.toISOString() : null,
         guestNumber: o.guestNumber ?? null,
+        guestName: o.guestName ?? null,
         createdAt: o.createdAt.toISOString(),
         items: o.items.map((it) => ({
           name: it.menuItem?.name || "Item",
@@ -140,6 +141,7 @@ export async function GET(request: NextRequest) {
             status: singleOrder.status,
             total: toNum(singleOrder.total),
             guestNumber: singleOrder.guestNumber ?? null,
+            guestName: singleOrder.guestName ?? null,
             items: singleOrder.items.map((it) => ({
               name: it.menuItem?.name || "Item",
               quantity: it.quantity,

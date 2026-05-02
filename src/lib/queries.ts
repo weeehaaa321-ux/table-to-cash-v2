@@ -119,6 +119,7 @@ export async function createOrder(data: {
   language?: string;
   notes?: string;
   guestNumber?: number;
+  guestName?: string;
   clientRequestId?: string;
   orderType?: string;
   vipGuestId?: string;
@@ -166,6 +167,7 @@ export async function createOrder(data: {
         items: mergedItems,
         total: mergedTotal,
         guestNumber: existing.guestNumber,
+        guestName: existing.guestName ?? null,
         createdAt: existing.createdAt.toISOString(),
         groupId: existing.groupId,
       };
@@ -308,6 +310,7 @@ export async function createOrder(data: {
           language: data.language || "en",
           notes: data.notes,
           guestNumber: data.guestNumber && data.guestNumber > 0 ? data.guestNumber : null,
+          guestName: data.guestName && data.guestName.trim() ? data.guestName.trim().slice(0, 30) : null,
           station: bucket.station,
           groupId,
           // Only the first sub-order carries the idempotency key — split
@@ -355,6 +358,7 @@ export async function createOrder(data: {
     items: mergedItems,
     total: mergedTotal,
     guestNumber: primary.guestNumber,
+    guestName: primary.guestName ?? null,
     createdAt: primary.createdAt.toISOString(),
     groupId,
   };
@@ -408,6 +412,7 @@ export async function getOrdersForRestaurant(
     orderType: o.orderType,
     vipGuestName: o.vipGuest?.name ?? null,
     guestNumber: o.guestNumber ?? null,
+    guestName: o.guestName ?? null,
     deliveryStatus: o.deliveryStatus ?? null,
     readyAt: o.readyAt ? o.readyAt.toISOString() : null,
     servedAt: o.servedAt ? o.servedAt.toISOString() : null,
@@ -465,6 +470,7 @@ export async function getOrdersForSession(sessionId: string) {
     station: o.station,
     groupId: o.groupId || null,
     guestNumber: o.guestNumber ?? null,
+    guestName: o.guestName ?? null,
     notes: o.notes || null,
     items: o.items.map((oi) => ({
       id: oi.id,

@@ -54,6 +54,7 @@ export async function POST(request: NextRequest) {
       language: body.language,
       notes: body.notes,
       guestNumber: typeof body.guestNumber === "number" ? body.guestNumber : undefined,
+      guestName: typeof body.guestName === "string" ? body.guestName : undefined,
       clientRequestId: typeof body.clientRequestId === "string" ? body.clientRequestId : undefined,
       orderType: body.orderType,
       vipGuestId: body.vipGuestId,

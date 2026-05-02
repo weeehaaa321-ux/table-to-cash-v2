@@ -143,6 +143,7 @@ function TrackPage() {
     paymentMethod?: string | null;
     paidAt?: string | null;
     guestNumber?: number | null;
+    guestName?: string | null;
     items: { name: string; quantity: number; price: number }[];
   }[]>([]);
 
@@ -166,6 +167,7 @@ function TrackPage() {
   const [dbOrder, setDbOrder] = useState<{
     id: string; orderNumber: number; status: string; total: number;
     guestNumber?: number | null;
+    guestName?: string | null;
     items: { name: string; quantity: number; price: number }[];
   } | null>(null);
 
@@ -177,6 +179,7 @@ function TrackPage() {
     orders: {
       id: string; orderNumber: number; total: number;
       guestNumber?: number | null;
+      guestName?: string | null;
       items: { name: string; quantity: number; price: number }[];
     }[];
     tipAmount: number;
@@ -312,6 +315,7 @@ function TrackPage() {
           paymentMethod: string | null;
           paidAt: string | null;
           guestNumber: number | null;
+          guestName: string | null;
           items: { name: string; quantity: number; price: number }[];
         };
         const mapped: MappedOrder[] = (data.orders || []).map((o: {
@@ -319,6 +323,7 @@ function TrackPage() {
           paymentMethod?: string | null;
           paidAt?: string | null;
           guestNumber?: number | null;
+          guestName?: string | null;
           items: { name: string; quantity: number; price: number }[];
         }) => ({
           id: o.id,
@@ -328,6 +333,7 @@ function TrackPage() {
           paymentMethod: o.paymentMethod || null,
           paidAt: o.paidAt || null,
           guestNumber: o.guestNumber ?? null,
+          guestName: o.guestName ?? null,
           items: o.items,
         }));
         setSessionOrders(mapped);
@@ -366,6 +372,7 @@ function TrackPage() {
               orderNumber: o.orderNumber,
               total: o.total,
               guestNumber: o.guestNumber,
+              guestName: o.guestName,
               items: o.items,
             })),
             tipAmount,
@@ -404,6 +411,7 @@ function TrackPage() {
             status: data.trackedOrder.status?.toLowerCase() || "pending",
             total: data.trackedOrder.total,
             guestNumber: data.trackedOrder.guestNumber ?? null,
+            guestName: data.trackedOrder.guestName ?? null,
             items: data.trackedOrder.items,
           });
         }
@@ -443,6 +451,7 @@ function TrackPage() {
   type TrackOrder = {
     id: string; orderNumber: number; status: string; total: number;
     guestNumber?: number | null;
+    guestName?: string | null;
     paidAt?: string | null;
     items: { name: string; quantity: number; price: number }[];
   };
@@ -758,11 +767,11 @@ function TrackPage() {
                   <h3 className="text-sm font-bold text-text-primary flex items-center gap-2 flex-wrap">
                     Order #{ord.orderNumber}
                     {ord.guestNumber && ord.guestNumber > 0 && (
-                      <span className="inline-flex items-center gap-1 text-[9px] font-bold text-ocean-600 bg-ocean-50 border border-ocean-100 rounded-full px-2 py-0.5 uppercase tracking-wider">
-                        <svg className="w-2.5 h-2.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                      <span className="inline-flex items-center gap-1 text-[9px] font-bold text-ocean-600 bg-ocean-50 border border-ocean-100 rounded-full px-2 py-0.5 uppercase tracking-wider max-w-[10rem]">
+                        <svg className="w-2.5 h-2.5 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
                           <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 6a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0zM4.501 20.118a7.5 7.5 0 0114.998 0A17.933 17.933 0 0112 21.75c-2.676 0-5.216-.584-7.499-1.632z" />
                         </svg>
-                        G{ord.guestNumber}
+                        <span className="truncate">{ord.guestName && ord.guestName.trim() ? ord.guestName : `G${ord.guestNumber}`}</span>
                       </span>
                     )}
                     {/* Walk-up paid badge — prevents the guest from
@@ -954,19 +963,30 @@ function TrackPage() {
                     <div className="flex gap-2 flex-wrap mb-3">
                       {Array.from({ length: sessionGuestCount }, (_, i) => i + 1)
                         .filter((g) => g !== (guestNumber > 0 ? guestNumber : 1))
-                        .map((g) => (
-                          <button
-                            key={g}
-                            onClick={() => setDelegateGuest(g)}
-                            className={`px-4 py-2 rounded-xl text-sm font-bold border-2 transition-all ${
-                              delegateGuest === g
-                                ? "border-ocean-500 bg-ocean-50 text-ocean-700"
-                                : "border-sand-200 bg-white text-text-secondary"
-                            }`}
-                          >
-                            Guest {g}
-                          </button>
-                        ))}
+                        .map((g) => {
+                          // Pull a friendly label from any order this guest
+                          // already placed under their name. Falls back to
+                          // "Guest N" for guests who haven't ordered (or who
+                          // skipped the name prompt).
+                          const named = sessionOrders.find(
+                            (o) => o.guestNumber === g && o.guestName && o.guestName.trim(),
+                          );
+                          const label = named?.guestName?.trim()
+                            || (lang === "ar" ? `الضيف ${g}` : `Guest ${g}`);
+                          return (
+                            <button
+                              key={g}
+                              onClick={() => setDelegateGuest(g)}
+                              className={`px-4 py-2 rounded-xl text-sm font-bold border-2 transition-all max-w-[10rem] truncate ${
+                                delegateGuest === g
+                                  ? "border-ocean-500 bg-ocean-50 text-ocean-700"
+                                  : "border-sand-200 bg-white text-text-secondary"
+                              }`}
+                            >
+                              {label}
+                            </button>
+                          );
+                        })}
                     </div>
                     {delegateGuest && (
                       <button
@@ -993,7 +1013,15 @@ function TrackPage() {
                         }}
                         className="w-full py-2.5 rounded-xl bg-ocean-500 text-white text-sm font-bold"
                       >
-                        {isDelegating ? "..." : lang === "ar" ? `تفويض الضيف ${delegateGuest}` : `Delegate to Guest ${delegateGuest}`}
+                        {(() => {
+                          if (isDelegating) return "...";
+                          const named = sessionOrders.find(
+                            (o) => o.guestNumber === delegateGuest && o.guestName && o.guestName.trim(),
+                          );
+                          const target = named?.guestName?.trim()
+                            || (lang === "ar" ? `الضيف ${delegateGuest}` : `Guest ${delegateGuest}`);
+                          return lang === "ar" ? `تفويض ${target}` : `Delegate to ${target}`;
+                        })()}
                       </button>
                     )}
                   </div>
@@ -1012,8 +1040,8 @@ function TrackPage() {
                             <span className="flex items-center gap-1.5">
                               Order #{o.orderNumber} ({o.items.length} items)
                               {o.guestNumber && o.guestNumber > 0 && (
-                                <span className="inline-flex items-center text-[9px] font-bold text-ocean-600 bg-ocean-50 border border-ocean-100 rounded-full px-1.5 py-px">
-                                  G{o.guestNumber}
+                                <span className="inline-flex items-center text-[9px] font-bold text-ocean-600 bg-ocean-50 border border-ocean-100 rounded-full px-1.5 py-px max-w-[8rem] truncate">
+                                  {o.guestName && o.guestName.trim() ? o.guestName : `G${o.guestNumber}`}
                                 </span>
                               )}
                             </span>

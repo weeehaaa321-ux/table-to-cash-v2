@@ -137,6 +137,7 @@ model Order {
   servedAt     DateTime?
   notes        String?
   guestNumber  Int?
+  guestName    String?
   language     String      @default("en")
   station      Station     @default(KITCHEN)
   groupId      String?
