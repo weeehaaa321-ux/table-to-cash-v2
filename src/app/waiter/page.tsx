@@ -25,6 +25,7 @@ import {
 } from "@/lib/notifications";
 import { staffFetch } from "@/lib/staff-fetch";
 import { startPoll } from "@/lib/polling";
+import { localizedMessageText } from "@/lib/localize-message";
 
 // ═══════════════════════════════════════════════
 // CONSTANTS + HELPERS
@@ -1204,7 +1205,7 @@ function OwnerMessageBanner({
   messages: OwnerMessage[];
   onDismiss: (id: string) => void;
 }) {
-  const { t } = useLanguage();
+  const { t, lang } = useLanguage();
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const playedRef = useRef<Set<string>>(new Set());
 
@@ -1269,7 +1270,7 @@ function OwnerMessageBanner({
                 {msg.type === "voice" ? t("waiter.voiceNoteFromOwner") : msg.command === "call_waiter" ? t("waiter.guestCalling") : msg.command?.startsWith("shift_reminder") ? t("waiter.shiftReminder") : msg.command?.startsWith("settle_cash") ? t("waiter.cashSettlement") : t("waiter.ownerCommand")}
               </p>
               <p className={`text-xs ${msg.type === "voice" ? "text-status-wait-600" : msg.command === "call_waiter" ? "text-status-warn-700" : msg.command?.startsWith("settle_cash") ? "text-status-good-700" : "text-status-warn-700"}`}>
-                {msg.text}
+                {localizedMessageText(msg, lang as "en" | "ar")}
               </p>
               {msg.type === "voice" && msg.audio && (
                 <button

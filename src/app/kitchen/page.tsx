@@ -6,6 +6,7 @@ import { usePerception, type LiveOrder } from "@/lib/engine/perception";
 import { useLiveData } from "@/lib/use-live-data";
 import { useMenu } from "@/store/menu";
 import { useLanguage } from "@/lib/use-language";
+import { localizedMessageText } from "@/lib/localize-message";
 import { LanguageToggle } from "@/presentation/components/ui/LanguageToggle";
 import LogoutButton from "@/presentation/components/ui/LogoutButton";
 import type { Lang } from "@/i18n";
@@ -646,7 +647,7 @@ function KitchenSystem({ staff }: { staff: StaffInfo }) {
   const [now, setNow] = useState(0);
   const [kitchenConfig, setKitchenConfigState] = useState<KitchenConfig>(DEFAULT_KITCHEN_CONFIG);
   const [dismissedAlerts, setDismissedAlerts] = useState<Set<string>>(new Set());
-  const [ownerMessages, setOwnerMessages] = useState<{ id: string; type: string; text?: string; audio?: string; createdAt: number }[]>([]);
+  const [ownerMessages, setOwnerMessages] = useState<{ id: string; type: string; text?: string; audio?: string; command?: string | null; tableId?: number | null; orderId?: string | null; createdAt: number }[]>([]);
   const [dismissedMessages, setDismissedMessages] = useState<Set<string>>(new Set());
   const [activeTab, setActiveTab] = useState<"orders" | "menu">("orders");
   const lastMsgPoll = useRef(Date.now());
@@ -909,7 +910,10 @@ function KitchenSystem({ staff }: { staff: StaffInfo }) {
                 <span className="text-lg">{msg.type === "voice" ? "🎙" : "📢"}</span>
                 <div className="flex-1 min-w-0">
                   <p className="text-xs font-bold text-status-wait-800">{msg.type === "voice" ? t("kitchen.voiceNote") : t("kitchen.ownerMessage")}</p>
-                  {msg.text && <p className="text-xs text-status-wait-600 truncate">{msg.text}</p>}
+                  {(() => {
+                    const body = localizedMessageText(msg, lang as "en" | "ar");
+                    return body ? <p className="text-xs text-status-wait-600 truncate">{body}</p> : null;
+                  })()}
                   {msg.type === "voice" && msg.audio && (
                     <button
                       onClick={() => { const a = new Audio(msg.audio!); a.play().catch(() => {}); }}
