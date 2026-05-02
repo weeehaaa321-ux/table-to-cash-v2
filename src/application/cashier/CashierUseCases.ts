@@ -52,6 +52,12 @@ export class CashierUseCases {
   }
 
   async sumCashSince(restaurantId: string, since: Date): Promise<number> {
+    // Expected cash = order totals + tips that were collected in cash.
+    // The tip column is per-order and gets stamped at confirmPayRound;
+    // for a CASH-paid order the cashier physically takes home total+tip,
+    // so the drawer must expect both. Without the tip term, every
+    // cash-tipped shift comes out positive-variance and the cashier
+    // can't tell theft from gratuity.
     const agg = await db.order.aggregate({
       where: {
         restaurantId,
@@ -59,10 +65,11 @@ export class CashierUseCases {
         paidAt: { gte: since },
         status: { not: "CANCELLED" },
       },
-      _sum: { total: true },
+      _sum: { total: true, tip: true },
     });
-    const t = agg._sum.total;
-    return t == null ? 0 : Number(t);
+    const total = agg._sum.total == null ? 0 : Number(agg._sum.total);
+    const tip = agg._sum.tip == null ? 0 : Number(agg._sum.tip);
+    return total + tip;
   }
 
   async createOpenDrawer(input: { restaurantId: string; cashierId: string; openingFloat: number }) {

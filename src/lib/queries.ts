@@ -449,6 +449,33 @@ export async function getOrdersForSession(sessionId: string) {
   }));
 }
 
+// Allowed prior statuses for each target. Acts as a state-machine
+// guard so a stale/queued PATCH on a flaky tablet can't, say, flip a
+// CANCELLED order back to READY (kitchen offline at cancel time, its
+// queued "ready" arrives 5 s later — we don't want food cooked
+// against a row the floor manager already voided).
+//
+// PAID accepts any pre-PAID/pre-CANCELLED state so the cashier-walk-up
+// case (confirm before food is served) keeps working. CANCELLED can
+// fire from any pre-served state but never from SERVED/PAID — those
+// represent food a customer actually received and revenue we already
+// booked.
+const STATUS_LEGAL_PRIORS: Record<string, string[]> = {
+  PENDING: [],
+  CONFIRMED: ["PENDING"],
+  PREPARING: ["PENDING", "CONFIRMED"],
+  READY: ["PENDING", "CONFIRMED", "PREPARING"],
+  SERVED: ["READY", "PREPARING", "CONFIRMED"],
+  PAID: ["PENDING", "CONFIRMED", "PREPARING", "READY", "SERVED"],
+  CANCELLED: ["PENDING", "CONFIRMED", "PREPARING", "READY"],
+};
+
+export class StaleStatusTransitionError extends Error {
+  constructor(message = "STALE_TRANSITION") {
+    super(message);
+  }
+}
+
 export async function updateOrderStatus(
   orderId: string,
   status: string,
@@ -483,8 +510,21 @@ export async function updateOrderStatus(
     ? { subtotal: 0, total: 0, paymentMethod: null, tip: 0, deliveryFee: 0 }
     : {};
 
-  const order = await db.order.update({
-    where: { id: orderId, restaurantId },
+  const legalPriors = STATUS_LEGAL_PRIORS[status];
+  if (!legalPriors) {
+    throw new StaleStatusTransitionError(`Unknown target status: ${status}`);
+  }
+
+  // updateMany lets us combine the id/restaurant filter with the
+  // legal-prior filter atomically, so two concurrent transitions
+  // race against each other on the database row instead of
+  // last-writer-wins on the application side.
+  const updateResult = await db.order.updateMany({
+    where: {
+      id: orderId,
+      restaurantId,
+      status: { in: legalPriors as never[] },
+    },
     data: {
       status: status as never,
       paidAt: paidAtValue,
@@ -493,10 +533,21 @@ export async function updateOrderStatus(
       ...(notes !== undefined ? { notes } : {}),
       ...cancelExtras,
     },
+  });
+
+  if (updateResult.count === 0) {
+    // Either the order doesn't exist in this restaurant, or the
+    // current status isn't a legal prior for the requested
+    // transition. Caller turns this into a 409 STALE_TRANSITION.
+    throw new StaleStatusTransitionError();
+  }
+
+  const order = await db.order.findUnique({
+    where: { id: orderId },
     select: { id: true, status: true, orderNumber: true, notes: true },
   });
 
-  return order;
+  return order!;
 }
 
 // ─── Append Items to Order ──────────────────────
@@ -576,9 +627,21 @@ export async function appendItemsToOrder(
       allItems.reduce((sum, i) => sum + toNum(i.price) * i.quantity, 0)
     );
 
+    // Preserve the delivery fee in `total`. Without re-reading
+    // orderType + deliveryFee, the earlier code stripped the fee
+    // whenever items were appended to a delivery order — the rider
+    // page (which derives subtotal as total − deliveryFee) then
+    // rendered a negative subtotal, and the cashier under-collected
+    // by the fee amount.
+    const orderRow = await tx.order.findUnique({
+      where: { id: orderId },
+      select: { orderType: true, deliveryFee: true },
+    });
+    const fee = orderRow?.orderType === "DELIVERY" ? toNum(orderRow.deliveryFee) : 0;
+
     return tx.order.update({
       where: { id: orderId },
-      data: { subtotal: newSubtotal, total: newSubtotal },
+      data: { subtotal: newSubtotal, total: newSubtotal + fee },
       include: {
         items: {
           include: { menuItem: { select: { name: true, image: true } } },

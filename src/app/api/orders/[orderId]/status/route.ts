@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { useCases } from "@/infrastructure/composition";
-import { closeSessionForOrder } from "@/lib/queries";
+import { closeSessionForOrder, StaleStatusTransitionError } from "@/lib/queries";
 import { sendPushToStaff, sendPushToRole } from "@/lib/web-push";
 import { getShiftTimer } from "@/lib/shifts";
 import { requireStaffAuth } from "@/lib/api-auth";
@@ -143,6 +143,17 @@ export async function PATCH(
 
     return NextResponse.json(order);
   } catch (err) {
+    if (err instanceof StaleStatusTransitionError) {
+      // Order has moved on (or is gone) since the caller decided to
+      // PATCH. Examples: a kitchen tablet's queued "READY" arriving
+      // after the floor manager cancelled the order, or a SERVED
+      // double-tap on an already-PAID order. 409 = "your view of
+      // this resource is stale, refresh and retry."
+      return NextResponse.json(
+        { error: "STALE_TRANSITION", message: "This order's status has already moved." },
+        { status: 409 }
+      );
+    }
     console.error("Order status update failed:", err);
     return NextResponse.json(
       { error: "Failed to update order status" },

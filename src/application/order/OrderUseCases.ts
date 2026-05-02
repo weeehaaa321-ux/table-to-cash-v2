@@ -73,7 +73,7 @@ export class OrderUseCases {
         where: { orderId, cancelled: false, comped: false },
         select: { price: true, quantity: true },
       });
-      const newTotal = Math.round(
+      const newSubtotal = Math.round(
         effective.reduce((s, i) => s + toNum(i.price) * i.quantity, 0),
       );
 
@@ -82,18 +82,36 @@ export class OrderUseCases {
       });
 
       if (anyActive === 0) {
+        // Whole order is gone — zero everything money-shaped including
+        // the delivery fee column itself, since the customer pays for
+        // nothing.
         await tx.order.update({
           where: { id: orderId },
-          data: { status: "CANCELLED", subtotal: 0, total: 0 },
+          data: { status: "CANCELLED", subtotal: 0, total: 0, deliveryFee: 0 },
         });
       } else {
+        // Partial cancel/comp — recompute total but keep the delivery
+        // fee on top. Without re-reading orderType + deliveryFee, the
+        // earlier code stripped the fee from total whenever items were
+        // edited on a delivery order — visible bug on /delivery
+        // (subtotal rendered as total − fee, went negative) and an
+        // under-charge for the cashier.
+        const order = await tx.order.findUnique({
+          where: { id: orderId },
+          select: { orderType: true, deliveryFee: true },
+        });
+        const fee = order?.orderType === "DELIVERY" ? toNum(order.deliveryFee) : 0;
         await tx.order.update({
           where: { id: orderId },
-          data: { subtotal: newTotal, total: newTotal },
+          data: { subtotal: newSubtotal, total: newSubtotal + fee },
         });
       }
 
-      return { newTotal, action, allCancelled: anyActive === 0 };
+      return {
+        newTotal: newSubtotal,
+        action,
+        allCancelled: anyActive === 0,
+      };
     });
   }
 

@@ -151,6 +151,11 @@ async function tryAgentPrint(sessionId: string): Promise<boolean> {
 }
 
 function printInvoice(inv: InvoiceData) {
+  // RECEIPT POLICY: print order items + their TOTAL only. Never show a
+  // tip line. Tip is a private cashier↔guest matter and stays in the
+  // app; the printed paper is for the customer's records of what they
+  // ordered. The TOTAL below is `current.subtotal` which is sum of
+  // Order.total — already excludes tip by design.
   const rounds = inv.rounds || [];
   // The receipt prints at the moment of settlement — so the "current"
   // round is always the most recent one. Older rounds fold into a
