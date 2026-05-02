@@ -16,7 +16,7 @@ type SubscribeInput = {
 export class PushSubscriptionUseCases {
   async subscribe(data: SubscribeInput) {
     const lang = data.lang === "ar" ? "ar" : "en";
-    return db.pushSubscription.upsert({
+    const result = await db.pushSubscription.upsert({
       where: { endpoint: data.endpoint },
       create: { ...data, lang },
       update: {
@@ -27,6 +27,18 @@ export class PushSubscriptionUseCases {
         lang,
       },
     });
+    // Stale-endpoint cleanup, copied from v1's working flow:
+    // when a staff logs in on a new browser/phone, the old
+    // subscription endpoint is dead but stays in the DB and
+    // sendPushToStaff would still try (and fail) to deliver to
+    // it. Remove every other subscription this staff had so
+    // sends only target the live device.
+    if (data.staffId) {
+      await db.pushSubscription.deleteMany({
+        where: { staffId: data.staffId, endpoint: { not: data.endpoint } },
+      });
+    }
+    return result;
   }
 
   async unsubscribe(endpoint: string) {
