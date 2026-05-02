@@ -402,7 +402,7 @@
   </div>
 
   <!-- ════ STEP 2 — PRINTER ═════════════════════ -->
-  <div class="step printer" data-step="2" data-total="11">
+  <div class="step printer" data-step="2" data-total="12">
     <div class="step-head">
       <div class="step-num"><span>2</span></div>
       <div style="flex:1">
@@ -503,27 +503,51 @@
       <div class="substep" data-id="2-7">
         <div class="substep-check"></div>
         <div class="substep-body">
-          <b>Install the service <span class="machine-tag cashier">cashier PC</span></b>
+          <b>Find the real path to <code>node.exe</code> <span class="machine-tag cashier">cashier PC</span></b>
+          <p>The Node installer puts <code>node.exe</code> in different places depending on whether it was installed "for all users" (<code>C:\Program Files\nodejs\</code>) or "for me only" (<code>%LOCALAPPDATA%\Programs\nodejs\</code>). The NSSM service runs as LocalSystem and can only see the all-users path. Let's check.</p>
           <div class="code">
             <button class="copy-btn">Copy</button>
-            <pre>nssm install TTC-PrintAgent "C:\Program Files\nodejs\node.exe" "$env:USERPROFILE\Desktop\print-agent.mjs"</pre>
+            <pre>where.exe node</pre>
           </div>
+          <p>It prints the full path. Copy whatever path it shows — you'll paste it into the next command.</p>
+          <div class="warn">If it shows a path under <code>AppData\Local</code>, NSSM running as LocalSystem won't see it. <b>Reinstall Node.js with "for all users" selected</b> during the setup wizard, then re-run <code>where.exe node</code>.</div>
         </div>
       </div>
 
       <div class="substep" data-id="2-8">
         <div class="substep-check"></div>
         <div class="substep-body">
-          <b>Set printer IP and Vercel URL on the service <span class="machine-tag cashier">cashier PC</span></b>
+          <b>Install the service (paste the node.exe path from 2-7) <span class="machine-tag cashier">cashier PC</span></b>
           <div class="code">
             <button class="copy-btn">Copy</button>
-            <pre data-tpl="nssm set TTC-PrintAgent AppEnvironmentExtra &quot;PRINTER_IP={{IP}}&quot; &quot;APP_URL={{URL}}&quot;">nssm set TTC-PrintAgent AppEnvironmentExtra "PRINTER_IP={{IP}}" "APP_URL={{URL}}"</pre>
+            <pre>nssm install TTC-PrintAgent "C:\Program Files\nodejs\node.exe" "$env:USERPROFILE\Desktop\print-agent.mjs"</pre>
           </div>
-          <div class="warn" id="cfg-missing-2-8" style="display:none">⚠ Fill in <b>Printer IP</b> and <b>v2 Vercel URL</b> at the top of this page first — the command above is using placeholders.</div>
+          <p>If <code>where.exe node</code> printed a different path, edit the line above before pasting — replace <code>C:\Program Files\nodejs\node.exe</code> with what you saw.</p>
         </div>
       </div>
 
       <div class="substep" data-id="2-9">
+        <div class="substep-check"></div>
+        <div class="substep-body">
+          <b>Set the env vars + log redirect on the service <span class="machine-tag cashier">cashier PC</span></b>
+          <div class="code">
+            <button class="copy-btn">Copy</button>
+            <pre data-tpl="nssm set TTC-PrintAgent AppEnvironmentExtra &quot;PRINTER_IP={{IP}}&quot; &quot;APP_URL={{URL}}&quot;
+nssm set TTC-PrintAgent AppStdout &quot;$env:USERPROFILE\Desktop\print-agent.log&quot;
+nssm set TTC-PrintAgent AppStderr &quot;$env:USERPROFILE\Desktop\print-agent.log&quot;
+nssm set TTC-PrintAgent AppRotateFiles 1
+nssm set TTC-PrintAgent AppRotateBytes 1048576">nssm set TTC-PrintAgent AppEnvironmentExtra "PRINTER_IP={{IP}}" "APP_URL={{URL}}"
+nssm set TTC-PrintAgent AppStdout "$env:USERPROFILE\Desktop\print-agent.log"
+nssm set TTC-PrintAgent AppStderr "$env:USERPROFILE\Desktop\print-agent.log"
+nssm set TTC-PrintAgent AppRotateFiles 1
+nssm set TTC-PrintAgent AppRotateBytes 1048576</pre>
+          </div>
+          <div class="warn" id="cfg-missing-2-9" style="display:none">⚠ Fill in <b>Printer IP</b> and <b>v2 Vercel URL</b> at the top of this page first — the command above is using placeholders.</div>
+          <div class="hint">The log redirect to <code>print-agent.log</code> on the Desktop is essential — without it, when the service silently fails, you have no way to see why. The log rotates at 1 MB so it won't fill the disk.</div>
+        </div>
+      </div>
+
+      <div class="substep" data-id="2-10">
         <div class="substep-check"></div>
         <div class="substep-body">
           <b>Start the service <span class="machine-tag cashier">cashier PC</span></b>
@@ -531,16 +555,21 @@
             <button class="copy-btn">Copy</button>
             <pre>nssm start TTC-PrintAgent</pre>
           </div>
-          <p>Confirm it's running:</p>
+          <p>Confirm it's actually working — not just "Running" on paper. The agent has a health endpoint that probes the printer and returns OK only if the printer responds:</p>
           <div class="code">
             <button class="copy-btn">Copy</button>
-            <pre>Get-Service TTC-PrintAgent</pre>
+            <pre>Invoke-RestMethod http://localhost:9911/health</pre>
           </div>
-          <p>Should show <code>Running</code>. If <code>Stopped</code>, env vars are wrong — rerun sub-step 2-8 with the correct values, then start again.</p>
+          <p>You want to see <code>ok : True</code> and a <code>printer : &lt;your IP&gt;:9100</code> field. If you see <code>ok : False</code> with <code>error : unreachable</code> → printer IP wrong; redo 2-1. If the call itself fails with "connection refused" → service didn't start; check the log:</p>
+          <div class="code">
+            <button class="copy-btn">Copy</button>
+            <pre>Get-Content "$env:USERPROFILE\Desktop\print-agent.log" -Tail 30</pre>
+          </div>
+          <p>Common errors in the log: <code>PRINTER_IP env var is required</code> (you skipped 2-9), <code>Cannot find module</code> (wrong path in 2-8).</p>
         </div>
       </div>
 
-      <div class="substep" data-id="2-10">
+      <div class="substep" data-id="2-11">
         <div class="substep-check"></div>
         <div class="substep-body">
           <b>Test print from the cashier UI <span class="machine-tag cashier">cashier PC</span></b>
@@ -551,16 +580,21 @@
             <li>Click the <b>🖨</b> button on the bill</li>
             <li>Receipt prints within ~2 seconds</li>
           </ol>
+          <div class="warn">If the cashier UI says "agent unreachable" but <code>/health</code> returned OK in 2-10, the browser may be blocking HTTP-from-HTTPS. Edge/Chrome treat <code>http://localhost</code> as secure by default — if it's blocked, click the lock icon in the address bar → Site settings → Insecure content → Allow.</div>
         </div>
       </div>
 
-      <div class="substep" data-id="2-11">
+      <div class="substep" data-id="2-12">
         <div class="substep-check"></div>
         <div class="substep-body">
           <b>Reboot test — the truth test <span class="machine-tag cashier">cashier PC</span></b>
-          <p>Reboot the cashier PC. After it boots back up, open the cashier UI → click 🖨 on any bill → receipt prints.</p>
-          <p>If yes, the service is properly auto-starting. <b>This is what lets you walk away.</b></p>
-          <div class="warn">If it fails after reboot: <code>Get-Service TTC-PrintAgent</code> in Admin PowerShell. If "Stopped", run <code>nssm start TTC-PrintAgent</code>. If still failing, run <code>nssm edit TTC-PrintAgent</code> and verify the path to <code>node.exe</code> and <code>print-agent.mjs</code> are correct.</div>
+          <p>Reboot the cashier PC. After it boots back up:</p>
+          <ol>
+            <li><code>Invoke-RestMethod http://localhost:9911/health</code> in PowerShell — should return <code>ok : True</code> within 30 sec of boot.</li>
+            <li>Open the cashier UI → click 🖨 on any bill → receipt prints.</li>
+          </ol>
+          <p><b>If both work, the service is properly auto-starting. This is what lets you walk away.</b></p>
+          <div class="warn">If it fails after reboot: tail the log <code>Get-Content "$env:USERPROFILE\Desktop\print-agent.log" -Tail 50</code>. If empty, the service didn't even try to start — run <code>nssm edit TTC-PrintAgent</code> and verify both paths (node.exe + print-agent.mjs) are correct.</div>
         </div>
       </div>
 
@@ -908,7 +942,7 @@ Anything else
         .replace(/{{CAFE}}/g, val("cafe", "Neom"));
       pre.textContent = out;
     });
-    const w = document.getElementById("cfg-missing-2-8");
+    const w = document.getElementById("cfg-missing-2-9");
     if (w) {
       const missing = !val("ip", "") || !val("url", "");
       w.style.display = missing ? "block" : "none";
