@@ -2332,41 +2332,6 @@ function StaffSystem({ loggedInStaff, onLogout }: { loggedInStaff: LoggedInStaff
 
   const isOnShift = loggedInStaff.shift === 0 || shiftInfo.isOnShift;
 
-  // Auto-reload on new deploy. Polls /api/version every 60s and
-  // reloads the tab when the deployed build id no longer matches
-  // the build id baked into this tab's bundle. Without this, a
-  // waiter-page fix (e.g. removing a duplicate notification path)
-  // sits inactive on a tab that was opened before the deploy
-  // until the staff manually refreshes — which doesn't happen
-  // during a shift.
-  useEffect(() => {
-    const myVersion = process.env.NEXT_PUBLIC_BUILD_ID || "dev";
-    if (!myVersion || myVersion === "dev") return;
-    let stopped = false;
-    let firstSeenAt: number | null = null;
-    const check = async () => {
-      if (stopped) return;
-      if (typeof document !== "undefined" && document.visibilityState !== "visible") return;
-      try {
-        const res = await fetch("/api/version", { cache: "no-store" });
-        if (!res.ok) return;
-        const { version } = (await res.json()) as { version?: string };
-        if (!version || version === "dev" || version === myVersion) return;
-        // 30s grace after the first time we noticed the new
-        // version, then reload. Short enough that fixes land
-        // promptly, long enough that two waiters tapping in
-        // sync don't reload at the same instant.
-        if (firstSeenAt === null) firstSeenAt = Date.now();
-        if (Date.now() - firstSeenAt > 30_000) {
-          window.location.reload();
-        }
-      } catch { /* silent */ }
-    };
-    check();
-    const id = setInterval(check, 60_000);
-    return () => { stopped = true; clearInterval(id); };
-  }, []);
-
   // Eagerly register the service worker on mount, regardless of
   // notification-permission state. Without this, the SW only
   // installed if the user tapped "Allow" on the permission prompt
