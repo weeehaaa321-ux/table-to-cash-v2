@@ -22,8 +22,8 @@ export function NotificationBadge({ staffId, role, restaurantId = "neom-dahab" }
 
   const handleTap = useCallback(async () => {
     if (status === "granted" || status === "unsupported") return;
-    const ok = await subscribeToPush(staffId, role, restaurantId);
-    setStatus(ok ? "granted" : "denied");
+    const result = await subscribeToPush(staffId, role, restaurantId);
+    setStatus(result.ok ? "granted" : "denied");
   }, [status, staffId, role, restaurantId]);
 
   if (status === "unsupported") return null;

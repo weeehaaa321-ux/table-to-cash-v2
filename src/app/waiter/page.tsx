@@ -2389,10 +2389,22 @@ function StaffSystem({ loggedInStaff, onLogout }: { loggedInStaff: LoggedInStaff
   // Subscribe to push notifications. `lang` in deps so flipping the
   // language toggle updates the server-side subscription record, and
   // future pushes land in the new language.
+  //
+  // Logs the structured result to console so the operator can pull
+  // it out of devtools when push isn't working — the silent
+  // .catch(() => {}) we used to have masked every failure mode.
   useEffect(() => {
     import("@/lib/push-client").then(({ subscribeToPush }) => {
       const restaurantSlug = process.env.NEXT_PUBLIC_RESTAURANT_SLUG || "neom-dahab";
-      subscribeToPush(loggedInStaff.id, loggedInStaff.role, restaurantSlug, lang as "en" | "ar").catch(() => {});
+      subscribeToPush(loggedInStaff.id, loggedInStaff.role, restaurantSlug, lang as "en" | "ar").then((r) => {
+        if (r.ok) {
+          setPushHealthy(true);
+          console.log("[push] subscription registered");
+        } else {
+          setPushHealthy(false);
+          console.warn(`[push] subscription failed: ${r.reason}${r.detail ? ` — ${r.detail}` : ""}`);
+        }
+      });
     });
   }, [loggedInStaff.id, loggedInStaff.role, lang]);
 
@@ -2818,12 +2830,26 @@ function StaffSystem({ loggedInStaff, onLogout }: { loggedInStaff: LoggedInStaff
             </div>
             <button
               onClick={async () => {
-                const ok = await requestNotificationPermission();
-                if (ok) {
-                  const { subscribeToPush } = await import("@/lib/push-client");
-                  const restaurantSlug = process.env.NEXT_PUBLIC_RESTAURANT_SLUG || "neom-dahab";
-                  await subscribeToPush(loggedInStaff.id, loggedInStaff.role, restaurantSlug, lang as "en" | "ar");
+                const granted = await requestNotificationPermission();
+                if (!granted) {
+                  alert(lang === "ar"
+                    ? "لم يتم منح الإذن. افتح إعدادات المتصفح وفعّل الإشعارات لهذا الموقع."
+                    : "Permission was not granted. Open your browser settings and enable notifications for this site.");
+                  return;
+                }
+                const { subscribeToPush } = await import("@/lib/push-client");
+                const restaurantSlug = process.env.NEXT_PUBLIC_RESTAURANT_SLUG || "neom-dahab";
+                const result = await subscribeToPush(loggedInStaff.id, loggedInStaff.role, restaurantSlug, lang as "en" | "ar");
+                if (result.ok) {
                   setPushHealthy(true);
+                  alert(lang === "ar"
+                    ? "تم تفعيل الإشعارات. اضغط (اختبر) للتأكد."
+                    : "Notifications enabled. Tap (Test) to verify.");
+                } else {
+                  // Surface the exact failure reason so we can fix it
+                  // instead of silently retrying. The reason codes
+                  // come from src/lib/push-client.ts SubscribeResult.
+                  alert(`Push subscription failed.\nReason: ${result.reason}\n\n${result.detail || ""}`);
                 }
               }}
               className="px-4 py-2 rounded-xl bg-status-bad-600 text-white text-xs font-bold active:scale-95 shrink-0"
