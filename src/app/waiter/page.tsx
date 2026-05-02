@@ -2447,31 +2447,33 @@ function StaffSystem({ loggedInStaff, onLogout }: { loggedInStaff: LoggedInStaff
 
   const visibleOwnerMessages = ownerMessages.filter((m) => !dismissedMessages.has(m.id));
 
-  // ─── Push Notifications ──────────────────────────
-  // Notify on new orders for my tables
+  // ─── Notification de-duplication ─────────────────
+  //
+  // We removed the client-side notifyOrderReady/Voice/Command
+  // calls that used to fire here. They were running on every
+  // poll tick — meaning when the waiter's Chrome was backgrounded
+  // and resumed, the catch-up poll would re-fire local browser
+  // notifications for events that had ALREADY been delivered to
+  // the lock screen via real web push. Hence the "Arabic at
+  // arrival, English duplicate when Chrome opens" double-buzz.
+  //
+  // The seen-ID refs (seenReadyIdsRef, seenMessageIdsRef) still
+  // get populated below so the in-app UI can skip "first-render
+  // alert" effects, but no notifications are fired client-side
+  // any more — server push is the single source.
   useEffect(() => {
     const myTables = new Set(
       sessions.filter((s) => s.waiterId === loggedInStaff.id && s.status === "OPEN").map((s) => s.tableNumber)
     );
     for (const o of orders) {
       if (o.tableNumber == null || !myTables.has(o.tableNumber)) continue;
-      if (o.status === "ready" && !seenReadyIdsRef.current.has(o.id)) {
-        seenReadyIdsRef.current.add(o.id);
-        notifyOrderReady(o.tableNumber, o.orderNumber);
-      }
+      if (o.status === "ready") seenReadyIdsRef.current.add(o.id);
     }
   }, [orders, sessions, loggedInStaff.id]);
 
-  // Notify on owner messages
   useEffect(() => {
     for (const m of ownerMessages) {
-      if (seenMessageIdsRef.current.has(m.id)) continue;
       seenMessageIdsRef.current.add(m.id);
-      if (m.type === "voice") {
-        notifyVoiceNote("Owner");
-      } else {
-        notifyOwnerCommand(m.text || "New command from owner");
-      }
     }
   }, [ownerMessages]);
 

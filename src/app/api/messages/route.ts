@@ -45,6 +45,34 @@ export async function POST(request: NextRequest) {
       // Awaiting adds ~200-500ms to the route's own response,
       // but the dashboard owner doesn't notice that — and the
       // waiters get pushes immediately instead of seconds late.
+      // Build a bilingual push body so each device sees the
+      // notification in its own language (web-push.ts pickLang
+      // resolves to en/ar based on the subscription's stored
+      // lang). The English string still goes into Message.text
+      // in the DB so the in-app message log keeps reading it
+      // verbatim — only the lock-screen body gets localized.
+      const bilingualBody = (() => {
+        const cmd: string | undefined = body.command;
+        const t = body.tableId;
+        const fallback = body.text || { en: "New message from manager", ar: "رسالة جديدة من المدير" };
+        switch (cmd) {
+          case "send_waiter":
+            return t ? { en: `Go to Table ${t} — owner request`, ar: `اذهب إلى الطاولة ${t} — طلب من المالك` } : fallback;
+          case "prioritize":
+            return { en: `Priority — rush this order`, ar: `أولوية — أسرع بهذا الطلب` };
+          case "push_menu":
+            return t ? { en: `Push menu recommendations to Table ${t}`, ar: `أرسل توصيات المنيو لطاولة ${t}` } : fallback;
+          case "cash_payment":
+            return body.text || { en: `Cash collection requested`, ar: `طلب تحصيل نقدي` };
+          default:
+            // Voice notes + free-form owner text fall through to
+            // whatever the dashboard sent. If it's bilingual already
+            // (object with en/ar) pickLang handles it; if it's a
+            // string we just use it as-is in both languages.
+            return fallback;
+        }
+      })();
+
       const pushPromise = (async () => {
         if (body.command === "call_waiter" && body.tableId) {
           const payload = {
@@ -74,7 +102,7 @@ export async function POST(request: NextRequest) {
               : { en: "Message", ar: "رسالة" };
           const payload = {
             title: titleByType,
-            body: body.text || { en: "New message from manager", ar: "رسالة جديدة من المدير" },
+            body: bilingualBody,
             tag: `msg-${msg.id}`,
             url: "/waiter",
           };
