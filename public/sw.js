@@ -5,7 +5,7 @@
 // have an older sw.js cached detect a content change and install
 // the new SW. Without a content change browsers leave stale SWs
 // active for up to 24 hours.
-const SW_VERSION = "2026-05-02-v3";
+const SW_VERSION = "2026-05-02-v4-revert";
 
 self.addEventListener("install", (event) => {
   console.log("[sw] installing", SW_VERSION);
@@ -19,15 +19,13 @@ self.addEventListener("activate", (event) => {
 
 // Web Push — fires even when the phone is sleeping / app is closed
 self.addEventListener("push", (event) => {
-  console.log("[sw] push event fired");
+  if (!event.data) return;
 
-  let payload = { title: "Table to Cash", body: "" };
-  if (event.data) {
-    try {
-      payload = event.data.json();
-    } catch {
-      payload = { title: "Table to Cash", body: event.data.text() };
-    }
+  let payload;
+  try {
+    payload = event.data.json();
+  } catch {
+    payload = { title: "Table to Cash", body: event.data.text() };
   }
 
   const options = {
@@ -37,21 +35,10 @@ self.addEventListener("push", (event) => {
     badge: "/icon-192.png",
     vibrate: [200, 100, 200],
     requireInteraction: true,
-    renotify: true,
-    silent: false,
     data: { url: payload.url || "/waiter" },
   };
 
-  // Don't return-early on missing data — Chrome will show the
-  // generic title-only notification, which is better than silently
-  // dropping. Plus opportunistically refresh the SW so any deployed
-  // sw.js fix lands the moment we're alive in the background.
-  event.waitUntil(
-    Promise.all([
-      self.registration.showNotification(payload.title || "Table to Cash", options),
-      self.registration.update().catch(() => {}),
-    ])
-  );
+  event.waitUntil(self.registration.showNotification(payload.title || "Table to Cash", options));
 });
 
 // Foreground messages from the main thread
