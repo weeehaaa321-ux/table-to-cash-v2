@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { useCases } from "@/infrastructure/composition";
+import { SessionClosedError } from "@/lib/queries";
 
 export async function POST(request: NextRequest) {
   const body = await request.json();
@@ -73,6 +74,19 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json(order, { status: 201 });
   } catch (err) {
+    if (err instanceof SessionClosedError) {
+      // The session was closed (or vanished) between the pre-check
+      // at the top of this handler and the per-session lock taken
+      // inside createOrder's transaction. Treat as a clean 409 so
+      // the guest's UI can show "rescan to start a new session".
+      return NextResponse.json(
+        {
+          error: "SESSION_CLOSED",
+          message: "This session has been closed. Please scan the QR code to start a new session.",
+        },
+        { status: 409 },
+      );
+    }
     console.error("Order creation failed:", err);
     return NextResponse.json({ error: "Failed to create order" }, { status: 500 });
   }

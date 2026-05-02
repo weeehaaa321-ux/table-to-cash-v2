@@ -164,7 +164,33 @@ export class SessionUseCases {
     });
   }
 
-  /** Create a regular table session, atomically closing any existing OPEN session. */
+  /**
+   * Create a regular table session.
+   *
+   * Race-safe: if two guests scan simultaneously, both POSTs land
+   * here in parallel. The flow is now:
+   *   1. Take a per-table advisory lock so the two transactions
+   *      serialise.
+   *   2. Look for an existing OPEN session on this table.
+   *   3. If one exists, return it (the second guest's scan is
+   *      treated as "join the same table" — the join-request UX
+   *      on the client takes over from there).
+   *   4. Otherwise, create a fresh session.
+   *
+   * The earlier behaviour — `updateMany(close existing) + create`
+   * — was intentional for force-replacing an orphaned/stuck OPEN
+   * session, but it also meant two real simultaneous scans each
+   * closed the other's just-created session, leaving guests on
+   * unmanaged closed sessions. The partial unique index on
+   * `TableSession(tableId) WHERE status='OPEN'` is the
+   * belt-and-braces backstop: if anything bypasses this code path,
+   * the DB still refuses a second OPEN row.
+   *
+   * Stuck-session recovery now happens via the auto-clockout cron
+   * (which closes sessions that have been idle for hours) or via
+   * a floor-manager force-close action — never by silently
+   * stomping on whatever was there during a fresh scan.
+   */
   async createTableSession(input: {
     tableId: string;
     restaurantId: string;
@@ -172,10 +198,21 @@ export class SessionUseCases {
     waiterId: string | null;
   }) {
     return db.$transaction(async (tx) => {
-      await tx.tableSession.updateMany({
-        where: { tableId: input.tableId, restaurantId: input.restaurantId, status: "OPEN" },
-        data: { status: "CLOSED", closedAt: new Date() },
+      // Namespace 2: per-table lock. Distinct from the per-session
+      // (1) and per-restaurant (0) lock spaces so paths can't
+      // accidentally serialise against each other.
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${input.tableId}, 2))`;
+
+      const existing = await tx.tableSession.findFirst({
+        where: {
+          tableId: input.tableId,
+          restaurantId: input.restaurantId,
+          status: "OPEN",
+        },
+        include: { waiter: { select: { id: true, name: true } } },
       });
+      if (existing) return existing;
+
       return tx.tableSession.create({
         data: {
           tableId: input.tableId,
@@ -238,24 +275,32 @@ export class SessionUseCases {
     sessionId: string;
     isVipSession: boolean;
   }) {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const orderWhere: any = input.isVipSession
-      ? { sessionId: input.sessionId, status: "PENDING" }
-      : { sessionId: input.sessionId, status: { in: ["PENDING", "CONFIRMED", "PREPARING", "READY"] } };
+    return db.$transaction(async (tx) => {
+      // Per-session lock. Pairs with the lock taken by createOrder,
+      // confirmPayRound, changeTable, and maybeCloseSession — so a
+      // POST /api/orders for this session waits for our close to
+      // commit (rather than landing a fresh PENDING order on a
+      // session we're about to mark CLOSED).
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${input.sessionId}, 1))`;
 
-    const orders = await db.order.findMany({ where: orderWhere, select: { id: true } });
-    let cancelledCount = 0;
-    if (orders.length > 0) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const orderWhere: any = input.isVipSession
+        ? { sessionId: input.sessionId, status: "PENDING" }
+        : { sessionId: input.sessionId, status: { in: ["PENDING", "CONFIRMED", "PREPARING", "READY"] } };
+
+      const orders = await tx.order.findMany({ where: orderWhere, select: { id: true } });
+      let cancelledCount = 0;
+      if (orders.length > 0) {
       // Zero everything money-shaped on the cancelled rows. If a guest
       // had tapped "Pay X" before this close fires, the order would
       // otherwise stay tagged with paymentMethod + tip on a CANCELLED
       // row, and downstream aggregations that filter on paymentMethod
       // (cashTotal, ledger views) would falsely pick it up.
-      await db.order.updateMany({
+      await tx.order.updateMany({
         where: { id: { in: orders.map((o) => o.id) } },
         data: { status: "CANCELLED", paymentMethod: null, tip: 0 },
       });
-      await db.orderItem.updateMany({
+      await tx.orderItem.updateMany({
         where: { orderId: { in: orders.map((o) => o.id) }, cancelled: false },
         data: {
           cancelled: true,
@@ -265,12 +310,13 @@ export class SessionUseCases {
       });
       cancelledCount = orders.length;
     }
-    const session = await db.tableSession.update({
+    const session = await tx.tableSession.update({
       where: { id: input.sessionId },
       data: { status: "CLOSED", closedAt: new Date() },
       include: fullSessionInclude,
     });
     return { session, cancelledCount };
+    });
   }
 
   async incrementGuestCount(sessionId: string) {
@@ -295,45 +341,66 @@ export class SessionUseCases {
     });
   }
 
-  /** Move a session to a different table — also moves its orders. */
+  /**
+   * Move a session to a different table — also moves its orders.
+   *
+   * Wrapped in a transaction with both the moving session's lock
+   * AND the destination table's lock. Without those locks, a guest
+   * scanning the destination table mid-move could open a new
+   * OPEN session there and we'd land two OPENs on the same
+   * tableId. The partial unique index would catch that as P2002,
+   * but doing it inside the transaction means we fail cleanly
+   * with "Table is occupied" instead of 500.
+   */
   async changeTable(sessionId: string, newTableNumber: number) {
-    const currentSession = await db.tableSession.findUnique({
-      where: { id: sessionId },
-      include: {
-        table: { select: { number: true } },
-        waiter: { select: { id: true, name: true } },
-      },
-    });
-    if (!currentSession) return { error: "Session not found" as const };
-    if (currentSession.orderType === "DELIVERY") return { error: "DELIVERY_NO_TABLE" as const };
+    return db.$transaction(async (tx) => {
+      // Lock this session first, in the same namespace every other
+      // session-mutating path uses, so concurrent close/pay-confirm
+      // serialise behind us.
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${sessionId}, 1))`;
 
-    const newTable = await db.table.findUnique({
-      where: {
-        restaurantId_number: { restaurantId: currentSession.restaurantId, number: newTableNumber },
-      },
-    });
-    if (!newTable) return { error: "Table not found" as const };
+      const currentSession = await tx.tableSession.findUnique({
+        where: { id: sessionId },
+        include: {
+          table: { select: { number: true } },
+          waiter: { select: { id: true, name: true } },
+        },
+      });
+      if (!currentSession) return { error: "Session not found" as const };
+      if (currentSession.orderType === "DELIVERY") return { error: "DELIVERY_NO_TABLE" as const };
 
-    const occupied = await db.tableSession.findFirst({
-      where: { tableId: newTable.id, status: "OPEN" },
-    });
-    if (occupied) return { error: "Table is occupied" as const };
+      const newTable = await tx.table.findUnique({
+        where: {
+          restaurantId_number: { restaurantId: currentSession.restaurantId, number: newTableNumber },
+        },
+      });
+      if (!newTable) return { error: "Table not found" as const };
 
-    const updated = await db.tableSession.update({
-      where: { id: sessionId },
-      data: { tableId: newTable.id },
+      // Lock the destination table so a parallel scan can't open a
+      // new session on it between our occupancy check and our move.
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${newTable.id}, 2))`;
+
+      const occupied = await tx.tableSession.findFirst({
+        where: { tableId: newTable.id, status: "OPEN" },
+      });
+      if (occupied) return { error: "Table is occupied" as const };
+
+      const updated = await tx.tableSession.update({
+        where: { id: sessionId },
+        data: { tableId: newTable.id },
+      });
+      await tx.order.updateMany({
+        where: { sessionId },
+        data: { tableId: newTable.id },
+      });
+      return {
+        ok: true as const,
+        session: updated,
+        currentSession,
+        oldTableNumber: currentSession.table?.number ?? 0,
+        newTableNumber,
+      };
     });
-    await db.order.updateMany({
-      where: { sessionId },
-      data: { tableId: newTable.id },
-    });
-    return {
-      ok: true as const,
-      session: updated,
-      currentSession,
-      oldTableNumber: currentSession.table?.number ?? 0,
-      newTableNumber,
-    };
   }
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -507,6 +574,13 @@ export class SessionUseCases {
   > {
     const { sessionId, paymentMethod, tipAmount } = input;
     return db.$transaction(async (tx) => {
+      // Per-session lock so a fresh order POST or a session close
+      // can't race the settle. Without this, a guest placing
+      // round-2 milliseconds before this confirm could either land
+      // their order on the just-paid round, or miss being included
+      // in maybeCloseSession's "all paid?" check.
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${sessionId}, 1))`;
+
       let orders = await tx.order.findMany({
         where: {
           sessionId,
@@ -514,6 +588,7 @@ export class SessionUseCases {
           paidAt: null,
           paymentMethod: { not: null },
         },
+        orderBy: { createdAt: "asc" },
         select: { id: true, status: true, total: true },
       });
       if (orders.length === 0) {

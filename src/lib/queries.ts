@@ -2,6 +2,20 @@ import { db } from "./db";
 import { DELIVERY_FEE } from "./restaurant-config";
 import { toNum } from "./money";
 
+/**
+ * Thrown by createOrder when the in-transaction session-status
+ * re-read finds the session is gone or already CLOSED. Caller
+ * (the orders POST route) translates this into 409 SESSION_CLOSED
+ * so the guest's UI can prompt them to rescan.
+ */
+export class SessionClosedError extends Error {
+  code: "SESSION_NOT_FOUND" | "SESSION_CLOSED";
+  constructor(code: "SESSION_NOT_FOUND" | "SESSION_CLOSED") {
+    super(code);
+    this.code = code;
+  }
+}
+
 // ─── Menu ────────────────────────────────────────
 
 export async function getMenuForRestaurant(restaurantId: string) {
@@ -235,6 +249,25 @@ export async function createOrder(data: {
   // retry on conflict; the advisory lock just queues briefly.
   const created = await db.$transaction(async (tx) => {
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${data.restaurantId}, 0))`;
+
+    // Per-session lock (namespace 1). Pairs with confirmPayRound,
+    // closeWithCancellations, changeTable, and maybeCloseSession so
+    // a session close racing this order POST can't strand the new
+    // order on a CLOSED session. The session-status re-read below
+    // is the second half of that defense.
+    if (data.sessionId) {
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${data.sessionId}, 1))`;
+      const sessionRow = await tx.tableSession.findUnique({
+        where: { id: data.sessionId },
+        select: { status: true },
+      });
+      if (!sessionRow) {
+        throw new SessionClosedError("SESSION_NOT_FOUND");
+      }
+      if (sessionRow.status !== "OPEN") {
+        throw new SessionClosedError("SESSION_CLOSED");
+      }
+    }
 
     const lastOrder = await tx.order.findFirst({
       where: { restaurantId: data.restaurantId },
@@ -695,22 +728,31 @@ export async function getActiveOrderForSession(sessionId: string) {
 export async function maybeCloseSession(sessionId: string) {
   if (!sessionId) return;
 
-  const openCount = await db.order.count({
-    where: {
-      sessionId,
-      status: { notIn: ["PAID", "CANCELLED"] },
-    },
-  });
-  if (openCount > 0) return;
+  // Wrap the whole thing in a transaction with the per-session lock,
+  // so a fresh order POST that lands milliseconds after the last
+  // PAID order can't slip in between our "any open?" check and the
+  // status flip. Without the lock the new order ends up PENDING on
+  // a CLOSED session — kitchen cooks, nobody bills.
+  await db.$transaction(async (tx) => {
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${sessionId}, 1))`;
 
-  const paidCount = await db.order.count({
-    where: { sessionId, status: "PAID" },
-  });
-  if (paidCount === 0) return;
+    const openCount = await tx.order.count({
+      where: {
+        sessionId,
+        status: { notIn: ["PAID", "CANCELLED"] },
+      },
+    });
+    if (openCount > 0) return;
 
-  await db.tableSession.updateMany({
-    where: { id: sessionId, status: "OPEN" },
-    data: { status: "CLOSED", closedAt: new Date() },
+    const paidCount = await tx.order.count({
+      where: { sessionId, status: "PAID" },
+    });
+    if (paidCount === 0) return;
+
+    await tx.tableSession.updateMany({
+      where: { id: sessionId, status: "OPEN" },
+      data: { status: "CLOSED", closedAt: new Date() },
+    });
   });
 }
 
