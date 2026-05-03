@@ -138,7 +138,20 @@ export class SessionUseCases {
         waiter: { select: { id: true, name: true } },
         vipGuest: { select: { name: true } },
         orders: {
-          select: { id: true, orderNumber: true, total: true, status: true, paymentMethod: true, paidAt: true, tip: true, guestNumber: true, guestName: true },
+          select: {
+            id: true, orderNumber: true, total: true, status: true, paymentMethod: true, paidAt: true, tip: true, guestNumber: true, guestName: true,
+            items: {
+              where: { cancelled: false },
+              select: {
+                quantity: true,
+                price: true,
+                addOns: true,
+                notes: true,
+                comped: true,
+                menuItem: { select: { name: true, nameAr: true } },
+              },
+            },
+          },
           orderBy: { createdAt: "asc" },
         },
       },
@@ -196,6 +209,15 @@ export class SessionUseCases {
     restaurantId: string;
     guestCount: number;
     waiterId: string | null;
+    // The guest's browser-side identity. When the session is created
+    // by a guest scan (autoStart), we stamp them as the owner inside
+    // the same transaction by writing an APPROVED JoinRequest. That
+    // owner record is the ground-truth marker subsequent scanners
+    // check against before deciding whether they should be claimed
+    // as owner or routed through the join-request flow. Waiter-
+    // opened sessions pass null here, leaving the seat open so the
+    // first guest to scan claims it.
+    ownerGuestId?: string | null;
   }) {
     return db.$transaction(async (tx) => {
       // Namespace 2: per-table lock. Distinct from the per-session
@@ -211,9 +233,27 @@ export class SessionUseCases {
         },
         include: { waiter: { select: { id: true, name: true } } },
       });
-      if (existing) return existing;
+      if (existing) {
+        // Returning a session opened by someone else (likely a waiter
+        // pre-seating the table). If this caller has a guestId AND
+        // no owner has been claimed yet, register them as the owner
+        // here so the next scanner is correctly routed through join-
+        // request instead of being auto-claimed too.
+        if (input.ownerGuestId) {
+          const anyApproved = await tx.joinRequest.findFirst({
+            where: { sessionId: existing.id, status: "APPROVED" },
+            select: { id: true },
+          });
+          if (!anyApproved) {
+            await tx.joinRequest.create({
+              data: { sessionId: existing.id, guestId: input.ownerGuestId, status: "APPROVED" },
+            });
+          }
+        }
+        return existing;
+      }
 
-      return tx.tableSession.create({
+      const created = await tx.tableSession.create({
         data: {
           tableId: input.tableId,
           restaurantId: input.restaurantId,
@@ -223,6 +263,12 @@ export class SessionUseCases {
         },
         include: { waiter: { select: { id: true, name: true } } },
       });
+      if (input.ownerGuestId) {
+        await tx.joinRequest.create({
+          data: { sessionId: created.id, guestId: input.ownerGuestId, status: "APPROVED" },
+        });
+      }
+      return created;
     });
   }
 
@@ -770,6 +816,95 @@ export class SessionUseCases {
   async findPendingJoinRequest(sessionId: string, guestId: string) {
     return db.joinRequest.findFirst({
       where: { sessionId, guestId, status: "PENDING" },
+    });
+  }
+
+  // Returns the most recent non-rejected request so a guest who closed
+  // their tab after approval (or before polling caught it) is recognized
+  // on re-scan instead of being forced through the join flow again.
+  async findExistingJoinRequest(sessionId: string, guestId: string) {
+    return db.joinRequest.findFirst({
+      where: { sessionId, guestId, status: { in: ["PENDING", "APPROVED"] } },
+      orderBy: { createdAt: "desc" },
+    });
+  }
+
+  // Atomic claim-or-join. Used by the /scan flow when a guest lands on
+  // a table that already has an OPEN session. Behaviour:
+  //
+  //   • Guest already has a PENDING/APPROVED record → echo it back so
+  //     a returning tab walks straight in (or keeps waiting) instead of
+  //     stacking duplicate requests.
+  //   • No APPROVED record exists for the session AND no orders have
+  //     been placed → treat the session as "owner-less" (e.g. a waiter
+  //     pre-seated the table from their device). Auto-claim this guest
+  //     as the owner so they can enter, place orders, and approve the
+  //     next scanner — without that, every guest hits "Ask Guest #1 to
+  //     let you in" but no Guest #1 client exists to approve.
+  //   • Otherwise → create a PENDING request for the existing owner to
+  //     approve. The "owner" is whoever holds the earliest APPROVED
+  //     record (we don't track role explicitly on JoinRequest).
+  //
+  // Wrapped in a transaction with the per-session advisory lock so two
+  // simultaneous first scanners can't both be promoted to owner.
+  async claimOrJoinSession(sessionId: string, guestId: string): Promise<{
+    id: string;
+    status: "approved" | "pending";
+    role: "owner" | "member";
+  }> {
+    return db.$transaction(async (tx) => {
+      // Namespace 1: per-session lock. Same space the rest of the
+      // session-mutating paths use.
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${sessionId}, 1))`;
+
+      const earliestApproved = await tx.joinRequest.findFirst({
+        where: { sessionId, status: "APPROVED" },
+        orderBy: { createdAt: "asc" },
+        select: { id: true, guestId: true },
+      });
+
+      const existing = await tx.joinRequest.findFirst({
+        where: { sessionId, guestId, status: { in: ["PENDING", "APPROVED"] } },
+        orderBy: { createdAt: "desc" },
+      });
+      if (existing) {
+        const isOwner = existing.status === "APPROVED" && earliestApproved?.id === existing.id;
+        return {
+          id: existing.id,
+          status: existing.status === "APPROVED" ? "approved" : "pending",
+          role: isOwner ? "owner" : "member",
+        };
+      }
+
+      if (!earliestApproved) {
+        // No client has been registered as owner yet. Guard against the
+        // legacy case where a guest-created session predates owner-
+        // stamping (no APPROVED record but a real client guest is
+        // already actively using the table) by checking menuOpenedAt.
+        // That field is only set when a guest browser hits the menu
+        // page (ImmersiveMenu → POST /api/sessions menu_opened) — staff
+        // flows (waiter Seat, dashboard assign, floor manager) never
+        // trigger it. So menuOpenedAt === null is a reliable "no client
+        // guest has joined yet" signal that survives the case where
+        // staff pre-placed orders before the first guest scanned (the
+        // earlier orderCount === 0 guard mis-handled that case and
+        // left the guest stuck on "Ask Guest #1").
+        const session = await tx.tableSession.findUnique({
+          where: { id: sessionId },
+          select: { menuOpenedAt: true },
+        });
+        if (session && session.menuOpenedAt === null) {
+          const claim = await tx.joinRequest.create({
+            data: { sessionId, guestId, status: "APPROVED" },
+          });
+          return { id: claim.id, status: "approved", role: "owner" };
+        }
+      }
+
+      const pending = await tx.joinRequest.create({
+        data: { sessionId, guestId, status: "PENDING" },
+      });
+      return { id: pending.id, status: "pending", role: "member" };
     });
   }
 

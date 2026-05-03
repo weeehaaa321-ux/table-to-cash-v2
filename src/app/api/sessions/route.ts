@@ -89,7 +89,7 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   const body = await request.json();
-  const { tableNumber, restaurantId, guestCount: bodyGuestCount, waiterId: bodyWaiterId, orderType, vipGuestId } = body;
+  const { tableNumber, restaurantId, guestCount: bodyGuestCount, waiterId: bodyWaiterId, orderType, vipGuestId, guestId: bodyGuestId } = body;
 
   const isVip = orderType === "VIP_DINE_IN" || orderType === "DELIVERY";
 
@@ -136,6 +136,11 @@ export async function POST(request: NextRequest) {
       restaurantId: realId,
       guestCount,
       waiterId,
+      // When the caller is a guest browser (autoStart on /scan), it sends
+      // its localStorage-persisted guestId so this server-side TX can
+      // stamp them as the session owner atomically. Waiter "Seat" calls
+      // omit guestId, leaving the seat open for the first scanner.
+      ownerGuestId: typeof bodyGuestId === "string" && bodyGuestId.length > 0 ? bodyGuestId : null,
     });
     return NextResponse.json(session, { status: 201 });
   } catch (err) {

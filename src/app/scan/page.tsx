@@ -145,6 +145,34 @@ function ScanPage() {
               });
               if (joinRes.ok) {
                 const joinData = await joinRes.json();
+                // Server-approved entry, no owner needs to tap anything.
+                // Two cases land here:
+                //   role=owner   → first scanner of a waiter-pre-seated
+                //                  table; auto-promoted to owner so they
+                //                  can approve everyone after them.
+                //   role=member  → returning guest whose APPROVED record
+                //                  survived (closed tab + lost local
+                //                  marker). The server recognised them
+                //                  by guestId.
+                if (joinData.status === "approved") {
+                  const claimedAsOwner = joinData.role === "owner";
+                  setTable(tableNumber, restaurantSlug);
+                  setSessionId(data.session.id);
+                  setIsSessionOwner(claimedAsOwner);
+                  setGuestNumber(claimedAsOwner ? 1 : (data.session.guestCount || 2));
+                  setHasPaymentAuthority(claimedAsOwner);
+                  try {
+                    if (claimedAsOwner) {
+                      localStorage.setItem(`ttc_owner_${data.session.id}`, "1");
+                    } else {
+                      localStorage.setItem(`ttc_member_${data.session.id}`, "1");
+                    }
+                  } catch {}
+                  localStorage.setItem("ttc_tableNumber", tableNumber);
+                  setMenuTarget(`/menu?table=${tableNumber}&restaurant=${restaurantSlug}&session=${data.session.id}`);
+                  gateOnName(data.session.id);
+                  return;
+                }
                 setJoinRequestId(joinData.id);
                 setPendingSessionId(data.session.id);
                 setStatus("waiting_approval");
@@ -192,11 +220,27 @@ function ScanPage() {
     async function autoStart() {
       setTable(tableNumber, restaurantSlug);
       setSessionCreateError(false);
+      // Send (and persist) a stable guestId so the server can stamp this
+      // browser as the session owner inside the same TX. Without it,
+      // the server has no way to tell two near-simultaneous scanners
+      // apart, and the second one would end up auto-claimed as a
+      // duplicate owner.
+      const guestId = (() => {
+        try {
+          const existing = localStorage.getItem("ttc_guestId");
+          if (existing) return existing;
+          const fresh = `guest_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+          localStorage.setItem("ttc_guestId", fresh);
+          return fresh;
+        } catch {
+          return `guest_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+        }
+      })();
       try {
         const res = await fetch("/api/sessions", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ tableNumber, restaurantId: restaurantSlug }),
+          body: JSON.stringify({ tableNumber, restaurantId: restaurantSlug, guestId }),
         });
         if (res.ok) {
           const session = await res.json();

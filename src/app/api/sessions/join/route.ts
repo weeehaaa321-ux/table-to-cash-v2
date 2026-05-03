@@ -7,12 +7,17 @@ export async function POST(request: NextRequest) {
   if (!sessionId || !guestId) {
     return NextResponse.json({ error: "sessionId and guestId required" }, { status: 400 });
   }
-  const existing = await useCases.sessions.findPendingJoinRequest(sessionId, guestId);
-  if (existing) {
-    return NextResponse.json({ id: existing.id, status: existing.status.toLowerCase() });
-  }
-  const req = await useCases.sessions.createJoinRequest({ sessionId, guestId });
-  return NextResponse.json({ id: req.id, status: "pending" }, { status: 201 });
+  // Atomic claim-or-join. If the session has no client owner yet
+  // (waiter pre-seated the table), this guest is auto-promoted to
+  // owner — otherwise a PENDING request is created for the existing
+  // owner to approve. Returning guests with a prior PENDING/APPROVED
+  // record get that record echoed back so they walk back into the
+  // same role.
+  const result = await useCases.sessions.claimOrJoinSession(sessionId, guestId);
+  return NextResponse.json(
+    { id: result.id, status: result.status, role: result.role },
+    { status: result.status === "pending" ? 201 : 200 },
+  );
 }
 
 export async function GET(request: NextRequest) {
