@@ -153,8 +153,15 @@ function TrackPage() {
     paidAt?: string | null;
     guestNumber?: number | null;
     guestName?: string | null;
-    items: { name: string; quantity: number; price: number }[];
+    items: { id: string; name: string; quantity: number; price: number; cancelled?: boolean; comped?: boolean }[];
   }[]>([]);
+
+  // Split-pay selection. Default = "all unpaid items selected", which
+  // reproduces the legacy single-button "pay everything" UX. The
+  // moment the guest unticks something, the Pay button switches to
+  // "Pay 120 EGP for selected" and the POST sends the picked itemIds.
+  // null = "follow the default (all)", Set = explicit user choice.
+  const [selectedItemIds, setSelectedItemIds] = useState<Set<string> | null>(null);
 
   // Rounds derived from live server data — each "round" is a set of
   // orders sharing the exact same paidAt (cashier stamps them in one
@@ -177,7 +184,7 @@ function TrackPage() {
     id: string; orderNumber: number; status: string; total: number;
     guestNumber?: number | null;
     guestName?: string | null;
-    items: { name: string; quantity: number; price: number }[];
+    items: { id: string; name: string; quantity: number; price: number; cancelled?: boolean; comped?: boolean }[];
   } | null>(null);
 
   // Persisted receipt so refresh after payment keeps showing the final bill
@@ -340,13 +347,14 @@ function TrackPage() {
         if (data.session.guestCount) setSessionGuestCount(data.session.guestCount);
 
         // Orders
+        type MappedItem = { id: string; name: string; quantity: number; price: number; cancelled?: boolean; comped?: boolean };
         type MappedOrder = {
           id: string; orderNumber: number; status: string; total: number;
           paymentMethod: string | null;
           paidAt: string | null;
           guestNumber: number | null;
           guestName: string | null;
-          items: { name: string; quantity: number; price: number }[];
+          items: MappedItem[];
         };
         const mapped: MappedOrder[] = (data.orders || []).map((o: {
           id: string; orderNumber: number; status: string; total: number;
@@ -354,7 +362,7 @@ function TrackPage() {
           paidAt?: string | null;
           guestNumber?: number | null;
           guestName?: string | null;
-          items: { name: string; quantity: number; price: number }[];
+          items: { id?: string; name: string; quantity: number; price: number; cancelled?: boolean; comped?: boolean }[];
         }) => ({
           id: o.id,
           orderNumber: o.orderNumber,
@@ -364,7 +372,18 @@ function TrackPage() {
           paidAt: o.paidAt || null,
           guestNumber: o.guestNumber ?? null,
           guestName: o.guestName ?? null,
-          items: o.items,
+          items: o.items.map((it) => ({
+            // Item id is required by the picker. Items returned without
+            // one (legacy clients, kitchen-injected synthetic rows) get
+            // an empty string and are filtered out of payableItems via
+            // the `it.id` check.
+            id: it.id ?? "",
+            name: it.name,
+            quantity: it.quantity,
+            price: it.price,
+            cancelled: it.cancelled,
+            comped: it.comped,
+          })),
         }));
         setSessionOrders(mapped);
 
@@ -492,7 +511,7 @@ function TrackPage() {
     guestNumber?: number | null;
     guestName?: string | null;
     paidAt?: string | null;
-    items: { name: string; quantity: number; price: number }[];
+    items: { id: string; name: string; quantity: number; price: number; cancelled?: boolean; comped?: boolean }[];
   };
   // Always show all unpaid session orders. `orderId` in the URL is a hint for
   // which one is "new" (used to highlight it) — never a filter, so a guest who
@@ -519,6 +538,59 @@ function TrackPage() {
     : tableOrders;
   const invoiceTotal = billableOrders.reduce((s, o) => s + o.total, 0);
   const invoiceOrderCount = billableOrders.length;
+
+  // Flat list of every item the guest could pay for, with stable ids.
+  // Cancelled / comped items are filtered out — guest doesn't owe for
+  // them, so they shouldn't be selectable. SERVED-only is enforced
+  // server-side by splitOrderForPayment, but the picker also hides
+  // not-yet-served items so the UI doesn't tease a selection that
+  // would be rejected on POST.
+  const payableItems = billableOrders
+    .filter((o) => o.status.toLowerCase() === "served")
+    .flatMap((o) =>
+      o.items
+        .filter((it) => !it.cancelled && !it.comped && it.id)
+        .map((it) => ({
+          id: it.id,
+          orderId: o.id,
+          orderNumber: o.orderNumber,
+          name: it.name,
+          quantity: it.quantity,
+          price: it.price,
+        })),
+    );
+
+  // null = "default state, all items selected" → POST omits itemIds and
+  // server settles every unpaid order in the session (back-compat with
+  // the original single Pay button). Set = explicit pick.
+  const splitPayActive = selectedItemIds !== null;
+  const effectiveSelectedIds: Set<string> = selectedItemIds ?? new Set(payableItems.map((p) => p.id));
+  const selectedItems = payableItems.filter((p) => effectiveSelectedIds.has(p.id));
+  const selectedSubtotal = selectedItems.reduce((s, it) => s + it.price * it.quantity, 0);
+  // The amount we charge: when the guest hasn't touched the picker we
+  // honour the existing invoice total (which can include rounding /
+  // delivery fees the picker can't see). When they HAVE picked, we
+  // trust the per-item math.
+  const payableSubtotal = splitPayActive ? selectedSubtotal : invoiceTotal;
+  const isFullPay = !splitPayActive
+    || (payableItems.length > 0 && selectedItems.length === payableItems.length);
+
+  const toggleItemPick = (id: string) => {
+    setSelectedItemIds((prev) => {
+      const base = prev ?? new Set(payableItems.map((p) => p.id));
+      const next = new Set(base);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      // If the new selection covers everything, collapse back to null
+      // so the next poll's freshly-arrived items default to selected
+      // (otherwise a guest who orders more after picking would have to
+      // re-tick the new item every time).
+      if (next.size === payableItems.length && payableItems.every((p) => next.has(p.id))) {
+        return null;
+      }
+      return next;
+    });
+  };
 
   const leastProgressed = tableOrders.length > 0
     ? tableOrders.reduce((min, o) => getStepIndex(o.status, STEPS) < getStepIndex(min.status, STEPS) ? o : min)
@@ -1070,11 +1142,59 @@ function TrackPage() {
                 <div className="bg-white rounded-2xl p-5 shadow-sm border border-sand-100">
                   <h3 className="font-bold text-text-primary text-[15px] mb-4">{t("track.payForTable")}</h3>
 
-                  {/* Full session invoice */}
+                  {/* Full session invoice — item-level when there are
+                      multiple billable items so the guest can split-pay
+                      by ticking only what they're covering. Single-item
+                      sessions skip the checkboxes (no point picking when
+                      there's only one thing). */}
                   <div className="bg-sand-50 rounded-xl p-4 mb-4 border border-sand-100">
-                    <div className="space-y-1.5">
-                      {billableOrders.length > 0 ? (
-                        billableOrders.map((o) => (
+                    {payableItems.length > 1 ? (
+                      <>
+                        <div className="flex items-center justify-between mb-2">
+                          <span className="text-[10px] font-bold text-text-muted uppercase tracking-widest">
+                            {lang === "ar" ? "اختر ما ستدفعه" : "Pick what you'll pay for"}
+                          </span>
+                          {splitPayActive && (
+                            <button
+                              onClick={() => setSelectedItemIds(null)}
+                              className="text-[10px] font-bold text-ocean-600 underline underline-offset-2"
+                            >
+                              {lang === "ar" ? "اختر الكل" : "Select all"}
+                            </button>
+                          )}
+                        </div>
+                        <div className="space-y-1.5 max-h-44 overflow-y-auto pr-1">
+                          {payableItems.map((it) => {
+                            const checked = effectiveSelectedIds.has(it.id);
+                            const lineTotal = Math.round(it.price * it.quantity);
+                            return (
+                              <label
+                                key={it.id}
+                                className={`flex items-center gap-2.5 px-2 py-1.5 rounded-lg cursor-pointer transition ${
+                                  checked ? "bg-white border border-ocean-200" : "bg-transparent border border-transparent"
+                                }`}
+                              >
+                                <input
+                                  type="checkbox"
+                                  checked={checked}
+                                  onChange={() => toggleItemPick(it.id)}
+                                  className="w-4 h-4 rounded border-sand-300 text-ocean-600 focus:ring-ocean-500"
+                                />
+                                <span className="flex-1 text-xs text-text-primary truncate">
+                                  <span className="font-bold tabular-nums">{it.quantity}× </span>
+                                  {it.name}
+                                </span>
+                                <span className="text-xs font-semibold text-text-secondary tabular-nums">
+                                  {lineTotal} {t("common.egp")}
+                                </span>
+                              </label>
+                            );
+                          })}
+                        </div>
+                      </>
+                    ) : billableOrders.length > 0 ? (
+                      <div className="space-y-1.5">
+                        {billableOrders.map((o) => (
                           <div key={o.id} className="flex justify-between text-xs text-text-secondary">
                             <span className="flex items-center gap-1.5">
                               Order #{o.orderNumber} ({o.items.length} items)
@@ -1086,17 +1206,21 @@ function TrackPage() {
                             </span>
                             <span className="font-semibold">{o.total} EGP</span>
                           </div>
-                        ))
-                      ) : (
-                        <div className="flex justify-between text-xs text-text-secondary">
-                          <span>{invoiceOrderCount} order{invoiceOrderCount !== 1 ? "s" : ""}</span>
-                          <span className="font-semibold">{invoiceTotal} EGP</span>
-                        </div>
-                      )}
-                    </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="flex justify-between text-xs text-text-secondary">
+                        <span>{invoiceOrderCount} order{invoiceOrderCount !== 1 ? "s" : ""}</span>
+                        <span className="font-semibold">{invoiceTotal} EGP</span>
+                      </div>
+                    )}
                     <div className="border-t border-sand-200 mt-2 pt-2 flex justify-between items-center">
-                      <span className="text-sm font-bold text-text-secondary">{lang === "ar" ? "المجموع" : "Subtotal"}</span>
-                      <span className="text-sm font-semibold text-text-primary">{invoiceTotal} EGP</span>
+                      <span className="text-sm font-bold text-text-secondary">
+                        {splitPayActive
+                          ? (lang === "ar" ? "مجموع المختار" : "Selected subtotal")
+                          : (lang === "ar" ? "المجموع" : "Subtotal")}
+                      </span>
+                      <span className="text-sm font-semibold text-text-primary">{payableSubtotal} EGP</span>
                     </div>
                     {tipAmount > 0 && (
                       <div className="flex justify-between items-center mt-1.5">
@@ -1106,8 +1230,15 @@ function TrackPage() {
                     )}
                     <div className="border-t border-sand-200 mt-2 pt-2 flex justify-between items-center">
                       <span className="text-sm font-semibold text-text-primary">{lang === "ar" ? "الإجمالي" : "Total"}</span>
-                      <span className="text-lg font-semibold text-text-primary">{invoiceTotal + tipAmount} EGP</span>
+                      <span className="text-lg font-semibold text-text-primary">{payableSubtotal + tipAmount} EGP</span>
                     </div>
+                    {splitPayActive && !isFullPay && (
+                      <p className="mt-2 text-[10px] text-text-muted leading-snug">
+                        {lang === "ar"
+                          ? "بقية الطاولة ستظل مفتوحة لباقي الضيوف للدفع لاحقاً."
+                          : "The rest of the table stays open for the others to pay later."}
+                      </p>
+                    )}
                   </div>
 
                   {/* Payment methods + (conditionally) tip — locked behind
@@ -1413,19 +1544,20 @@ function TrackPage() {
                     <button
                       onClick={() => {
                         if (!paymentMethod || isPaying) return;
+                        if (splitPayActive && selectedItems.length === 0) return;
                         setPayError(null);
                         setShowPayConfirm(true);
                       }}
-                      disabled={!paymentMethod || isPaying}
+                      disabled={!paymentMethod || isPaying || (splitPayActive && selectedItems.length === 0)}
                       className={`w-full py-3.5 rounded-2xl font-bold text-[15px] transition-all ${
-                        paymentMethod && !isPaying
+                        paymentMethod && !isPaying && !(splitPayActive && selectedItems.length === 0)
                           ? "bg-ocean-600 hover:bg-ocean-700 text-white shadow-lg shadow-ocean-500/20"
                           : "bg-sand-200 text-text-muted cursor-not-allowed"
                       }`}
                     >
                       {isPaying ? t("track.processing") : paymentMethod === "CASH"
-                        ? `${lang === "ar" ? "ادفع عند الكاشير" : "Pay at Cashier"} — ${invoiceTotal + tipAmount} ${t("common.egp")}`
-                        : `${t("track.pay")} ${invoiceTotal + tipAmount} ${t("common.egp")}`}
+                        ? `${lang === "ar" ? "ادفع عند الكاشير" : "Pay at Cashier"} — ${payableSubtotal + tipAmount} ${t("common.egp")}`
+                        : `${t("track.pay")} ${payableSubtotal + tipAmount} ${t("common.egp")}`}
                     </button>
                   )}
                 </div>
@@ -1500,7 +1632,17 @@ function TrackPage() {
                       const res = await fetch("/api/sessions/pay", {
                         method: "POST",
                         headers: { "Content-Type": "application/json" },
-                        body: JSON.stringify({ sessionId, paymentMethod, tip: tipAmount }),
+                        body: JSON.stringify({
+                          sessionId,
+                          paymentMethod,
+                          tip: tipAmount,
+                          // Only send itemIds when the picker was used. An
+                          // omitted field tells the server to fall back to
+                          // the legacy "pay everything unpaid" path so a
+                          // single-button flow doesn't gain a partial-pay
+                          // selector by accident.
+                          ...(splitPayActive ? { itemIds: selectedItems.map((it) => it.id) } : {}),
+                        }),
                         signal: payCtrl.signal,
                       });
                       clearTimeout(payTimeout);
@@ -1511,6 +1653,11 @@ function TrackPage() {
                         } else {
                           setIsPaid(true);
                         }
+                        // Drop the picker selection — by the time the
+                        // poll catches up, the items are server-side
+                        // moved onto a split-off and the next round
+                        // should default to "all remaining unpaid".
+                        setSelectedItemIds(null);
                         ok = true;
                       }
                     } catch { /* handled below */ }

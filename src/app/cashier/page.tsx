@@ -61,17 +61,29 @@ type SessionInfo = {
   // tip input so the cashier doesn't type it from scratch (and
   // doesn't accidentally drop it).
   pendingTip?: number;
+  // Round-scoped total: sum of orders the guest already signalled
+  // they're paying for (paymentMethod stamped, paidAt null). When
+  // > 0, that's what the cashier collects in this round — NOT the
+  // full session unpaidTotal. Drives split-pay UX without forcing
+  // the cashier to do any picking themselves.
+  pendingTotal?: number;
   // Flat list of items the cashier is about to collect on (every
   // unpaid, non-cancelled, non-comped line across the session's
   // open orders). Rendered inline on the open-bill card so the
   // cashier can see what's being charged, not just the total.
+  // The `pending` flag marks items belonging to the in-flight
+  // round (a guest-signalled split); when ANY item is pending the
+  // card narrows the breakdown to just those items.
   unpaidItems?: {
+    id: string;
+    orderId: string;
     name: string;
     nameAr: string | null;
     quantity: number;
     price: number;
     addOns: string[];
     notes: string | null;
+    pending: boolean;
   }[];
 };
 
@@ -586,13 +598,19 @@ function AcceptPaymentPanel({ sessions, onAcceptPayment, onReversePayment, recen
     // what gets stamped (SET, not incremented), so there's no double-
     // counting risk.
     setTipInput(session.pendingTip && session.pendingTip > 0 ? String(session.pendingTip) : "");
+    // Round-scoped: when the guest signalled a partial pay, only collect
+    // the slice they earmarked. Cashier sees the matching amount on the
+    // confirm modal instead of the full session bill.
+    const collectAmount = (session.pendingTotal ?? 0) > 0
+      ? (session.pendingTotal || 0)
+      : (session.unpaidTotal || 0);
     setPendingConfirm({
       sessionId,
       tableNumber: session.tableNumber,
       orderType: session.orderType,
       vipGuestName: session.vipGuestName,
       method,
-      total: session.unpaidTotal || 0,
+      total: collectAmount,
       roundLabel,
       priorSummary: summarizePriorRounds(priorRounds),
     });
@@ -912,6 +930,17 @@ function AcceptPaymentPanel({ sessions, onAcceptPayment, onReversePayment, recen
               const priorSummary = summarizePriorRounds(priorRounds);
               const nextRoundIndex = priorRounds.length + 1;
               const hasPriorPayment = priorRounds.length > 0;
+              // Round-scoped figures. When the guest has signalled a
+              // split-pay (some items have paymentMethod stamped, some
+              // don't), pendingTotal is the slice the cashier is about
+              // to collect on. Otherwise we fall back to the full
+              // unpaid bill.
+              const hasPendingRound = (s.pendingTotal ?? 0) > 0;
+              const roundAmount = hasPendingRound ? (s.pendingTotal || 0) : (s.unpaidTotal || 0);
+              const visibleItems = hasPendingRound
+                ? (s.unpaidItems || []).filter((it) => it.pending)
+                : (s.unpaidItems || []);
+              const remainingAfterRound = (s.unpaidTotal || 0) - roundAmount;
               return (
               <div key={s.id} className="bg-white rounded-2xl border-2 border-sand-200 overflow-hidden">
                 {/* Identity row */}
@@ -949,21 +978,30 @@ function AcceptPaymentPanel({ sessions, onAcceptPayment, onReversePayment, recen
                 {/* HERO — total due. The single largest element on the card. */}
                 <div className="px-5 pb-3 text-center">
                   <div className="text-[10px] font-extrabold uppercase tracking-[0.2em] text-text-muted mb-1.5">
-                    {hasPriorPayment ? `${t("cashier.payment")} ${nextRoundIndex}` : t("cashier.totalDue")}
+                    {hasPendingRound
+                      ? (s.pendingPaymentMethod ? t("cashier.collect") : t("cashier.totalDue"))
+                      : hasPriorPayment ? `${t("cashier.payment")} ${nextRoundIndex}` : t("cashier.totalDue")}
                   </div>
                   <div className="text-5xl font-extrabold text-text-primary tabular-nums leading-none tracking-tight">
-                    {formatEGP(s.unpaidTotal || 0)}
+                    {formatEGP(roundAmount)}
                     <span className="text-xl text-text-muted font-bold ms-2">{t("common.egp")}</span>
                   </div>
+                  {hasPendingRound && remainingAfterRound > 0 && (
+                    <div className="text-[11px] font-bold text-text-muted mt-1.5">
+                      {t("cashier.partialPayBadge")} · {formatEGP(remainingAfterRound)} {t("common.egp")} {t("cashier.partialPayRemaining")}
+                    </div>
+                  )}
                 </div>
 
                 {/* Itemised breakdown — what's actually being collected on.
                     Cashier was previously seeing the total alone, which made
                     it impossible to verify a disputed bill ("you charged me
-                    for 3 coffees, I had 2") without printing first. */}
-                {(s.unpaidItems?.length ?? 0) > 0 && (
+                    for 3 coffees, I had 2") without printing first. When
+                    the guest signalled a split-pay, this list narrows to
+                    just the items in the pending round. */}
+                {visibleItems.length > 0 && (
                   <div className="mx-5 mb-3 rounded-lg bg-sand-50 border border-sand-200 divide-y divide-sand-200/70">
-                    {s.unpaidItems!.map((it, idx) => {
+                    {visibleItems.map((it, idx) => {
                       const addOnLabels = (it.addOns || [])
                         .map((a) => { try { const p = JSON.parse(a); return p.name || a; } catch { return a; } })
                         .filter(Boolean);

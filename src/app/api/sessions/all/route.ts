@@ -53,22 +53,38 @@ export async function GET(request: NextRequest) {
         const pendingMethod = (pendingOrders[0]?.paymentMethod ?? null) as
           | "CASH" | "CARD" | "INSTAPAY" | null;
         const pendingTip = pendingOrders.reduce((sum, o) => sum + toNum(o.tip ?? 0), 0);
+        // Round-scoped total: sum of just the orders the guest signalled
+        // they're paying for. Lets the cashier card show "Collect 100"
+        // instead of the full unpaid bill when only a subset is in
+        // flight (which is what split-pay produces).
+        const pendingTotal = pendingOrders.reduce((sum, o) => sum + toNum(o.total), 0);
         // Items the cashier is about to collect on. Flattened across
         // every unpaid, non-cancelled order so the card shows what
         // they're charging for, not just the number. Comped lines are
         // dropped — the guest doesn't owe for them.
+        //
+        // id and orderId are surfaced so the guest /track picker and
+        // the cashier card can both pass them back to /api/sessions/pay
+        // for split-pay. The pay endpoint hands them to
+        // splitOrderForPayment which peels them onto a new Order.
         const unpaidItems = s.orders
           .filter((o) => o.status !== "CANCELLED" && o.paidAt == null)
           .flatMap((o) =>
             o.items
               .filter((i) => !i.comped)
               .map((i) => ({
+                id: i.id,
+                orderId: o.id,
                 name: i.menuItem?.name ?? "Item",
                 nameAr: i.menuItem?.nameAr ?? null,
                 quantity: i.quantity,
                 price: toNum(i.price),
                 addOns: i.addOns ?? [],
                 notes: i.notes ?? null,
+                // Pre-staged by the guest tap on /track. Lets the cashier
+                // see which items belong to the in-flight pay round vs
+                // the rest of the unpaid bill.
+                pending: o.paymentMethod != null,
               })),
           );
         return {
@@ -105,6 +121,7 @@ export async function GET(request: NextRequest) {
           ),
           pendingPaymentMethod: pendingMethod,
           pendingTip,
+          pendingTotal,
           unpaidItems,
           isCurrentShift: new Date(s.openedAt) >= shiftStart,
         };

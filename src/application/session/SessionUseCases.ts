@@ -6,6 +6,64 @@ import { maybeCloseSession } from "@/lib/queries";
 import { getCurrentShift, getShiftLabel, getShiftProgress } from "@/lib/shifts";
 import { computeSessionRounds } from "@/lib/session-rounds";
 import { nowInRestaurantTz } from "@/lib/restaurant-config";
+import type { Prisma } from "@/generated/prisma/client";
+
+// Merge a split-off Order back into its parent and delete the split.
+// Used by cancelPaymentRequest and reverseLatestPayRound: when a
+// split-off Order's pay attempt is undone, leaving it as a dangling
+// unpaid Order would poison the bill (the parent is already missing
+// those items but they weren't actually paid for either). Returning
+// the items to the parent restores the original bill shape.
+async function mergeSplitBackIntoParent(
+  tx: Prisma.TransactionClient,
+  splitOrderId: string,
+  parentOrderId: string,
+) {
+  const parent = await tx.order.findUnique({
+    where: { id: parentOrderId },
+    include: {
+      items: {
+        where: { cancelled: false },
+        select: { id: true, price: true, quantity: true, comped: true },
+      },
+    },
+  });
+  if (!parent) {
+    // Parent has been deleted (rare — closed session cleanup, etc).
+    // Leave the split as-is rather than orphaning items into a void.
+    return;
+  }
+
+  // Move all items back onto the parent.
+  await tx.orderItem.updateMany({
+    where: { orderId: splitOrderId },
+    data: { orderId: parentOrderId },
+  });
+
+  // Recompute parent totals from the union of remaining + returned items.
+  const merged = await tx.order.findUnique({
+    where: { id: parentOrderId },
+    include: {
+      items: {
+        where: { cancelled: false },
+        select: { price: true, quantity: true, comped: true },
+      },
+    },
+  });
+  const subtotal = (merged?.items ?? []).reduce(
+    (s, i) => s + (i.comped ? 0 : Number(i.price) * i.quantity), 0,
+  );
+  await tx.order.update({
+    where: { id: parentOrderId },
+    data: {
+      subtotal,
+      total: subtotal + Number(parent.tax) + Number(parent.deliveryFee),
+    },
+  });
+
+  // Drop the now-empty split-off row.
+  await tx.order.delete({ where: { id: splitOrderId } });
+}
 
 const fullSessionInclude = {
   table: { select: { number: true } },
@@ -143,6 +201,7 @@ export class SessionUseCases {
             items: {
               where: { cancelled: false },
               select: {
+                id: true,
                 quantity: true,
                 price: true,
                 addOns: true,
@@ -533,15 +592,23 @@ export class SessionUseCases {
     sessionId: string,
     paymentMethod: string,
     tipAmount: number = 0,
+    // Optional: restrict to a specific subset of unpaid orders. Used by
+    // the split-pay flow — splitOrderForPayment returns the Orders the
+    // guest is paying on, and we stamp only those (so a different guest's
+    // unpaid orders aren't accidentally pulled into this round).
+    orderIds?: string[],
   ) {
+    const scope = orderIds && orderIds.length > 0
+      ? { sessionId, status: { notIn: ["PAID", "CANCELLED"] as ("PAID" | "CANCELLED")[] }, paidAt: null, id: { in: orderIds } }
+      : { sessionId, status: { notIn: ["PAID", "CANCELLED"] as ("PAID" | "CANCELLED")[] }, paidAt: null };
     await db.order.updateMany({
-      where: { sessionId, status: { notIn: ["PAID", "CANCELLED"] }, paidAt: null },
+      where: scope,
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       data: { paymentMethod: paymentMethod as any, tip: 0 },
     });
     if (tipAmount > 0) {
       const firstUnpaid = await db.order.findFirst({
-        where: { sessionId, status: { notIn: ["PAID", "CANCELLED"] }, paidAt: null },
+        where: scope,
         orderBy: { createdAt: "asc" },
         select: { id: true },
       });
@@ -554,9 +621,11 @@ export class SessionUseCases {
     }
   }
 
-  async sumOpenTotal(sessionId: string): Promise<number> {
+  async sumOpenTotal(sessionId: string, orderIds?: string[]): Promise<number> {
     const agg = await db.order.aggregate({
-      where: { sessionId, status: { notIn: ["PAID", "CANCELLED"] } },
+      where: orderIds && orderIds.length > 0
+        ? { sessionId, status: { notIn: ["PAID", "CANCELLED"] }, id: { in: orderIds } }
+        : { sessionId, status: { notIn: ["PAID", "CANCELLED"] } },
       _sum: { total: true },
     });
     const t = agg._sum.total;
@@ -588,21 +657,231 @@ export class SessionUseCases {
   async cancelPaymentRequest(sessionId: string): Promise<
     | { ok: true; cleared: number }
   > {
-    const result = await db.order.updateMany({
-      where: { sessionId, paidAt: null, paymentMethod: { not: null } },
-      // Reset both the chosen method AND the guest's pre-stamped tip.
-      // Without the tip reset, a tip the guest typed then cancelled
-      // would silently linger and show up on the cashier's pre-fill
-      // the next time they tapped Pay.
-      data: { paymentMethod: null, tip: 0 },
+    return db.$transaction(async (tx) => {
+      // Per-session lock so a fresh confirm or split can't race the
+      // merge-back below.
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${sessionId}, 1))`;
+
+      // Snapshot the orders that are about to be unstamped so we can
+      // identify split-offs that should be merged back into their
+      // parents. Anything with parentOrderId set was created by the
+      // split-pay flow — leaving it as a dangling unpaid Order would
+      // pollute the bill with an orphan row that nobody asked for.
+      const stamped = await tx.order.findMany({
+        where: { sessionId, paidAt: null, paymentMethod: { not: null } },
+        select: { id: true, parentOrderId: true },
+      });
+
+      const result = await tx.order.updateMany({
+        where: { sessionId, paidAt: null, paymentMethod: { not: null } },
+        // Reset both the chosen method AND the guest's pre-stamped tip.
+        // Without the tip reset, a tip the guest typed then cancelled
+        // would silently linger and show up on the cashier's pre-fill
+        // the next time they tapped Pay.
+        data: { paymentMethod: null, tip: 0 },
+      });
+
+      const splitsToMerge = stamped.filter((o) => o.parentOrderId);
+      for (const split of splitsToMerge) {
+        await mergeSplitBackIntoParent(tx, split.id, split.parentOrderId!);
+      }
+
+      return { ok: true, cleared: result.count };
     });
-    return { ok: true, cleared: result.count };
   }
 
   async getSessionRestaurantScope(sessionId: string) {
     return db.tableSession.findUnique({
       where: { id: sessionId },
       select: { restaurantId: true },
+    });
+  }
+
+  /**
+   * Split a session's unpaid orders for partial payment.
+   *
+   * Given a list of itemIds (a strict subset of unpaid items in the
+   * session), peel those items into newly-created split-off Orders
+   * and recompute totals on the original parents. Returns the set of
+   * Orders whose items the caller is paying for — the existing
+   * stampPendingPaymentMethod / confirmPayRound flow then operates on
+   * those Orders unchanged.
+   *
+   * Rules:
+   *   • Only SERVED items can be split. Splitting before food is
+   *     delivered would let a guest "pay for" an order the kitchen
+   *     hasn't even started — which would be settled but uncooked.
+   *   • Cancelled and comped items are silently ignored (cancelled =
+   *     not owed; comped = explicitly free, no settlement needed).
+   *   • If the selected itemIds cover ALL non-cancelled items in an
+   *     Order, that Order is returned as-is (no split — it's already
+   *     a clean unit of payment).
+   *   • Tip stays on the parent Order and is reset to 0 on the split-
+   *     off. Tip on the round is set later by stamp/confirm.
+   *   • New Order keeps guestNumber/guestName/orderType/station/
+   *     etc from the parent, gets a fresh orderNumber and a
+   *     parentOrderId pointer for the cancel/reverse merge-back path.
+   *
+   * Wrapped in the per-session advisory lock so a fresh order POST
+   * can't race the split.
+   */
+  async splitOrderForPayment(input: {
+    sessionId: string;
+    itemIds: string[];
+  }): Promise<{
+    payableOrderIds: string[];
+    splitOrderIds: string[];
+  }> {
+    const { sessionId, itemIds } = input;
+    if (!itemIds || itemIds.length === 0) {
+      return { payableOrderIds: [], splitOrderIds: [] };
+    }
+
+    return db.$transaction(async (tx) => {
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${sessionId}, 1))`;
+
+      // Pull the candidate items, scoped to this session's unpaid orders.
+      // Anything not in this set (wrong session, already paid, cancelled,
+      // comped, not yet served) is filtered out so a malformed request
+      // can never escape its lane.
+      const items = await tx.orderItem.findMany({
+        where: {
+          id: { in: itemIds },
+          cancelled: false,
+          comped: false,
+          order: {
+            sessionId,
+            paidAt: null,
+            status: "SERVED",
+          },
+        },
+        select: {
+          id: true,
+          orderId: true,
+          quantity: true,
+          price: true,
+          addOns: true,
+          notes: true,
+          menuItemId: true,
+          wasUpsell: true,
+        },
+      });
+      if (items.length === 0) {
+        return { payableOrderIds: [], splitOrderIds: [] };
+      }
+
+      const byOrder = new Map<string, typeof items>();
+      for (const it of items) {
+        const arr = byOrder.get(it.orderId) ?? [];
+        arr.push(it);
+        byOrder.set(it.orderId, arr);
+      }
+
+      const payableOrderIds: string[] = [];
+      const splitOrderIds: string[] = [];
+
+      for (const [orderId, picked] of byOrder.entries()) {
+        const parent = await tx.order.findUnique({
+          where: { id: orderId },
+          include: {
+            items: {
+              where: { cancelled: false },
+              select: { id: true, price: true, quantity: true, comped: true },
+            },
+          },
+        });
+        if (!parent) continue;
+
+        const liveItemIds = parent.items.map((i) => i.id);
+        const pickedIds = new Set(picked.map((p) => p.id));
+        const allPicked = liveItemIds.every((id) => pickedIds.has(id));
+        if (allPicked) {
+          // Whole order picked — no split needed; settle it directly.
+          payableOrderIds.push(parent.id);
+          continue;
+        }
+
+        // Per-restaurant orderNumber: take next from the highest used today.
+        const lastForRestaurant = await tx.order.findFirst({
+          where: { restaurantId: parent.restaurantId },
+          orderBy: { orderNumber: "desc" },
+          select: { orderNumber: true },
+        });
+        const nextOrderNumber = (lastForRestaurant?.orderNumber ?? 0) + 1;
+
+        // Subtotal of the split-off = sum of item.price * qty for picked.
+        // Tax stays at 0 in this app, deliveryFee stays on the parent
+        // (it's a session-level fee, not item-level), tip resets to 0
+        // (round-level, set on confirm). total = subtotal.
+        const splitSubtotal = picked.reduce(
+          (s, it) => s + Number(it.price) * it.quantity, 0,
+        );
+
+        const splitOrder = await tx.order.create({
+          data: {
+            orderNumber: nextOrderNumber,
+            status: "SERVED",
+            tableId: parent.tableId,
+            restaurantId: parent.restaurantId,
+            sessionId: parent.sessionId,
+            subtotal: splitSubtotal,
+            tax: 0,
+            total: splitSubtotal,
+            tip: 0,
+            deliveryFee: 0,
+            paymentMethod: null,
+            paidAt: null,
+            readyAt: parent.readyAt,
+            servedAt: parent.servedAt,
+            notes: null,
+            guestNumber: parent.guestNumber,
+            guestName: parent.guestName,
+            language: parent.language,
+            station: parent.station,
+            // Intentionally NOT copying parent.groupId. groupId means
+            // "kitchen + bar siblings from the same cart" — the
+            // guest-poll merger folds those back into a single
+            // displayed order. If a split-off shared the parent's
+            // groupId it would re-merge with the parent and obscure
+            // the partial payment on the guest's bill view. parent
+            // ↔ split linkage lives on parentOrderId instead.
+            groupId: null,
+            orderType: parent.orderType,
+            vipGuestId: parent.vipGuestId,
+            parentOrderId: parent.id,
+          },
+        });
+
+        // Move the picked items onto the split order.
+        await tx.orderItem.updateMany({
+          where: { id: { in: picked.map((p) => p.id) } },
+          data: { orderId: splitOrder.id },
+        });
+
+        // Recompute parent totals from the items that remain.
+        const remaining = parent.items.filter((i) => !pickedIds.has(i.id));
+        const parentSubtotal = remaining.reduce(
+          (s, i) => s + (i.comped ? 0 : Number(i.price) * i.quantity), 0,
+        );
+        await tx.order.update({
+          where: { id: parent.id },
+          data: {
+            subtotal: parentSubtotal,
+            // total = subtotal + tax + deliveryFee. Tax stays 0; the
+            // delivery fee (if any) stays on the parent. Tip on the
+            // parent is left untouched — a guest can have already pre-
+            // stamped a tip and then chosen to split-pay only some
+            // items, in which case the tip belongs to the remaining
+            // round, not this one.
+            total: parentSubtotal + Number(parent.tax) + Number(parent.deliveryFee),
+          },
+        });
+
+        payableOrderIds.push(splitOrder.id);
+        splitOrderIds.push(splitOrder.id);
+      }
+
+      return { payableOrderIds, splitOrderIds };
     });
   }
 
@@ -730,7 +1009,7 @@ export class SessionUseCases {
 
       const affected = await tx.order.findMany({
         where: { sessionId, paidAt: { gte: windowStart, lte: windowEnd } },
-        select: { id: true, status: true, total: true, paymentMethod: true },
+        select: { id: true, status: true, total: true, paymentMethod: true, parentOrderId: true },
       });
 
       for (const o of affected) {
@@ -747,6 +1026,16 @@ export class SessionUseCases {
             status: o.status === "PAID" ? "SERVED" : o.status,
           },
         });
+      }
+
+      // For reversed split-off Orders, merge the items back into the
+      // parent. Without this, undoing a partial-pay would leave the
+      // bill split into Order rows nobody asked to keep separate, and
+      // the next "pay all" tap would charge them as two distinct
+      // rounds on the receipt.
+      const splitsToMerge = affected.filter((o) => o.parentOrderId);
+      for (const split of splitsToMerge) {
+        await mergeSplitBackIntoParent(tx, split.id, split.parentOrderId!);
       }
 
       const session = await tx.tableSession.findUnique({

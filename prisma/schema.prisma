@@ -159,6 +159,17 @@ model Order {
   createdAt    DateTime    @default(now())
   updatedAt    DateTime    @updatedAt
 
+  // Split-pay support. When a guest taps "Pay X EGP" with only some
+  // items selected, splitOrderForPayment moves those items into a new
+  // Order row and points its parentOrderId at the original. Lets the
+  // settlement layer (paid-rounds, receipt, cashout) keep treating
+  // Order as the unit of payment without per-item paidAt fields. On
+  // pay cancel / reverse, the split-off is merged back into the
+  // parent so the bill never accumulates orphan zero-totaled rows.
+  parentOrder   Order?  @relation("OrderSplits", fields: [parentOrderId], references: [id], onDelete: SetNull)
+  parentOrderId String?
+  splits        Order[] @relation("OrderSplits")
+
   @@index([groupId])
   @@index([restaurantId, status])
   @@index([restaurantId, createdAt])
@@ -166,6 +177,7 @@ model Order {
   @@index([sessionId])
   @@index([vipGuestId])
   @@index([deliveryDriverId, deliveryStatus])
+  @@index([parentOrderId])
 }
 
 model OrderItem {

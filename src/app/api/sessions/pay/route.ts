@@ -13,10 +13,16 @@ const PAY_CONFIRM_ROLES = ["CASHIER", "OWNER", "FLOOR_MANAGER"];
 
 export async function POST(request: NextRequest) {
   const body = await request.json();
-  const { sessionId, paymentMethod, tip } = body as {
+  const { sessionId, paymentMethod, tip, itemIds } = body as {
     sessionId?: string;
     paymentMethod?: string;
     tip?: number;
+    // Optional split-pay payload. When provided and a strict subset of
+    // the session's unpaid items, we run splitOrderForPayment first to
+    // peel those items onto fresh Order rows, then stamp pending only
+    // on those rows. Omitted / empty → today's "pay everything unpaid"
+    // behaviour stays intact for the legacy single-button flow.
+    itemIds?: string[];
   };
 
   if (!sessionId || !paymentMethod) {
@@ -29,6 +35,10 @@ export async function POST(request: NextRequest) {
     ? Math.round(tip)
     : 0;
 
+  const itemIdsClean = Array.isArray(itemIds)
+    ? itemIds.filter((s) => typeof s === "string" && s.length > 0)
+    : [];
+
   try {
     const session = await useCases.sessions.findForPayRequest(sessionId);
     if (!session) {
@@ -38,9 +48,39 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Session is already closed" }, { status: 409 });
     }
 
-    await useCases.sessions.stampPendingPaymentMethod(sessionId, paymentMethod, tipAmount);
+    // Split-pay path: peel the picked items into their own Order(s)
+    // and scope the pending stamp to those Order ids. If the picker
+    // happened to select every unpaid item, splitOrderForPayment
+    // returns the parent ids without splitting (no orphan empty
+    // Orders). itemIdsClean empty → null scope → "stamp everything
+    // unpaid", which preserves the current behaviour.
+    let payableOrderIds: string[] | undefined;
+    if (itemIdsClean.length > 0) {
+      const split = await useCases.sessions.splitOrderForPayment({
+        sessionId,
+        itemIds: itemIdsClean,
+      });
+      if (split.payableOrderIds.length === 0) {
+        // None of the requested items were eligible (cancelled, comped,
+        // not yet served, or already paid). Surface 409 so the guest UI
+        // can refresh and re-pick instead of silently signalling a
+        // payment for nothing.
+        return NextResponse.json(
+          { error: "No payable items in selection" },
+          { status: 409 },
+        );
+      }
+      payableOrderIds = split.payableOrderIds;
+    }
 
-    const total = await useCases.sessions.sumOpenTotal(sessionId);
+    await useCases.sessions.stampPendingPaymentMethod(
+      sessionId,
+      paymentMethod,
+      tipAmount,
+      payableOrderIds,
+    );
+
+    const total = await useCases.sessions.sumOpenTotal(sessionId, payableOrderIds);
     const labelByMethod = paymentMethod === "CASH"
       ? { en: "Cash Payment Incoming", ar: "دفع نقدي قادم" }
       : paymentMethod === "CARD"

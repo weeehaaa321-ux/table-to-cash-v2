@@ -127,9 +127,14 @@ export async function GET(request: NextRequest) {
         guestName: o.guestName ?? null,
         createdAt: o.createdAt.toISOString(),
         items: o.items.map((it) => ({
+          // Surfaced so the /track item picker can pass selected ids
+          // back to /api/sessions/pay for split-pay.
+          id: it.id,
           name: it.menuItem?.name || "Item",
           quantity: it.quantity,
           price: toNum(it.price),
+          cancelled: it.cancelled,
+          comped: it.comped,
         })),
       })),
       delegation: delegation ? parseInt(delegation.command || "0", 10) : null,
@@ -143,9 +148,12 @@ export async function GET(request: NextRequest) {
             guestNumber: singleOrder.guestNumber ?? null,
             guestName: singleOrder.guestName ?? null,
             items: singleOrder.items.map((it) => ({
+              id: it.id,
               name: it.menuItem?.name || "Item",
               quantity: it.quantity,
               price: toNum(it.price),
+              cancelled: it.cancelled,
+              comped: it.comped,
             })),
           }
         : null,
