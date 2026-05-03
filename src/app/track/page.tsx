@@ -1173,7 +1173,15 @@ function TrackPage() {
                             </button>
                           )}
                         </div>
-                        <div className="space-y-1.5 max-h-44 overflow-y-auto pr-1">
+                        {/* No max-height cap. The earlier max-h-44 fit ~5
+                            rows and silently hid older items behind an
+                            invisible scrollbar — guests with 6+ items at
+                            the table genuinely thought their bill was
+                            wrong. Letting the list grow naturally and
+                            scrolling the whole page is the standard
+                            mobile pattern; the Pay button at the bottom
+                            comes back into view via normal scroll. */}
+                        <div className="space-y-1.5">
                           {payableItems.map((it) => {
                             const checked = effectiveSelectedIds.has(it.id);
                             const lineTotal = Math.round(it.price * it.quantity);
