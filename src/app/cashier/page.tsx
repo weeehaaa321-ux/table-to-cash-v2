@@ -514,7 +514,19 @@ function AcceptPaymentPanel({ sessions, onAcceptPayment, onReversePayment, recen
     total: number;
     roundLabel: string;
     priorSummary: string | null;
+    // Set when the cashier picked a subset of items in the card. Drives
+    // the two-step settle (POST split+stamp, then PATCH settle) inside
+    // handleConfirmReceived. Empty/undefined → settle whatever is
+    // already pending (or everything unpaid, the legacy walk-up flow).
+    splitItemIds?: string[];
   } | null>(null);
+  // Per-session item-pick state for the cashier walk-up flow. null =
+  // "default — settle everything in this round" (preserves the existing
+  // single-tap UX for the common case). Set = explicit subset the cashier
+  // is collecting on. Locked when the guest has already signalled a
+  // pending round (can't override a guest signal silently — cashier
+  // would need to reject the existing request first).
+  const [pickedItems, setPickedItems] = useState<Map<string, Set<string>>>(new Map());
   // Lock while a settle is in flight so a double-tap on 'Yes, received'
   // can't fire the PATCH twice. The second call would be idempotent on
   // the DB side but would clobber the success flash with a 0 EGP total.
@@ -585,7 +597,18 @@ function AcceptPaymentPanel({ sessions, onAcceptPayment, onReversePayment, recen
 
   // Step 1: method picked — stage the confirm modal instead of settling
   // straight away. Nothing hits the server until the cashier answers Yes.
-  const handleMethodChosen = (sessionId: string, method: PaymentMethodChoice) => {
+  //
+  // splitItemIds / splitTotal: when the cashier used the in-card item
+  // picker for a walk-up split-pay, the click handler computes the
+  // selection and passes it through. The two-step settle in
+  // handleConfirmReceived (POST split+stamp → PATCH settle) reads it
+  // back from pendingConfirm. Empty/undefined → settle whatever's
+  // already pending or the full unpaid bill (the legacy flow).
+  const handleMethodChosen = (
+    sessionId: string,
+    method: PaymentMethodChoice,
+    split?: { itemIds: string[]; total: number },
+  ) => {
     const session = sessions.find((s) => s.id === sessionId);
     if (!session) return;
     const priorRounds = session.paidRounds || [];
@@ -598,12 +621,15 @@ function AcceptPaymentPanel({ sessions, onAcceptPayment, onReversePayment, recen
     // what gets stamped (SET, not incremented), so there's no double-
     // counting risk.
     setTipInput(session.pendingTip && session.pendingTip > 0 ? String(session.pendingTip) : "");
-    // Round-scoped: when the guest signalled a partial pay, only collect
-    // the slice they earmarked. Cashier sees the matching amount on the
-    // confirm modal instead of the full session bill.
-    const collectAmount = (session.pendingTotal ?? 0) > 0
-      ? (session.pendingTotal || 0)
-      : (session.unpaidTotal || 0);
+    // Round-scoped collect amount, in priority order:
+    //   1. cashier picker subset (walk-up split)
+    //   2. guest-signalled pending round
+    //   3. full unpaid (legacy "everything")
+    const collectAmount = split
+      ? split.total
+      : (session.pendingTotal ?? 0) > 0
+        ? (session.pendingTotal || 0)
+        : (session.unpaidTotal || 0);
     setPendingConfirm({
       sessionId,
       tableNumber: session.tableNumber,
@@ -613,21 +639,70 @@ function AcceptPaymentPanel({ sessions, onAcceptPayment, onReversePayment, recen
       total: collectAmount,
       roundLabel,
       priorSummary: summarizePriorRounds(priorRounds),
+      splitItemIds: split?.itemIds,
     });
   };
 
   // Step 2: cashier confirms in the modal — now settle + print.
+  //
+  // Two-step settle for split-pay: when the cashier ticked a subset of
+  // items in the picker, splitItemIds is populated. We POST to
+  // /api/sessions/pay first to peel those items into a fresh Order +
+  // stamp the chosen method on it (the same path the guest uses on
+  // /track), then PATCH to settle. The PATCH only stamps paidAt on
+  // orders with paymentMethod set, so it picks up exactly the just-
+  // stamped split-off — never the unpicked rest of the bill. If the
+  // POST fails the cashier sees an error and nothing's collected.
+  // If the POST succeeds but the PATCH fails, the split-off remains
+  // as a pending round (re-clicking Cash will call PATCH again and
+  // settle it cleanly — recoverable).
   const handleConfirmReceived = async () => {
     if (!pendingConfirm || settling) return;
-    const { sessionId, tableNumber, method } = pendingConfirm;
+    const { sessionId, tableNumber, method, splitItemIds } = pendingConfirm;
     // Parse once at confirm time. Anything that isn't a finite positive
     // number becomes 0 — the server will also defensively discard it.
     const parsedTip = Math.max(0, Math.round(Number(tipInput) || 0));
     setSettling(true);
     setPendingConfirm(null);
+
+    if (splitItemIds && splitItemIds.length > 0) {
+      try {
+        const splitRes = await fetch("/api/sessions/pay", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            sessionId,
+            paymentMethod: method,
+            tip: parsedTip,
+            itemIds: splitItemIds,
+          }),
+        });
+        if (!splitRes.ok) {
+          // 409 = no eligible items in the selection (already paid,
+          // cancelled, etc — likely a stale picker against a poll race).
+          // 500 = server-side failure. Either way, abort the settle so
+          // we don't try to PATCH a round that doesn't exist.
+          setSettling(false);
+          return;
+        }
+      } catch {
+        setSettling(false);
+        return;
+      }
+    }
+
     const result = await onAcceptPayment(sessionId, method, parsedTip);
     setSettling(false);
     if (result) {
+      // Drop the picker selection — the items the cashier just settled
+      // are gone from unpaidItems on the next poll, and the next round
+      // should default to "all remaining unpaid".
+      setPickedItems((prev) => {
+        if (!prev.has(sessionId)) return prev;
+        const next = new Map(prev);
+        next.delete(sessionId);
+        return next;
+      });
       // Show the authoritative total returned from the server rather than
       // the optimistic snapshot — if a guest added an order after the pay
       // request went out, this is the number the cashier should reconcile
@@ -936,11 +1011,60 @@ function AcceptPaymentPanel({ sessions, onAcceptPayment, onReversePayment, recen
               // to collect on. Otherwise we fall back to the full
               // unpaid bill.
               const hasPendingRound = (s.pendingTotal ?? 0) > 0;
-              const roundAmount = hasPendingRound ? (s.pendingTotal || 0) : (s.unpaidTotal || 0);
               const visibleItems = hasPendingRound
                 ? (s.unpaidItems || []).filter((it) => it.pending)
                 : (s.unpaidItems || []);
+
+              // Cashier-side item picker: enabled only when the guest
+              // hasn't already signalled a partial pay (otherwise we'd
+              // be silently overriding their selection) and there are
+              // multiple items to choose from.
+              const pickerEnabled = !hasPendingRound && visibleItems.length > 1;
+              const sessionPick = pickedItems.get(s.id) ?? null;
+              const pickerActive = pickerEnabled && sessionPick !== null;
+              // When the picker is in default state (null), every item is
+              // implicitly selected. The Set version is for membership
+              // checks in the row render below.
+              const effectivePick: Set<string> = sessionPick ?? new Set(visibleItems.map((it) => it.id));
+              const pickedSubtotal = visibleItems
+                .filter((it) => effectivePick.has(it.id))
+                .reduce((acc, it) => acc + Math.round(it.price * it.quantity), 0);
+
+              // The amount the cashier is about to collect on. Picker
+              // overrides; pending guest signal is next; full unpaid is
+              // the fallback.
+              const roundAmount = pickerActive
+                ? pickedSubtotal
+                : hasPendingRound
+                  ? (s.pendingTotal || 0)
+                  : (s.unpaidTotal || 0);
               const remainingAfterRound = (s.unpaidTotal || 0) - roundAmount;
+
+              const togglePick = (itemId: string) => {
+                setPickedItems((prev) => {
+                  const next = new Map(prev);
+                  const base = prev.get(s.id) ?? new Set(visibleItems.map((it) => it.id));
+                  const updated = new Set(base);
+                  if (updated.has(itemId)) updated.delete(itemId);
+                  else updated.add(itemId);
+                  // Collapse back to "default = all" when the cashier
+                  // has every item ticked again. Lets a freshly placed
+                  // round-2 item auto-include without re-ticking.
+                  const allTicked = visibleItems.every((it) => updated.has(it.id))
+                    && updated.size === visibleItems.length;
+                  if (allTicked) next.delete(s.id);
+                  else next.set(s.id, updated);
+                  return next;
+                });
+              };
+              const resetPick = () => {
+                setPickedItems((prev) => {
+                  if (!prev.has(s.id)) return prev;
+                  const next = new Map(prev);
+                  next.delete(s.id);
+                  return next;
+                });
+              };
               return (
               <div key={s.id} className="bg-white rounded-2xl border-2 border-sand-200 overflow-hidden">
                 {/* Identity row */}
@@ -998,16 +1122,50 @@ function AcceptPaymentPanel({ sessions, onAcceptPayment, onReversePayment, recen
                     it impossible to verify a disputed bill ("you charged me
                     for 3 coffees, I had 2") without printing first. When
                     the guest signalled a split-pay, this list narrows to
-                    just the items in the pending round. */}
+                    just the items in the pending round. When the cashier
+                    is taking a walk-up split-pay, the items become tickable
+                    via checkboxes — picking a subset routes through the
+                    same splitOrderForPayment flow the guest uses. */}
                 {visibleItems.length > 0 && (
-                  <div className="mx-5 mb-3 rounded-lg bg-sand-50 border border-sand-200 divide-y divide-sand-200/70">
+                  <div className="mx-5 mb-3 rounded-lg bg-sand-50 border border-sand-200 overflow-hidden">
+                    {pickerEnabled && (
+                      <div className="px-3 py-2 flex items-center justify-between border-b border-sand-200/70 bg-white/40">
+                        <span className="text-[10px] font-extrabold text-text-muted uppercase tracking-widest">
+                          {pickerActive
+                            ? `${effectivePick.size} ${t("cashier.itemsPicked")}`
+                            : t("cashier.tapItemsToSplit")}
+                        </span>
+                        {pickerActive && (
+                          <button
+                            onClick={resetPick}
+                            className="text-[10px] font-extrabold text-ocean-600 underline underline-offset-2"
+                          >
+                            {t("cashier.selectAll")}
+                          </button>
+                        )}
+                      </div>
+                    )}
+                    <div className="divide-y divide-sand-200/70">
                     {visibleItems.map((it, idx) => {
                       const addOnLabels = (it.addOns || [])
                         .map((a) => { try { const p = JSON.parse(a); return p.name || a; } catch { return a; } })
                         .filter(Boolean);
                       const lineTotal = Math.round(it.price * it.quantity);
+                      const checked = effectivePick.has(it.id);
+                      const Row = pickerEnabled ? "label" : "div";
                       return (
-                        <div key={idx} className="px-3 py-2 flex items-start gap-3">
+                        <Row
+                          key={it.id ?? idx}
+                          className={`px-3 py-2 flex items-start gap-3 ${pickerEnabled ? "cursor-pointer" : ""} ${pickerActive && !checked ? "opacity-40" : ""}`}
+                        >
+                          {pickerEnabled && (
+                            <input
+                              type="checkbox"
+                              checked={checked}
+                              onChange={() => togglePick(it.id)}
+                              className="mt-1 w-4 h-4 rounded border-sand-300 text-ocean-600 focus:ring-ocean-500 shrink-0"
+                            />
+                          )}
                           <span className="text-sm font-extrabold text-text-primary tabular-nums shrink-0 w-6 text-end">
                             {it.quantity}×
                           </span>
@@ -1028,9 +1186,10 @@ function AcceptPaymentPanel({ sessions, onAcceptPayment, onReversePayment, recen
                           <span className="text-sm font-extrabold text-text-primary tabular-nums shrink-0">
                             {formatEGP(lineTotal)}
                           </span>
-                        </div>
+                        </Row>
                       );
                     })}
+                    </div>
                   </div>
                 )}
 
@@ -1074,11 +1233,30 @@ function AcceptPaymentPanel({ sessions, onAcceptPayment, onReversePayment, recen
                     ["INSTAPAY", "📱", t("cashier.instapay"), "bg-status-wait-500 hover:bg-status-wait-600"],
                   ] as [PaymentMethodChoice, string, string, string][]).map(([key, icon, label, color], idx) => {
                     const isPreferred = !s.pendingPaymentMethod || s.pendingPaymentMethod === key;
+                    // Disable when the picker is active but nothing's
+                    // ticked — collecting 0 EGP would create no
+                    // settlement event and just confuse the cashier.
+                    const pickerEmpty = pickerActive && effectivePick.size === 0;
                     return (
                       <button
                         key={key}
-                        onClick={() => handleMethodChosen(s.id, key)}
-                        className={`py-5 text-sm font-extrabold uppercase tracking-wider text-white transition active:scale-[0.99] flex items-center justify-center gap-1.5 ${color} ${idx > 0 ? "border-l-2 border-sand-200" : ""} ${isPreferred ? "" : "opacity-30 saturate-50"}`}
+                        disabled={pickerEmpty}
+                        onClick={() => {
+                          if (pickerEmpty) return;
+                          handleMethodChosen(
+                            s.id,
+                            key,
+                            pickerActive
+                              ? {
+                                  itemIds: visibleItems
+                                    .filter((it) => effectivePick.has(it.id))
+                                    .map((it) => it.id),
+                                  total: pickedSubtotal,
+                                }
+                              : undefined,
+                          );
+                        }}
+                        className={`py-5 text-sm font-extrabold uppercase tracking-wider text-white transition active:scale-[0.99] flex items-center justify-center gap-1.5 ${color} ${idx > 0 ? "border-l-2 border-sand-200" : ""} ${isPreferred && !pickerEmpty ? "" : "opacity-30 saturate-50"} ${pickerEmpty ? "cursor-not-allowed" : ""}`}
                       >
                         <span className="text-xl leading-none">{icon}</span>
                         <span className="truncate">{label}</span>
