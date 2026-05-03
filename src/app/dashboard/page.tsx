@@ -5598,7 +5598,15 @@ function OwnerControlSystem({ verifiedOwnerId }: { verifiedOwnerId: string }) {
                     accent={shiftAvgServeMin > 20 ? "text-coral-600" : shiftAvgServeMin > 12 ? "text-sunset-500" : "text-success"}
                     sub={shiftAvgServeMin === 0 ? t("dashboard.kpi.shiftServeEmpty") : t("dashboard.kpi.shiftServeSub")}
                   />
-                  <KpiCard icon="◈" label={t("dashboard.kpi.waitTime")} value={metrics.avgWaitTime} unit={t("common.minutes")} placeholder={metrics.avgWaitTime === 0 ? "—" : undefined} accent={metrics.avgWaitTime > 15 ? "text-coral-600" : "text-text-primary"} sub={metrics.avgWaitTime === 0 ? t("dashboard.kpi.waitEmpty") : kitchen.stuckOrders.length > 0 ? tr("dashboard.kpi.stuckInKitchen", { n: kitchen.stuckOrders.length }) : t("dashboard.kpi.kitchenFlowing")} />
+                  <KpiCard
+                    icon="◈"
+                    label={t("dashboard.kpi.pickupTime")}
+                    value={metrics.avgPickupTime}
+                    unit={t("common.minutes")}
+                    placeholder={metrics.avgPickupTime === 0 ? "—" : undefined}
+                    accent={metrics.avgPickupTime > 5 ? "text-coral-600" : metrics.avgPickupTime > 3 ? "text-sunset-500" : "text-success"}
+                    sub={metrics.avgPickupTime === 0 ? t("dashboard.kpi.pickupEmpty") : metrics.avgPickupTime > 5 ? t("dashboard.kpi.pickupSlow") : t("dashboard.kpi.pickupFast")}
+                  />
                 </div>
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
                   <div className="space-y-4">

@@ -155,6 +155,19 @@ function computeMetrics(orders: LiveOrder[], tables: TableState[]) {
       ? completedServe.reduce((s, o) => s + (o.servedAt! - o.createdAt) / 60000, 0) / completedServe.length
       : 0;
 
+  // Floor pickup time = average of (servedAt - readyAt). Isolates the
+  // floor team's contribution to guest wait — food sitting on the pass
+  // after the kitchen finished but before a waiter delivered it. Pairs
+  // with avgPrepTime (kitchen) and avgWaitTime (end-to-end) so the
+  // owner can tell whether slow service is the kitchen or the floor.
+  const completedPickup = orders.filter(
+    (o) => typeof o.servedAt === "number" && typeof o.readyAt === "number"
+  );
+  const avgPickupTime =
+    completedPickup.length > 0
+      ? completedPickup.reduce((s, o) => s + (o.servedAt! - o.readyAt!) / 60000, 0) / completedPickup.length
+      : 0;
+
   const kitchenCapacity = computeKitchenCapacity(activeOrders.length, KITCHEN_CONFIG);
 
   // Bar: same computation, filtered to BAR-station orders.
@@ -221,6 +234,7 @@ function computeMetrics(orders: LiveOrder[], tables: TableState[]) {
       upsellRevenue,
       cartAbandonment: 0,
       avgWaitTime: Math.round(avgWaitTime),
+      avgPickupTime: Math.round(avgPickupTime),
       peakHourRevenue: Math.max(revenueToday * 0.3, 2500),
       occupancy,
       guestsNow,

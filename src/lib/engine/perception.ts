@@ -103,6 +103,11 @@ export type PerceptionState = {
     upsellRevenue: number;
     cartAbandonment: number;
     avgWaitTime: number;
+    // Floor-handoff metric: avg(servedAt - readyAt). Decouples "guest
+    // is waiting because the kitchen is slow" (avgWaitTime / kitchen
+    // avgPrepTime) from "guest is waiting because food is sitting on
+    // the pass" (avgPickupTime).
+    avgPickupTime: number;
     peakHourRevenue: number;
     occupancy: number;          // % tables occupied
     guestsNow: number;
@@ -155,6 +160,7 @@ export const usePerception = create<PerceptionState>((set, get) => ({
     upsellRevenue: 0,
     cartAbandonment: 0,
     avgWaitTime: 0,
+    avgPickupTime: 0,
     peakHourRevenue: 0,
     occupancy: 0,
     guestsNow: 0,
