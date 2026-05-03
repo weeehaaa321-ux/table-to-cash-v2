@@ -61,6 +61,18 @@ type SessionInfo = {
   // tip input so the cashier doesn't type it from scratch (and
   // doesn't accidentally drop it).
   pendingTip?: number;
+  // Flat list of items the cashier is about to collect on (every
+  // unpaid, non-cancelled, non-comped line across the session's
+  // open orders). Rendered inline on the open-bill card so the
+  // cashier can see what's being charged, not just the total.
+  unpaidItems?: {
+    name: string;
+    nameAr: string | null;
+    quantity: number;
+    price: number;
+    addOns: string[];
+    notes: string | null;
+  }[];
 };
 
 
@@ -944,6 +956,45 @@ function AcceptPaymentPanel({ sessions, onAcceptPayment, onReversePayment, recen
                     <span className="text-xl text-text-muted font-bold ms-2">{t("common.egp")}</span>
                   </div>
                 </div>
+
+                {/* Itemised breakdown — what's actually being collected on.
+                    Cashier was previously seeing the total alone, which made
+                    it impossible to verify a disputed bill ("you charged me
+                    for 3 coffees, I had 2") without printing first. */}
+                {(s.unpaidItems?.length ?? 0) > 0 && (
+                  <div className="mx-5 mb-3 rounded-lg bg-sand-50 border border-sand-200 divide-y divide-sand-200/70">
+                    {s.unpaidItems!.map((it, idx) => {
+                      const addOnLabels = (it.addOns || [])
+                        .map((a) => { try { const p = JSON.parse(a); return p.name || a; } catch { return a; } })
+                        .filter(Boolean);
+                      const lineTotal = Math.round(it.price * it.quantity);
+                      return (
+                        <div key={idx} className="px-3 py-2 flex items-start gap-3">
+                          <span className="text-sm font-extrabold text-text-primary tabular-nums shrink-0 w-6 text-end">
+                            {it.quantity}×
+                          </span>
+                          <div className="flex-1 min-w-0">
+                            <div className="text-sm font-bold text-text-primary leading-tight truncate">
+                              {it.name}
+                            </div>
+                            {(addOnLabels.length > 0 || it.notes) && (
+                              <div className="text-[11px] text-text-muted leading-snug mt-0.5">
+                                {addOnLabels.length > 0 && (
+                                  <span>+ {addOnLabels.join(", ")}</span>
+                                )}
+                                {addOnLabels.length > 0 && it.notes && <span> · </span>}
+                                {it.notes && <span className="italic">&ldquo;{it.notes}&rdquo;</span>}
+                              </div>
+                            )}
+                          </div>
+                          <span className="text-sm font-extrabold text-text-primary tabular-nums shrink-0">
+                            {formatEGP(lineTotal)}
+                          </span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
 
                 {/* Prior rounds context (when this is a follow-up payment) */}
                 {hasPriorPayment && priorSummary && (

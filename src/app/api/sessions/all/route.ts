@@ -53,6 +53,24 @@ export async function GET(request: NextRequest) {
         const pendingMethod = (pendingOrders[0]?.paymentMethod ?? null) as
           | "CASH" | "CARD" | "INSTAPAY" | null;
         const pendingTip = pendingOrders.reduce((sum, o) => sum + toNum(o.tip ?? 0), 0);
+        // Items the cashier is about to collect on. Flattened across
+        // every unpaid, non-cancelled order so the card shows what
+        // they're charging for, not just the number. Comped lines are
+        // dropped — the guest doesn't owe for them.
+        const unpaidItems = s.orders
+          .filter((o) => o.status !== "CANCELLED" && o.paidAt == null)
+          .flatMap((o) =>
+            o.items
+              .filter((i) => !i.comped)
+              .map((i) => ({
+                name: i.menuItem?.name ?? "Item",
+                nameAr: i.menuItem?.nameAr ?? null,
+                quantity: i.quantity,
+                price: toNum(i.price),
+                addOns: i.addOns ?? [],
+                notes: i.notes ?? null,
+              })),
+          );
         return {
           id: s.id,
           tableNumber: s.table?.number ?? null,
@@ -87,6 +105,7 @@ export async function GET(request: NextRequest) {
           ),
           pendingPaymentMethod: pendingMethod,
           pendingTip,
+          unpaidItems,
           isCurrentShift: new Date(s.openedAt) >= shiftStart,
         };
       }),
