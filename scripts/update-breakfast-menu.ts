@@ -113,10 +113,18 @@ async function plan(restaurantId: string): Promise<Action[]> {
     for (let idx = 0; idx < cat.items.length; idx++) {
       const spec = cat.items[idx];
       const sortOrder = idx + 1;
-      const matchName = spec.matchOldName ?? spec.name;
+      // Try the canonical (post-rename) name first so re-runs after a
+      // successful apply are noops. Fall back to matchOldName for the
+      // very-first run when the row still has its legacy name. The
+      // earlier order — matchOldName always — broke idempotency: after
+      // the rename it looked for the old name (gone), missed, and
+      // queued a CREATE-of-new + DELETE-of-renamed pair that would
+      // have reverted the rename on the next --apply.
       const match = existing.find(
-        (i) => !consumed.has(i.id) && i.name === matchName,
-      );
+        (i) => !consumed.has(i.id) && i.name === spec.name,
+      ) ?? (spec.matchOldName
+        ? existing.find((i) => !consumed.has(i.id) && i.name === spec.matchOldName)
+        : undefined);
 
       if (!match) {
         actions.push({ kind: "create", categorySlug: cat.slug, spec, sortOrder });
@@ -162,8 +170,13 @@ async function plan(restaurantId: string): Promise<Action[]> {
       const orderRefs = await db.orderItem.count({ where: { menuItemId: obsolete.id } });
       if (orderRefs === 0) {
         actions.push({ kind: "hard-delete", categorySlug: cat.slug, itemId: obsolete.id, name: obsolete.name });
-      } else {
+      } else if (obsolete.available) {
         actions.push({ kind: "deactivate", categorySlug: cat.slug, itemId: obsolete.id, name: obsolete.name, orderRefs });
+      } else {
+        // Already hidden + has order history — nothing to do, but emit a
+        // noop entry so re-runs report a clean "0 changes" plan instead
+        // of a phantom HIDE that would re-write the same value.
+        actions.push({ kind: "noop", categorySlug: cat.slug, itemId: obsolete.id, name: `${obsolete.name} (already hidden)` });
       }
     }
   }
