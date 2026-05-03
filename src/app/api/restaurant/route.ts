@@ -43,10 +43,25 @@ export async function GET(request: NextRequest) {
 
 export async function PATCH(request: NextRequest) {
   try {
-    const { slug, waiterCapacity } = await request.json();
+    const body = await request.json();
+    const { slug, waiterCapacity, instapayHandle, instapayPhone } = body;
     if (!slug) return NextResponse.json({ error: "slug required" }, { status: 400 });
     if (waiterCapacity !== undefined) {
       await useCases.updateRestaurantConfig.setWaiterCapacity(Number(waiterCapacity));
+    }
+    // Accept handle / phone independently. Empty string clears the
+    // value (so the dashboard can wipe a stale handle) while
+    // undefined leaves it alone.
+    if (instapayHandle !== undefined || instapayPhone !== undefined) {
+      const normalize = (v: unknown): string | null | undefined =>
+        v === undefined ? undefined
+        : v === null ? null
+        : typeof v === "string" ? (v.trim() || null)
+        : undefined;
+      await useCases.updateRestaurantConfig.setInstapay({
+        handle: normalize(instapayHandle),
+        phone: normalize(instapayPhone),
+      });
     }
     return NextResponse.json({ ok: true });
   } catch (err) {

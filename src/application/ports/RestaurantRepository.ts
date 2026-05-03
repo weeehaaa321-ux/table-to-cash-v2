@@ -22,4 +22,11 @@ export interface RestaurantRepository {
   deleteTableByNumberCascade(number: number): Promise<DeleteTableResult>;
   /** Update the waiter capacity setting on the current restaurant. */
   updateWaiterCapacity(capacity: number): Promise<void>;
+  /** Update the cafe's InstaPay alias and/or phone number. Each is
+   *  optional independently — passing undefined leaves the existing
+   *  value alone, passing null clears it. */
+  updateInstapay(input: {
+    handle?: string | null;
+    phone?: string | null;
+  }): Promise<void>;
 }

@@ -77,6 +77,29 @@ export class PrismaRestaurantRepository implements RestaurantRepository {
     cached = null;
   }
 
+  async updateInstapay(input: { handle?: string | null; phone?: string | null }): Promise<void> {
+    // Only set fields the caller actually passed — undefined means
+    // "leave alone", null means "clear". Trim/cap at 60 chars so a
+    // long paste from a banking app doesn't overflow the /track UI.
+    const data: { instapayHandle?: string | null; instapayPhone?: string | null } = {};
+    if (input.handle !== undefined) {
+      data.instapayHandle = input.handle === null
+        ? null
+        : (input.handle.trim().slice(0, 60) || null);
+    }
+    if (input.phone !== undefined) {
+      data.instapayPhone = input.phone === null
+        ? null
+        : (input.phone.trim().slice(0, 30) || null);
+    }
+    if (Object.keys(data).length === 0) return;
+    await db.restaurant.update({
+      where: { slug: env.RESTAURANT_SLUG },
+      data,
+    });
+    cached = null;
+  }
+
   async addNextTable(label: string | null): Promise<{ id: string; number: number; label: string }> {
     const restaurant = await this.current();
     const max = await db.table.findFirst({

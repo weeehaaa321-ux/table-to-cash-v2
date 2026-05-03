@@ -10,4 +10,8 @@ export class UpdateRestaurantConfigUseCase {
   async setWaiterCapacity(capacity: number): Promise<void> {
     await this.repo.updateWaiterCapacity(capacity);
   }
+
+  async setInstapay(input: { handle?: string | null; phone?: string | null }): Promise<void> {
+    await this.repo.updateInstapay(input);
+  }
 }

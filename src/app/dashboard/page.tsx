@@ -1675,11 +1675,18 @@ function StaffPanel({ staff, onRefresh, restaurantId, restaurantSlug, ownerId }:
   const [resetError, setResetError] = useState<string | null>(null);
   const showPins = false; // PINs are hashed — cannot be revealed
   const [waiterCapacity, setWaiterCapacity] = useState(15);
+  const [instapayHandle, setInstapayHandle] = useState("");
+  const [instapayPhone, setInstapayPhone] = useState("");
+  const [instapaySaveState, setInstapaySaveState] = useState<"idle" | "saving" | "saved" | "error">("idle");
 
   useEffect(() => {
     fetch(`/api/restaurant?slug=${restaurantSlug}`)
       .then((r) => r.json())
-      .then((d) => { if (d.waiterCapacity) setWaiterCapacity(d.waiterCapacity); })
+      .then((d) => {
+        if (d.waiterCapacity) setWaiterCapacity(d.waiterCapacity);
+        if (typeof d.instapayHandle === "string") setInstapayHandle(d.instapayHandle);
+        if (typeof d.instapayPhone === "string") setInstapayPhone(d.instapayPhone);
+      })
       .catch(() => {});
   }, [restaurantSlug]);
 
@@ -1690,6 +1697,26 @@ function StaffPanel({ staff, onRefresh, restaurantId, restaurantSlug, ownerId }:
       method: "PATCH",
       body: JSON.stringify({ slug: restaurantSlug, waiterCapacity: clamped }),
     }).catch(() => {});
+  };
+
+  const saveInstapay = async () => {
+    setInstapaySaveState("saving");
+    try {
+      const res = await ownerFetch(ownerId, "/api/restaurant", {
+        method: "PATCH",
+        body: JSON.stringify({
+          slug: restaurantSlug,
+          instapayHandle: instapayHandle.trim(),
+          instapayPhone: instapayPhone.trim(),
+        }),
+      });
+      if (!res.ok) throw new Error("save failed");
+      setInstapaySaveState("saved");
+      setTimeout(() => setInstapaySaveState("idle"), 2000);
+    } catch {
+      setInstapaySaveState("error");
+      setTimeout(() => setInstapaySaveState("idle"), 3000);
+    }
   };
 
   const handleDelete = async (staffId: string) => {
@@ -1850,6 +1877,69 @@ function StaffPanel({ staff, onRefresh, restaurantId, restaurantSlug, ownerId }:
           className="p-3 rounded-xl bg-status-bad-50 border border-status-bad-200 text-status-bad-700 text-sm font-medium"
         >{deleteError}</motion.div>
       )}
+
+      {/* InstaPay settings — owner pastes the cafe's alias and phone here.
+          Both surface to the guest on /track when they pick INSTAPAY,
+          so they can transfer directly from their banking app. */}
+      <div className="card-luxury p-4 space-y-3">
+        <div className="flex items-center justify-between">
+          <h4 className="text-[11px] font-extrabold uppercase tracking-[0.2em] text-text-secondary">
+            InstaPay
+          </h4>
+          <span className="text-[10px] text-text-muted font-extrabold uppercase tracking-wider">
+            Shown to guests on /track
+          </span>
+        </div>
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+          <div>
+            <label className="text-[10px] text-text-muted font-semibold uppercase tracking-wider block mb-1.5">
+              InstaPay alias
+            </label>
+            <input
+              type="text"
+              value={instapayHandle}
+              onChange={(e) => setInstapayHandle(e.target.value)}
+              placeholder="e.g. badrnasr-cib1@instapay"
+              className="w-full px-4 py-2.5 rounded-xl bg-sand-50 border border-sand-200 text-text-primary text-sm placeholder:text-text-muted focus:outline-none focus:border-ocean-400 transition"
+              dir="ltr"
+            />
+          </div>
+          <div>
+            <label className="text-[10px] text-text-muted font-semibold uppercase tracking-wider block mb-1.5">
+              Phone (registered with InstaPay)
+            </label>
+            <input
+              type="text"
+              value={instapayPhone}
+              onChange={(e) => setInstapayPhone(e.target.value)}
+              placeholder="e.g. 01002629534"
+              className="w-full px-4 py-2.5 rounded-xl bg-sand-50 border border-sand-200 text-text-primary text-sm placeholder:text-text-muted focus:outline-none focus:border-ocean-400 transition"
+              dir="ltr"
+            />
+          </div>
+        </div>
+        <div className="flex items-center gap-3 pt-1">
+          <button
+            onClick={saveInstapay}
+            disabled={instapaySaveState === "saving"}
+            className={`px-5 py-2 rounded-xl text-sm font-bold transition active:scale-95 disabled:opacity-50 ${
+              instapaySaveState === "saved"
+                ? "bg-status-good-500 text-white"
+                : instapaySaveState === "error"
+                  ? "bg-status-bad-500 text-white"
+                  : "bg-sand-900 text-white hover:bg-sand-800"
+            }`}
+          >
+            {instapaySaveState === "saving" ? "Saving…"
+              : instapaySaveState === "saved" ? "Saved"
+              : instapaySaveState === "error" ? "Save failed"
+              : "Save"}
+          </button>
+          <p className="text-[11px] text-text-muted">
+            Both fields are optional. Leave one blank to hide it on /track.
+          </p>
+        </div>
+      </div>
 
       {(() => {
         const groups: { role: string; labelKey: string }[] = [
