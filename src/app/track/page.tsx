@@ -565,6 +565,35 @@ function TrackPage() {
         })),
     );
 
+  // In-flight round = orders that already have paymentMethod stamped.
+  // Used to narrow the cashPending UI to "what you're paying for now"
+  // instead of showing the full bill again. Without this, after a guest
+  // picked a subset and the picker reset to default, the bill display
+  // would re-render every item as selected and the total would swell
+  // to the full session unpaid — visually contradicting the actual
+  // partial round the cashier is about to collect on.
+  // billableOrders is typed as the union of sessionOrders (which carry
+  // paymentMethod) and tableOrders (which don't). At runtime the in-
+  // flight round only exists when sessionOrders is the source — the
+  // singletrack dbOrder fallback never has a pending pay. Narrow with
+  // an `in` check rather than a cast so a future shape change doesn't
+  // silently fall through.
+  const pendingRoundOrders = billableOrders.filter(
+    (o): o is typeof o & { paymentMethod: string | null } =>
+      "paymentMethod" in o && !!(o as { paymentMethod?: string | null }).paymentMethod,
+  );
+  const pendingRoundItems = pendingRoundOrders.flatMap((o) =>
+    o.items
+      .filter((it) => !it.cancelled && !it.comped)
+      .map((it) => ({
+        id: it.id,
+        name: it.name,
+        quantity: it.quantity,
+        price: it.price,
+      })),
+  );
+  const pendingRoundSubtotal = pendingRoundOrders.reduce((s, o) => s + o.total, 0);
+
   // null = "default state, all items selected" → POST omits itemIds and
   // server settles every unpaid order in the session (back-compat with
   // the original single Pay button). Set = explicit pick.
@@ -1156,9 +1185,56 @@ function TrackPage() {
                       multiple billable items so the guest can split-pay
                       by ticking only what they're covering. Single-item
                       sessions skip the checkboxes (no point picking when
-                      there's only one thing). */}
+                      there's only one thing). When a payment is in
+                      flight (cashPending), the picker is replaced by a
+                      summary of just the round being paid so the guest
+                      sees what they're actually settling — without this,
+                      the post-POST picker reset showed the full bill
+                      with everything checked, which was misleading. */}
                   <div className="bg-sand-50 rounded-xl p-4 mb-4 border border-sand-100">
-                    {payableItems.length > 1 ? (
+                    {cashPending && pendingRoundItems.length > 0 ? (
+                      <>
+                        <div className="text-[10px] font-bold text-text-muted uppercase tracking-widest mb-2">
+                          {lang === "ar" ? "تدفع الآن" : "Paying for"}
+                        </div>
+                        <div className="space-y-1.5">
+                          {pendingRoundItems.map((it, i) => (
+                            <div key={`${it.id}-${i}`} className="flex justify-between text-xs text-text-secondary">
+                              <span className="flex-1 truncate">
+                                <span className="font-bold tabular-nums me-1">{it.quantity}×</span>
+                                {it.name}
+                              </span>
+                              <span className="font-semibold tabular-nums shrink-0">
+                                {Math.round(it.price * it.quantity)} {t("common.egp")}
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                        <div className="border-t border-sand-200 mt-2 pt-2 flex justify-between items-center">
+                          <span className="text-sm font-bold text-text-secondary">
+                            {lang === "ar" ? "إجمالي هذه الجولة" : "This round"}
+                          </span>
+                          <span className="text-sm font-semibold text-text-primary">{pendingRoundSubtotal} EGP</span>
+                        </div>
+                        {tipAmount > 0 && (
+                          <div className="flex justify-between items-center mt-1.5">
+                            <span className="text-xs font-medium text-status-good-600">{lang === "ar" ? "إكرامية" : "Tip"}</span>
+                            <span className="text-xs font-semibold text-status-good-600">{tipAmount} EGP</span>
+                          </div>
+                        )}
+                        <div className="border-t border-sand-200 mt-2 pt-2 flex justify-between items-center">
+                          <span className="text-sm font-semibold text-text-primary">{lang === "ar" ? "الإجمالي" : "Total"}</span>
+                          <span className="text-lg font-semibold text-text-primary">{pendingRoundSubtotal + tipAmount} EGP</span>
+                        </div>
+                        {invoiceTotal - pendingRoundSubtotal > 0 && (
+                          <p className="mt-2 text-[10px] text-text-muted leading-snug">
+                            {lang === "ar"
+                              ? `${invoiceTotal - pendingRoundSubtotal} ج.م متبقّي على الطاولة لباقي الضيوف`
+                              : `${invoiceTotal - pendingRoundSubtotal} EGP remaining on the table for the others`}
+                          </p>
+                        )}
+                      </>
+                    ) : payableItems.length > 1 ? (
                       <>
                         <div className="flex items-center justify-between mb-2">
                           <span className="text-[10px] font-bold text-text-muted uppercase tracking-widest">
@@ -1426,8 +1502,8 @@ function TrackPage() {
                           </motion.div>
                           <p className="text-sm font-bold text-text-primary mb-1">
                             {lang === "ar"
-                              ? `حوّل ${invoiceTotal + tipAmount} ج.م عبر إنستا باي`
-                              : `Send ${invoiceTotal + tipAmount} EGP via InstaPay`}
+                              ? `حوّل ${pendingRoundSubtotal + tipAmount} ج.م عبر إنستا باي`
+                              : `Send ${pendingRoundSubtotal + tipAmount} EGP via InstaPay`}
                           </p>
                           {instapayHandle || instapayPhone ? (
                             <>
