@@ -867,38 +867,54 @@ export class SessionUseCases {
         where: { sessionId, guestId, status: { in: ["PENDING", "APPROVED"] } },
         orderBy: { createdAt: "desc" },
       });
-      if (existing) {
-        const isOwner = existing.status === "APPROVED" && earliestApproved?.id === existing.id;
-        return {
-          id: existing.id,
-          status: existing.status === "APPROVED" ? "approved" : "pending",
-          role: isOwner ? "owner" : "member",
-        };
+
+      // Returning APPROVED guest → walk back in. Owner if their record
+      // is the earliest APPROVED for the session, member otherwise.
+      if (existing && existing.status === "APPROVED") {
+        const isOwner = earliestApproved?.id === existing.id;
+        return { id: existing.id, status: "approved", role: isOwner ? "owner" : "member" };
       }
 
+      // No client has been registered as owner yet. Guard against the
+      // legacy case where a guest-created session predates owner-
+      // stamping (no APPROVED record but a real client guest is already
+      // actively using the table) by checking menuOpenedAt. That field
+      // is only set when a guest browser hits the menu page
+      // (ImmersiveMenu → POST /api/sessions menu_opened) — staff flows
+      // (waiter Seat, dashboard assign, floor manager) never trigger
+      // it. So menuOpenedAt === null is a reliable "no client guest
+      // has joined yet" signal that survives the case where staff
+      // pre-placed orders before the first guest scanned.
       if (!earliestApproved) {
-        // No client has been registered as owner yet. Guard against the
-        // legacy case where a guest-created session predates owner-
-        // stamping (no APPROVED record but a real client guest is
-        // already actively using the table) by checking menuOpenedAt.
-        // That field is only set when a guest browser hits the menu
-        // page (ImmersiveMenu → POST /api/sessions menu_opened) — staff
-        // flows (waiter Seat, dashboard assign, floor manager) never
-        // trigger it. So menuOpenedAt === null is a reliable "no client
-        // guest has joined yet" signal that survives the case where
-        // staff pre-placed orders before the first guest scanned (the
-        // earlier orderCount === 0 guard mis-handled that case and
-        // left the guest stuck on "Ask Guest #1").
         const session = await tx.tableSession.findUnique({
           where: { id: sessionId },
           select: { menuOpenedAt: true },
         });
         if (session && session.menuOpenedAt === null) {
+          // If this guest has a stranded PENDING from a pre-fix attempt,
+          // upgrade it in place rather than leaving them stuck on "Ask
+          // Guest #1" forever — there is no Guest #1 to approve them,
+          // and a pure POST loop with the same guestId would just keep
+          // echoing back that same PENDING. Without this upgrade the
+          // bug self-perpetuates after deploy.
+          if (existing) {
+            const upgraded = await tx.joinRequest.update({
+              where: { id: existing.id },
+              data: { status: "APPROVED" },
+            });
+            return { id: upgraded.id, status: "approved", role: "owner" };
+          }
           const claim = await tx.joinRequest.create({
             data: { sessionId, guestId, status: "APPROVED" },
           });
           return { id: claim.id, status: "approved", role: "owner" };
         }
+      }
+
+      // Owner exists and this guest already has a PENDING — keep them
+      // in the waiting room rather than stacking duplicate requests.
+      if (existing) {
+        return { id: existing.id, status: "pending", role: "member" };
       }
 
       const pending = await tx.joinRequest.create({
