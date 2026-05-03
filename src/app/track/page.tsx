@@ -541,12 +541,17 @@ function TrackPage() {
 
   // Flat list of every item the guest could pay for, with stable ids.
   // Cancelled / comped items are filtered out — guest doesn't owe for
-  // them, so they shouldn't be selectable. SERVED-only is enforced
-  // server-side by splitOrderForPayment, but the picker also hides
-  // not-yet-served items so the UI doesn't tease a selection that
-  // would be rejected on POST.
+  // them, so they shouldn't be selectable. Any non-cancelled order
+  // status is fair game (matches the legacy "Pay X EGP" path and the
+  // server-side splitOrderForPayment guard). An earlier SERVED-only
+  // filter here hid second-and-later same-name items whose owning
+  // order hadn't been tapped "served" yet, making the bill look like
+  // the guest had ordered fewer drinks than they actually had.
   const payableItems = billableOrders
-    .filter((o) => o.status.toLowerCase() === "served")
+    .filter((o) => {
+      const st = o.status.toLowerCase();
+      return st !== "cancelled" && st !== "paid";
+    })
     .flatMap((o) =>
       o.items
         .filter((it) => !it.cancelled && !it.comped && it.id)

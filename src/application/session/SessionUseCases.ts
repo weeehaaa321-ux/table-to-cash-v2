@@ -752,7 +752,15 @@ export class SessionUseCases {
           order: {
             sessionId,
             paidAt: null,
-            status: "SERVED",
+            // Match legacy confirmPayRound: any non-CANCELLED, non-PAID
+            // order is payable. The earlier SERVED-only restriction was
+            // too tight — it left a guest unable to pay for a drink
+            // that's READY but not yet "served" by the waiter (a
+            // common cafe case where the waiter hasn't tapped the
+            // status button after handing it over). The cashier card
+            // and the legacy "Pay X EGP" button both accept any
+            // non-CANCELLED status; the picker should too.
+            status: { notIn: ["CANCELLED", "PAID"] },
           },
         },
         select: {
