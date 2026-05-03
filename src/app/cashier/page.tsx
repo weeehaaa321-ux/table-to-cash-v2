@@ -527,6 +527,64 @@ function AcceptPaymentPanel({ sessions, onAcceptPayment, onReversePayment, recen
   // pending round (can't override a guest signal silently — cashier
   // would need to reject the existing request first).
   const [pickedItems, setPickedItems] = useState<Map<string, Set<string>>>(new Map());
+
+  // Collapsible session cards. Cashier sees a tight list of identity +
+  // amount + method buttons by default; tapping the chevron expands the
+  // card to show the itemised breakdown, prior-rounds context, and the
+  // walk-up split picker. When a guest taps "Pay X EGP" on /track, the
+  // matching card auto-expands and scrolls into view so the cashier
+  // doesn't miss the signal in a long open-bill list.
+  const [expandedSessions, setExpandedSessions] = useState<Set<string>>(new Set());
+  // Refs per card so the auto-expand effect can scrollIntoView. Cleared
+  // when the session falls out of openSessions.
+  const cardRefs = useRef<Map<string, HTMLDivElement | null>>(new Map());
+  // Last-seen pendingPaymentMethod per session — used to detect the
+  // null → set transition that means "guest just tapped Pay". Stored
+  // in a ref so updating it doesn't kick a re-render.
+  const prevPendingMethodsRef = useRef<Map<string, string | null>>(new Map());
+
+  const toggleExpanded = (sessionId: string) => {
+    setExpandedSessions((prev) => {
+      const next = new Set(prev);
+      if (next.has(sessionId)) next.delete(sessionId);
+      else next.add(sessionId);
+      return next;
+    });
+  };
+
+  useEffect(() => {
+    // Detect newly-pending sessions and auto-expand + scroll. We can't
+    // do this in render — scrollIntoView is a side effect — so it lives
+    // here. Runs every time sessions changes (so once per poll); the
+    // ref-based prev map ensures we only act on the actual transition.
+    const newlyPending: string[] = [];
+    for (const s of sessions) {
+      if (s.status !== "OPEN") continue;
+      const prev = prevPendingMethodsRef.current.get(s.id) ?? null;
+      const curr = s.pendingPaymentMethod ?? null;
+      if (!prev && curr) newlyPending.push(s.id);
+      prevPendingMethodsRef.current.set(s.id, curr);
+    }
+    // Drop entries for sessions that are no longer in the list so the
+    // ref doesn't grow unbounded across the day.
+    const liveIds = new Set(sessions.map((s) => s.id));
+    for (const id of Array.from(prevPendingMethodsRef.current.keys())) {
+      if (!liveIds.has(id)) prevPendingMethodsRef.current.delete(id);
+    }
+    if (newlyPending.length === 0) return;
+    setExpandedSessions((prev) => {
+      const next = new Set(prev);
+      for (const id of newlyPending) next.add(id);
+      return next;
+    });
+    // Scroll the most recent transition into view. requestAnimationFrame
+    // gives the expand state one paint to flush before we measure.
+    requestAnimationFrame(() => {
+      const target = newlyPending[newlyPending.length - 1];
+      const el = cardRefs.current.get(target);
+      if (el) el.scrollIntoView({ behavior: "smooth", block: "center" });
+    });
+  }, [sessions]);
   // Lock while a settle is in flight so a double-tap on 'Yes, received'
   // can't fire the PATCH twice. The second call would be idempotent on
   // the DB side but would clobber the success flash with a 0 EGP total.
@@ -1065,8 +1123,16 @@ function AcceptPaymentPanel({ sessions, onAcceptPayment, onReversePayment, recen
                   return next;
                 });
               };
+              const isExpanded = expandedSessions.has(s.id);
               return (
-              <div key={s.id} className="bg-white rounded-2xl border-2 border-sand-200 overflow-hidden">
+              <div
+                key={s.id}
+                ref={(el) => {
+                  if (el) cardRefs.current.set(s.id, el);
+                  else cardRefs.current.delete(s.id);
+                }}
+                className="bg-white rounded-2xl border-2 border-sand-200 overflow-hidden"
+              >
                 {/* Identity row */}
                 <div className="px-5 pt-5 pb-3 flex items-start gap-4">
                   <div className={`flex-shrink-0 w-16 h-16 rounded-2xl border-2 flex items-center justify-center text-2xl font-extrabold ${
@@ -1092,10 +1158,30 @@ function AcceptPaymentPanel({ sessions, onAcceptPayment, onReversePayment, recen
                   <button
                     onClick={() => handlePrint(s.id)}
                     disabled={printing === s.id}
-                    className="flex-shrink-0 w-11 h-11 rounded-xl bg-sand-100 hover:bg-sand-200 text-text-secondary flex items-center justify-center text-base transition disabled:opacity-50 active:scale-95"
+                    className="flex-shrink-0 w-10 h-10 rounded-xl bg-sand-100 hover:bg-sand-200 text-text-secondary flex items-center justify-center text-base transition disabled:opacity-50 active:scale-95"
                     title={t("cashier.printBillPreview")}
                   >
                     {printing === s.id ? "…" : "🖨"}
+                  </button>
+                  <button
+                    onClick={() => toggleExpanded(s.id)}
+                    aria-expanded={isExpanded}
+                    aria-label={isExpanded ? t("cashier.collapseDetails") : t("cashier.expandDetails")}
+                    className="flex-shrink-0 w-10 h-10 rounded-xl bg-sand-100 hover:bg-sand-200 text-text-secondary flex items-center justify-center transition active:scale-95"
+                  >
+                    <svg
+                      width="16"
+                      height="16"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2.5"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      className={`transition-transform ${isExpanded ? "rotate-180" : ""}`}
+                    >
+                      <polyline points="6 9 12 15 18 9" />
+                    </svg>
                   </button>
                 </div>
 
@@ -1125,8 +1211,11 @@ function AcceptPaymentPanel({ sessions, onAcceptPayment, onReversePayment, recen
                     just the items in the pending round. When the cashier
                     is taking a walk-up split-pay, the items become tickable
                     via checkboxes — picking a subset routes through the
-                    same splitOrderForPayment flow the guest uses. */}
-                {visibleItems.length > 0 && (
+                    same splitOrderForPayment flow the guest uses.
+                    Hidden when the card is collapsed; auto-revealed by
+                    the pendingPaymentMethod transition effect when the
+                    guest taps Pay so the cashier doesn't miss it. */}
+                {isExpanded && visibleItems.length > 0 && (
                   <div className="mx-5 mb-3 rounded-lg bg-sand-50 border border-sand-200 overflow-hidden">
                     {pickerEnabled && (
                       <div className="px-3 py-2 flex items-center justify-between border-b border-sand-200/70 bg-white/40">
@@ -1193,8 +1282,11 @@ function AcceptPaymentPanel({ sessions, onAcceptPayment, onReversePayment, recen
                   </div>
                 )}
 
-                {/* Prior rounds context (when this is a follow-up payment) */}
-                {hasPriorPayment && priorSummary && (
+                {/* Prior rounds context (when this is a follow-up payment).
+                    Only shown when expanded — the hero amount already reflects
+                    the round delta, so a collapsed card doesn't need this
+                    breakdown to be safe. */}
+                {isExpanded && hasPriorPayment && priorSummary && (
                   <div className="mx-5 mb-4 rounded-lg bg-status-good-50 border border-status-good-200 px-3 py-2 flex items-center justify-between gap-2">
                     <span className="text-[11px] font-extrabold text-status-good-700 uppercase tracking-widest">
                       {t("cashier.alreadyPaid")} · {priorRounds.length} {priorRounds.length !== 1 ? t("cashier.roundsPlural") : t("cashier.rounds")}

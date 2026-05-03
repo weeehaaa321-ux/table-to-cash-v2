@@ -670,6 +670,8 @@
   "cashier.tapItemsToSplit": "اضغط الأصناف لتقسيم الدفع",
   "cashier.itemsPicked": "صنف مختار",
   "cashier.selectAll": "اختر الكل",
+  "cashier.expandDetails": "عرض الأصناف",
+  "cashier.collapseDetails": "إخفاء الأصناف",
   "cashier.confirming": "جاري التأكيد...",
   "cashier.yesReceived": "نعم، تم الاستلام",
   "cashier.cashReceivedMsg": "تم استلام الكاش",

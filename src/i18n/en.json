@@ -670,6 +670,8 @@
   "cashier.tapItemsToSplit": "Tap items to split-pay",
   "cashier.itemsPicked": "items picked",
   "cashier.selectAll": "Select all",
+  "cashier.expandDetails": "Show items",
+  "cashier.collapseDetails": "Hide items",
   "cashier.confirming": "Confirming...",
   "cashier.yesReceived": "Yes, received",
   "cashier.cashReceivedMsg": "Cash received",
