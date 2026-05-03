@@ -1059,11 +1059,16 @@ function TrackPage() {
                   </div>
                 )}
               </motion.div>
-            ) : hasPaymentAuthority && sessionId ? (
+            ) : sessionId ? (
               <div className="mt-4">
-                {/* Delegate payment — visible to whoever currently holds
-                    payment authority (owner or a delegated guest) */}
-                {sessionGuestCount > 1 && !cashPending && !cashConfirmed && (
+                {/* Delegate payment — historically the way an owner gave
+                    one specific guest authority to pay the whole bill.
+                    With split-pay now open to everyone (anyone can pick
+                    items + tap Pay), this panel is purely a shortcut for
+                    the "X handles the entire tab" case, so it stays
+                    owner-only. Other guests don't see it; they pay via
+                    the picker below instead. */}
+                {isSessionOwner && sessionGuestCount > 1 && !cashPending && !cashConfirmed && (
                   <div className="bg-white rounded-2xl p-4 shadow-sm border border-sand-100 mb-4">
                     <p className="text-xs font-bold text-text-muted uppercase tracking-widest mb-2">
                       {lang === "ar" ? "تفويض الدفع" : "Delegate Payment"}
@@ -1561,15 +1566,6 @@ function TrackPage() {
                     </button>
                   )}
                 </div>
-              </div>
-            ) : sessionId && !isSessionOwner && !hasPaymentAuthority ? (
-              <div className="mt-4 bg-sand-50 rounded-2xl p-5 border border-sand-100 text-center">
-                <p className="text-sm font-semibold text-text-secondary mb-1">
-                  {lang === "ar" ? "الدفع من صلاحية صاحب الطاولة" : "Payment is handled by the table host"}
-                </p>
-                <p className="text-xs text-text-muted">
-                  {lang === "ar" ? "يمكن لصاحب الجلسة تفويضك للدفع" : "The session owner can delegate payment to you"}
-                </p>
               </div>
             ) : null}
           </div>
