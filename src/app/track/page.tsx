@@ -1308,30 +1308,39 @@ function TrackPage() {
                         <span className="font-semibold">{invoiceTotal} EGP</span>
                       </div>
                     )}
-                    <div className="border-t border-sand-200 mt-2 pt-2 flex justify-between items-center">
-                      <span className="text-sm font-bold text-text-secondary">
-                        {splitPayActive
-                          ? (lang === "ar" ? "مجموع المختار" : "Selected subtotal")
-                          : (lang === "ar" ? "المجموع" : "Subtotal")}
-                      </span>
-                      <span className="text-sm font-semibold text-text-primary">{payableSubtotal} EGP</span>
-                    </div>
-                    {tipAmount > 0 && (
-                      <div className="flex justify-between items-center mt-1.5">
-                        <span className="text-xs font-medium text-status-good-600">{lang === "ar" ? "إكرامية" : "Tip"}</span>
-                        <span className="text-xs font-semibold text-status-good-600">{tipAmount} EGP</span>
-                      </div>
-                    )}
-                    <div className="border-t border-sand-200 mt-2 pt-2 flex justify-between items-center">
-                      <span className="text-sm font-semibold text-text-primary">{lang === "ar" ? "الإجمالي" : "Total"}</span>
-                      <span className="text-lg font-semibold text-text-primary">{payableSubtotal + tipAmount} EGP</span>
-                    </div>
-                    {splitPayActive && !isFullPay && (
-                      <p className="mt-2 text-[10px] text-text-muted leading-snug">
-                        {lang === "ar"
-                          ? "بقية الطاولة ستظل مفتوحة لباقي الضيوف للدفع لاحقاً."
-                          : "The rest of the table stays open for the others to pay later."}
-                      </p>
+                    {/* Trailing subtotal/total footer — for the picker
+                        and order-summary branches only. The cashPending
+                        branch above renders its OWN footer with the
+                        round amount; rendering this one too would stack
+                        two "Total" rows (full bill vs round). */}
+                    {!(cashPending && pendingRoundItems.length > 0) && (
+                      <>
+                        <div className="border-t border-sand-200 mt-2 pt-2 flex justify-between items-center">
+                          <span className="text-sm font-bold text-text-secondary">
+                            {splitPayActive
+                              ? (lang === "ar" ? "مجموع المختار" : "Selected subtotal")
+                              : (lang === "ar" ? "المجموع" : "Subtotal")}
+                          </span>
+                          <span className="text-sm font-semibold text-text-primary">{payableSubtotal} EGP</span>
+                        </div>
+                        {tipAmount > 0 && (
+                          <div className="flex justify-between items-center mt-1.5">
+                            <span className="text-xs font-medium text-status-good-600">{lang === "ar" ? "إكرامية" : "Tip"}</span>
+                            <span className="text-xs font-semibold text-status-good-600">{tipAmount} EGP</span>
+                          </div>
+                        )}
+                        <div className="border-t border-sand-200 mt-2 pt-2 flex justify-between items-center">
+                          <span className="text-sm font-semibold text-text-primary">{lang === "ar" ? "الإجمالي" : "Total"}</span>
+                          <span className="text-lg font-semibold text-text-primary">{payableSubtotal + tipAmount} EGP</span>
+                        </div>
+                        {splitPayActive && !isFullPay && (
+                          <p className="mt-2 text-[10px] text-text-muted leading-snug">
+                            {lang === "ar"
+                              ? "بقية الطاولة ستظل مفتوحة لباقي الضيوف للدفع لاحقاً."
+                              : "The rest of the table stays open for the others to pay later."}
+                          </p>
+                        )}
+                      </>
                     )}
                   </div>
 
