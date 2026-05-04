@@ -786,11 +786,56 @@ function CartPage() {
   const total = subtotal();
   const grandTotal = total;
 
-  // Suggestions + Bundles
-  const cartItemIds = new Set(items.map((i) => i.menuItem.id));
-  const cartMenuItems = items.map((i) => i.menuItem);
-  const suggestions = computeSuggestions(cartItemIds, cartMenuItems);
-  const bundles = detectBundles(cartItemIds, cartMenuItems);
+  // Suggestions: fetched from /api/upsell. The engine on the server
+  // does the heavy lifting (Cairo-time aware, AOV-aware, factors
+  // session cancellations, honours pairsWith). The cart UI just
+  // renders what comes back. Refetch when the cart contents change;
+  // debounced so a rapid +/+/+ doesn't spam the endpoint.
+  const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
+  // Stable-ish key over the cart's menu-item ids so we don't refetch
+  // when the user just changes a quantity by 1 (qty isn't used in
+  // ranking — only presence is).
+  const cartIdsKey = items.map((i) => i.menuItem.id).sort().join(",");
+  useEffect(() => {
+    let cancelled = false;
+    const handle = setTimeout(async () => {
+      try {
+        const res = await fetch("/api/upsell", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            restaurantId: restaurantSlug,
+            cart: items.map((i) => ({ menuItemId: i.menuItem.id, quantity: i.quantity })),
+            sessionId: sessionId || undefined,
+          }),
+        });
+        if (!res.ok || cancelled) return;
+        const data = await res.json();
+        const menuMap = new Map<string, MenuItem>(getMenuItems().map((m) => [m.id, m]));
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const out: Suggestion[] = (data.suggestions || []).map((s: any, idx: number) => {
+          const item = menuMap.get(s.itemId);
+          if (!item) return null;
+          return {
+            item,
+            reason: s.reason || "You might like this",
+            subtext: s.subtext || "",
+            // Preserve order from the server — that's the ranked order.
+            priority: idx,
+          };
+        }).filter(Boolean) as Suggestion[];
+        if (!cancelled) setSuggestions(out);
+      } catch {
+        // Silent — leaving the previous suggestions visible is better
+        // than a flicker of nothing on a transient network blip.
+      }
+    }, 250);
+    return () => { cancelled = true; clearTimeout(handle); };
+  }, [cartIdsKey, restaurantSlug, sessionId, items]);
+  // Bundles are folded into the unified ranker now — keep the prop
+  // wiring but always pass an empty array so SuggestionCards' layout
+  // doesn't need a code change.
+  const bundles: BundleOffer[] = [];
 
   // Reinforcement
   const hasUpsells = items.some((i) => i.wasUpsell);
@@ -1097,7 +1142,7 @@ function CartPage() {
         </div>
 
         {/* Meal Progress */}
-        <MealProgress items={cartMenuItems} />
+        <MealProgress items={items.map((i) => i.menuItem)} />
 
         {/* Reinforcement Message */}
         <AnimatePresence>

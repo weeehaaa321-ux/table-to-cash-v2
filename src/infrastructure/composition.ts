@@ -37,6 +37,7 @@ import { PushSubscriptionUseCases } from "@/application/push/PushSubscriptionUse
 import { CronUseCases } from "@/application/cron/CronUseCases";
 import { LivePollUseCases } from "@/application/realtime/LivePollUseCases";
 import { AdminUseCases } from "@/application/admin/AdminUseCases";
+import { UpsellUseCases } from "@/application/upsell/UpsellUseCases";
 
 const clock = new SystemClock();
 const menuRepo = new PrismaMenuRepository();
@@ -71,6 +72,7 @@ export const useCases = {
   cron: new CronUseCases(),
   livePoll: new LivePollUseCases(),
   admin: new AdminUseCases(),
+  upsell: new UpsellUseCases(),
 };
 
 export const ports = {
