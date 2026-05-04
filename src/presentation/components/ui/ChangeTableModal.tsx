@@ -179,10 +179,18 @@ export function ChangeTableButton({ tableNumber, restaurant }: { tableNumber: st
                     setChangingTable(true);
                     setChangeTableError("");
                     try {
+                      // Send the guest's persistent browser id so the
+                      // server can verify they're the approved owner of
+                      // this session before authorising the move. Staff
+                      // (waiter/floor/cashier/owner) calls go through
+                      // separate UIs that send x-staff-id instead.
+                      const guestId = (() => {
+                        try { return localStorage.getItem("ttc_guestId") || ""; } catch { return ""; }
+                      })();
                       const res = await fetch("/api/sessions", {
                         method: "PATCH",
                         headers: { "Content-Type": "application/json" },
-                        body: JSON.stringify({ sessionId, action: "change_table", newTableNumber: newTableNum }),
+                        body: JSON.stringify({ sessionId, action: "change_table", newTableNumber: newTableNum, guestId }),
                       });
                       if (res.ok) {
                         const data = await res.json();

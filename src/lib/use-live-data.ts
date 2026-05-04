@@ -89,7 +89,7 @@ function toLiveOrder(raw: {
     paymentMethod: raw.paymentMethod || undefined,
     notes: raw.notes || undefined,
     source: "real",
-    station: (raw.station === "BAR" ? "BAR" : "KITCHEN") as "KITCHEN" | "BAR",
+    station: (raw.station === "BAR" ? "BAR" : raw.station === "ACTIVITY" ? "ACTIVITY" : "KITCHEN") as "KITCHEN" | "BAR" | "ACTIVITY",
     groupId: raw.groupId ?? null,
     orderType: raw.orderType,
     vipGuestName: raw.vipGuestName ?? null,

@@ -19,11 +19,13 @@ export function OrderActionSheet({
   onAdvanceStatus: (orderId: string, status: string) => void;
   onPrioritize: (orderId: string) => void;
   onCancelItem: (orderId: string, itemId: string, reason: string, action?: "cancel" | "comp") => void;
-  onReassign: (sessionId: string, waiterId: string) => void;
+  onReassign: (sessionId: string, waiterId: string) => Promise<{ ok: boolean; message?: string }> | void;
   onAssignDriver: (orderId: string, driverId: string) => void;
   onUpdateDeliveryStatus: (orderId: string, status: string) => void;
 }) {
   const [showReassign, setShowReassign] = useState(false);
+  const [reassignError, setReassignError] = useState<string | null>(null);
+  const [reassignBusyId, setReassignBusyId] = useState<string | null>(null);
   const [showDriverPicker, setShowDriverPicker] = useState(false);
   const [cancellingItem, setCancellingItem] = useState<{ id: string; mode: "cancel" | "comp" } | null>(null);
   const { t } = useLanguage();
@@ -187,12 +189,28 @@ export function OrderActionSheet({
               <p className="text-[10px] font-bold text-text-secondary uppercase mb-2">{t("floor.assignToWaiter")}</p>
               <div className="flex flex-wrap gap-2">
                 {waiters.map((w) => (
-                  <button key={w.id} onClick={() => { onReassign(session.id, w.id); onClose(); }}
-                    className={`px-3 py-2 rounded-lg border text-xs font-bold active:scale-95 transition ${
+                  <button key={w.id} disabled={reassignBusyId !== null}
+                    onClick={async () => {
+                      setReassignError(null);
+                      setReassignBusyId(w.id);
+                      const result = await onReassign(session.id, w.id);
+                      setReassignBusyId(null);
+                      if (result && result.ok === false) {
+                        setReassignError(result.message || "Assign failed");
+                        return;
+                      }
+                      onClose();
+                    }}
+                    className={`px-3 py-2 rounded-lg border text-xs font-bold active:scale-95 transition disabled:opacity-50 ${
                       session.waiterId === w.id ? "bg-ocean-600 text-white border-ocean-600" : "bg-white border-sand-200 text-text-secondary"
-                    }`}>{w.name}</button>
+                    }`}>{w.name}{reassignBusyId === w.id ? " …" : ""}</button>
                 ))}
               </div>
+              {reassignError && (
+                <div className="mt-2 px-3 py-2 rounded-lg bg-status-bad-50 border border-status-bad-200 text-status-bad-700 text-xs font-semibold">
+                  {reassignError}
+                </div>
+              )}
             </motion.div>
           )}
         </AnimatePresence>

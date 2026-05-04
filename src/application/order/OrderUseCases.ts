@@ -207,6 +207,138 @@ export class OrderUseCases {
     return autoAssignDelivery(restaurantId, orderId);
   }
 
+  /**
+   * Activity post-processing for an order that just landed on the
+   * ACTIVITY station. Two things happen:
+   *   - The order skips PENDING/CONFIRMED/PREPARING/READY/SERVED and
+   *     jumps straight to SERVED with servedAt = now. Activities don't
+   *     pass through a kitchen, so the prep state machine doesn't
+   *     apply — they're "delivered" the moment the guest receives
+   *     the ticket / kayak / massage chair.
+   *   - Items whose MenuItem carries pricePerHour get their timer
+   *     started here (activityStartedAt = now). The cashier or floor
+   *     manager taps "Stop" later to set activityStoppedAt; until then
+   *     the bill prorates against the running clock.
+   *
+   * Flat-priced activities (e.g. pool ticket) carry no pricePerHour, so
+   * activityStartedAt stays null and the item bills like any other
+   * fixed-price line.
+   *
+   * Safe to no-op when the order isn't an ACTIVITY — we still check
+   * server-side rather than trusting the route to filter.
+   */
+  async finalizeActivityOrder(orderId: string): Promise<void> {
+    const order = await db.order.findUnique({
+      where: { id: orderId },
+      select: {
+        id: true,
+        station: true,
+        items: {
+          select: {
+            id: true,
+            menuItem: { select: { pricePerHour: true } },
+          },
+        },
+      },
+    });
+    if (!order || order.station !== "ACTIVITY") return;
+
+    const now = new Date();
+    const timerItemIds = order.items
+      .filter((it) => it.menuItem?.pricePerHour != null && Number(it.menuItem.pricePerHour) > 0)
+      .map((it) => it.id);
+
+    await db.$transaction(async (tx) => {
+      await tx.order.update({
+        where: { id: orderId },
+        data: { status: "SERVED", servedAt: now, readyAt: now },
+      });
+      if (timerItemIds.length > 0) {
+        await tx.orderItem.updateMany({
+          where: { id: { in: timerItemIds } },
+          data: { activityStartedAt: now },
+        });
+      }
+    });
+  }
+
+  /**
+   * Stop a running activity timer and recompute the parent order's
+   * total based on the elapsed duration and the item's pricePerHour.
+   * Idempotent — calling it twice on the same item leaves the first
+   * stoppedAt intact.
+   */
+  async stopActivityTimer(orderId: string, itemId: string): Promise<{ ok: boolean; reason?: string }> {
+    return db.$transaction(async (tx) => {
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${orderId}, 1))`;
+      const item = await tx.orderItem.findUnique({
+        where: { id: itemId },
+        select: {
+          id: true,
+          orderId: true,
+          quantity: true,
+          activityStartedAt: true,
+          activityStoppedAt: true,
+          menuItem: { select: { pricePerHour: true } },
+        },
+      });
+      if (!item || item.orderId !== orderId) return { ok: false, reason: "not_found" };
+      if (!item.activityStartedAt) return { ok: false, reason: "not_started" };
+      if (item.activityStoppedAt) return { ok: true }; // already stopped — idempotent
+      const pricePerHour = item.menuItem?.pricePerHour ? Number(item.menuItem.pricePerHour) : 0;
+      if (pricePerHour <= 0) return { ok: false, reason: "no_price_per_hour" };
+
+      const stoppedAt = new Date();
+      await tx.orderItem.update({
+        where: { id: itemId },
+        data: { activityStoppedAt: stoppedAt },
+      });
+
+      // Recompute the parent order's total. Other items on the order
+      // bill at price * quantity; the just-stopped activity item bills
+      // at (durationMinutes/60) * pricePerHour, rounded up to the
+      // nearest EGP — short sessions still earn at least 1 EGP rather
+      // than rounding to 0.
+      const allItems = await tx.orderItem.findMany({
+        where: { orderId, cancelled: false },
+        select: {
+          id: true,
+          quantity: true,
+          price: true,
+          comped: true,
+          activityStartedAt: true,
+          activityStoppedAt: true,
+          menuItem: { select: { pricePerHour: true } },
+        },
+      });
+      const newSubtotal = allItems.reduce((sum, it) => {
+        if (it.comped) return sum;
+        const pph = it.menuItem?.pricePerHour ? Number(it.menuItem.pricePerHour) : 0;
+        if (pph > 0 && it.activityStartedAt) {
+          const end = it.activityStoppedAt ?? new Date();
+          const minutes = Math.max(0, (end.getTime() - it.activityStartedAt.getTime()) / 60000);
+          return sum + Math.ceil((minutes / 60) * pph) * it.quantity;
+        }
+        return sum + Number(it.price) * it.quantity;
+      }, 0);
+
+      const order = await tx.order.findUnique({
+        where: { id: orderId },
+        select: { tax: true, deliveryFee: true },
+      });
+      const tax = Number(order?.tax ?? 0);
+      const fee = Number(order?.deliveryFee ?? 0);
+      await tx.order.update({
+        where: { id: orderId },
+        data: {
+          subtotal: newSubtotal,
+          total: newSubtotal + tax + fee,
+        },
+      });
+      return { ok: true };
+    });
+  }
+
   async defaultRestaurant() {
     return getDefaultRestaurant();
   }

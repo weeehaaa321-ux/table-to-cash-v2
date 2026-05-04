@@ -65,7 +65,12 @@ export class PlaceOrderUseCase {
     // or unavailable, refuse the order. Use the DB price, never the
     // client-supplied one.
     const lineItems: OrderItem[] = [];
-    let stationVote: "KITCHEN" | "BAR" | null = null;
+    // Station resolution: ACTIVITY beats BAR beats KITCHEN. An order
+    // containing any activity item routes to ACTIVITY (and skips both
+    // prep screens — activities don't go through kitchen / bar). An
+    // order containing any BAR item but no activity routes to BAR.
+    // Otherwise KITCHEN.
+    let stationVote: "KITCHEN" | "BAR" | "ACTIVITY" | null = null;
 
     for (const cartLine of input.items) {
       const menuItem = await this.menu.findItemById(cartLine.menuItemId);
@@ -95,11 +100,15 @@ export class PlaceOrderUseCase {
         }),
       );
 
-      // Station: if any item routes to BAR, the order goes to BAR;
-      // otherwise KITCHEN. (Mirrors source repo kitchenConfig logic
-      // — a more sophisticated split-by-station happens at print time.)
+      // Station vote with priority ACTIVITY > BAR > KITCHEN. An order
+      // mixing activities with food/drinks shouldn't punish the prep
+      // line — but for now, this codebase routes a single Order to one
+      // station, so an "ACTIVITY + drink" cart resolves to ACTIVITY
+      // (the timer items dominate). Mixing happens rarely in practice;
+      // the cashier sees the breakdown on the receipt.
       const itemStation = await this.lookupStation(menuItem.categoryId);
-      if (itemStation === "BAR") stationVote = "BAR";
+      if (itemStation === "ACTIVITY") stationVote = "ACTIVITY";
+      else if (itemStation === "BAR" && stationVote !== "ACTIVITY") stationVote = "BAR";
       else if (stationVote === null) stationVote = itemStation;
     }
     const station = stationVote ?? "KITCHEN";
@@ -168,8 +177,8 @@ export class PlaceOrderUseCase {
 
   // Helper: look up which station a category routes to. Cached at
   // the use case level for the lifetime of one execute() call.
-  private stationCache = new Map<string, "KITCHEN" | "BAR">();
-  private async lookupStation(categoryId: string): Promise<"KITCHEN" | "BAR"> {
+  private stationCache = new Map<string, "KITCHEN" | "BAR" | "ACTIVITY">();
+  private async lookupStation(categoryId: string): Promise<"KITCHEN" | "BAR" | "ACTIVITY"> {
     const cached = this.stationCache.get(categoryId);
     if (cached) return cached;
     const cat = await this.menu.findCategoryById(categoryId);

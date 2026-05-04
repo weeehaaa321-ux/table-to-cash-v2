@@ -422,11 +422,13 @@ function TableDetailModal({
   onPushRecommendation: (tableId: number) => void;
   sessions?: { id: string; tableNumber: number | null; waiterId?: string; waiterName?: string; status: string }[];
   staff?: StaffMember[];
-  onAssignTable?: (sessionIdOrTableNumber: string | number, waiterId: string) => void;
+  onAssignTable?: (sessionIdOrTableNumber: string | number, waiterId: string) => Promise<{ ok: boolean; message?: string }> | void;
   ownerId?: string | null;
 }) {
   const { t } = useLanguage();
   const [assigningWaiter, setAssigningWaiter] = useState(false);
+  const [assignError, setAssignError] = useState<string | null>(null);
+  const [assignBusyId, setAssignBusyId] = useState<string | null>(null);
   const [cancellingItem, setCancellingItem] = useState<{ orderId: string; itemId: string } | null>(null);
   const [cancelReason, setCancelReason] = useState("");
   const [cancelling, setCancelling] = useState(false);
@@ -751,21 +753,35 @@ function TableDetailModal({
                   {waiters.map((w) => (
                     <button
                       key={w.id}
-                      onClick={() => {
-                        onAssignTable(tableSession ? tableSession.id : table.id, w.id);
+                      disabled={assignBusyId !== null}
+                      onClick={async () => {
+                        setAssignError(null);
+                        setAssignBusyId(w.id);
+                        const result = await onAssignTable(tableSession ? tableSession.id : table.id, w.id);
+                        setAssignBusyId(null);
+                        if (result && result.ok === false) {
+                          setAssignError(result.message || "Assign failed");
+                          return;
+                        }
                         setAssigningWaiter(false);
                       }}
-                      className={`w-full text-left px-3 py-2 rounded-lg text-xs font-bold transition-all ${
+                      className={`w-full text-left px-3 py-2 rounded-lg text-xs font-bold transition-all disabled:opacity-50 ${
                         tableSession?.waiterId === w.id
                           ? "bg-ocean-200 text-ocean-800"
                           : "bg-white text-text-secondary hover:bg-ocean-100 border border-sand-200"
                       }`}
                     >
                       {w.name} {tableSession?.waiterId === w.id ? "✓" : ""}
+                      {assignBusyId === w.id ? " …" : ""}
                     </button>
                   ))}
+                  {assignError && (
+                    <div className="px-3 py-2 rounded-lg bg-status-bad-50 border border-status-bad-200 text-status-bad-700 text-xs font-semibold">
+                      {assignError}
+                    </div>
+                  )}
                   <button
-                    onClick={() => setAssigningWaiter(false)}
+                    onClick={() => { setAssigningWaiter(false); setAssignError(null); }}
                     className="w-full px-3 py-1.5 rounded-lg text-xs text-text-muted hover:text-text-secondary"
                   >
                     {t?.("common.cancel") || "Cancel"}
@@ -773,7 +789,7 @@ function TableDetailModal({
                 </div>
               ) : (
                 <button
-                  onClick={() => setAssigningWaiter(true)}
+                  onClick={() => { setAssigningWaiter(true); setAssignError(null); }}
                   className="w-full px-3 py-2 rounded-lg bg-ocean-100 text-ocean-700 text-xs font-bold hover:bg-ocean-200 transition active:scale-95"
                 >
                   {tableSession?.waiterId
@@ -5472,7 +5488,7 @@ function OwnerControlSystem({ verifiedOwnerId }: { verifiedOwnerId: string }) {
   const handleLeakHide = useCallback((itemId: string) => boostItem(itemId, "Hidden — low performance"), [boostItem]);
   const handleRevertDecision = useCallback((id: string) => sys.revertDecision(id), [sys]);
 
-  const handleAssignTable = useCallback(async (sessionIdOrTableNumber: string | number, waiterId: string) => {
+  const handleAssignTable = useCallback(async (sessionIdOrTableNumber: string | number, waiterId: string): Promise<{ ok: boolean; message?: string }> => {
     try {
       let sessionId: string;
 
@@ -5483,24 +5499,34 @@ function OwnerControlSystem({ verifiedOwnerId }: { verifiedOwnerId: string }) {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ tableNumber: sessionIdOrTableNumber, restaurantId: restaurantSlug, guestType: "walkin" }),
         });
-        if (!createRes.ok) return;
+        if (!createRes.ok) {
+          const data = await createRes.json().catch(() => ({}));
+          return { ok: false, message: data.message || data.error || "Could not open table" };
+        }
         const created = await createRes.json();
         sessionId = created.id;
       } else {
         sessionId = sessionIdOrTableNumber;
       }
 
-      await ownerFetch(ownerIdRef.current, "/api/sessions", {
+      const patchRes = await ownerFetch(ownerIdRef.current, "/api/sessions", {
         method: "PATCH",
         body: JSON.stringify({ sessionId, action: "assign_waiter", waiterId }),
       });
+      if (!patchRes.ok) {
+        const data = await patchRes.json().catch(() => ({}));
+        return { ok: false, message: data.message || data.error || "Assign failed" };
+      }
       // Refresh sessions
       const res = await ownerFetch(ownerIdRef.current, `/api/sessions/all?restaurantId=${restaurantSlug}`, { method: "GET" });
       if (res.ok) {
         const data = await res.json();
         setSessions(data.sessions || []);
       }
-    } catch { /* silent */ }
+      return { ok: true };
+    } catch {
+      return { ok: false, message: "Network error" };
+    }
   }, [restaurantSlug]);
 
   const hour = new Date().getHours();

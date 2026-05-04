@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { useCases } from "@/infrastructure/composition";
 import { toNum } from "@/lib/money";
+import { Prisma } from "@/generated/prisma/client";
 
 // GET: Fetch full invoice data for a session.
 //
@@ -33,13 +34,29 @@ export async function GET(request: NextRequest) {
       notes: string | null;
       comped?: boolean;
       cancelled?: boolean;
+      // Activity time-billing surface. activity.minutes is the elapsed
+      // duration the guest is being charged for (rounded up minute);
+      // activity.pricePerHour is the rate. The receipt renderer uses
+      // this to print "Kayak (1h 32m) @ 500/hr = 767" instead of a
+      // simple qty × price.
+      activity?: {
+        minutes: number;
+        pricePerHour: number;
+        running: boolean;
+      };
     };
     type InvoiceRound = {
       index: number;
       paidAt: string;
       paymentMethod: string | null;
       items: InvoiceItem[];
+      // Gross subtotal of the round before discount — what the items
+      // actually cost. Receipt shows this on the line above the
+      // discount + collected lines.
       subtotal: number;
+      // EGP discount applied to this round (cashier-entered at confirm
+      // time). 0 when none. Always whole-EGP, capped at subtotal.
+      discount: number;
       guestNumber: number | null;
       guestName: string | null;
     };
@@ -56,11 +73,37 @@ export async function GET(request: NextRequest) {
       .map(([paidAt, group], i) => {
         const items: InvoiceItem[] = [];
         let subtotal = 0;
+        let discount = 0;
         for (const o of group) {
           subtotal += toNum(o.total);
+          // Discount column was added 2026-05-04. Older paid orders
+          // never have it set, so the coalesce keeps historical totals
+          // intact (sum stays at gross when discount is 0/null).
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const oDisc = (o as any).discount as Prisma.Decimal | number | null | undefined;
+          discount += toNum(oDisc ?? 0);
           for (const it of o.items) {
             // Skip cancelled rows entirely — guest never owed for them.
             if (it.cancelled) continue;
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const itAny = it as any;
+            const pricePerHour = itAny.menuItem?.pricePerHour != null
+              ? toNum(itAny.menuItem.pricePerHour)
+              : 0;
+            const startedAt = itAny.activityStartedAt as Date | null | undefined;
+            const stoppedAt = itAny.activityStoppedAt as Date | null | undefined;
+            let activity: InvoiceItem["activity"] | undefined;
+            let unitPrice = it.comped ? 0 : toNum(it.price);
+            if (pricePerHour > 0 && startedAt) {
+              const end = stoppedAt ?? new Date();
+              const minutes = Math.max(1, Math.ceil((end.getTime() - startedAt.getTime()) / 60000));
+              activity = {
+                minutes,
+                pricePerHour,
+                running: !stoppedAt,
+              };
+              unitPrice = it.comped ? 0 : Math.ceil((minutes / 60) * pricePerHour);
+            }
             items.push({
               name: it.menuItem?.name ?? "Deleted item",
               nameAr: it.menuItem?.nameAr ?? null,
@@ -69,10 +112,11 @@ export async function GET(request: NextRequest) {
               // but isn't charged. Order.total was already re-summed
               // server-side excluding comped rows when the comp happened,
               // so the round subtotal is correct without further adjustment.
-              price: it.comped ? 0 : toNum(it.price),
+              price: unitPrice,
               addOns: it.addOns,
               notes: it.notes,
               comped: it.comped || undefined,
+              activity,
             });
           }
         }
@@ -91,6 +135,7 @@ export async function GET(request: NextRequest) {
           paymentMethod: group[0].paymentMethod ?? null,
           items,
           subtotal: Math.round(subtotal),
+          discount: Math.round(discount),
           guestNumber,
           guestName,
         };
@@ -101,6 +146,7 @@ export async function GET(request: NextRequest) {
     // still get something reasonable.
     const allItems: InvoiceItem[] = rounds.flatMap((r) => r.items);
     const subtotal = rounds.reduce((s, r) => s + r.subtotal, 0);
+    const totalDiscount = rounds.reduce((s, r) => s + r.discount, 0);
     const lastRound = rounds[rounds.length - 1];
 
     return NextResponse.json({
@@ -114,7 +160,8 @@ export async function GET(request: NextRequest) {
       paymentMethod: lastRound?.paymentMethod ?? null,
       items: allItems,
       subtotal,
-      total: subtotal,
+      discount: totalDiscount,
+      total: subtotal - totalDiscount,
       orderCount: session.orders.length,
       sessionId: session.id,
       rounds,

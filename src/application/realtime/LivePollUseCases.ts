@@ -17,7 +17,7 @@ export class LivePollUseCases {
         waiter: { select: { id: true, name: true } },
         vipGuest: { select: { name: true } },
         orders: {
-          select: { id: true, orderNumber: true, total: true, status: true, paymentMethod: true, paidAt: true, guestNumber: true, guestName: true },
+          select: { id: true, orderNumber: true, total: true, status: true, paymentMethod: true, paidAt: true, discount: true, guestNumber: true, guestName: true },
           orderBy: { createdAt: "asc" },
         },
       },

@@ -52,12 +52,15 @@ export class CashierUseCases {
   }
 
   async sumCashSince(restaurantId: string, since: Date): Promise<number> {
-    // Expected cash = order totals + tips that were collected in cash.
-    // The tip column is per-order and gets stamped at confirmPayRound;
-    // for a CASH-paid order the cashier physically takes home total+tip,
-    // so the drawer must expect both. Without the tip term, every
-    // cash-tipped shift comes out positive-variance and the cashier
-    // can't tell theft from gratuity.
+    // Expected cash = order totals + tips that were collected in cash,
+    // minus any cashier-applied discounts on those orders. The tip
+    // column is per-order and gets stamped at confirmPayRound; for a
+    // CASH-paid order the cashier physically takes home (total + tip −
+    // discount), so the drawer must expect that net. Without the tip
+    // term every cash-tipped shift came out positive-variance, and
+    // without the discount term every discounted shift came out
+    // negative-variance — both made theft vs. gratuity vs. discount
+    // indistinguishable.
     const agg = await db.order.aggregate({
       where: {
         restaurantId,
@@ -65,11 +68,12 @@ export class CashierUseCases {
         paidAt: { gte: since },
         status: { not: "CANCELLED" },
       },
-      _sum: { total: true, tip: true },
+      _sum: { total: true, tip: true, discount: true },
     });
     const total = agg._sum.total == null ? 0 : Number(agg._sum.total);
     const tip = agg._sum.tip == null ? 0 : Number(agg._sum.tip);
-    return total + tip;
+    const discount = agg._sum.discount == null ? 0 : Number(agg._sum.discount);
+    return total + tip - discount;
   }
 
   async createOpenDrawer(input: { restaurantId: string; cashierId: string; openingFloat: number }) {
@@ -353,7 +357,11 @@ export class CashierUseCases {
         orders: {
           where: { paidAt: { not: null }, status: { not: "CANCELLED" } },
           include: {
-            items: { include: { menuItem: { select: { name: true, nameAr: true } } } },
+            // Pull pricePerHour + the timer pair so the invoice route
+            // can render activity items as "Kayak (1h 32m) @ 500/hr"
+            // instead of a flat-priced line that doesn't match what the
+            // guest actually used.
+            items: { include: { menuItem: { select: { name: true, nameAr: true, pricePerHour: true } } } },
           },
           orderBy: { createdAt: "asc" },
         },

@@ -129,10 +129,13 @@ export async function DELETE(request: NextRequest) {
 
 export async function PATCH(request: NextRequest) {
   const body = await request.json();
-  const { sessionId, paymentMethod, tip } = body as {
+  const { sessionId, paymentMethod, tip, discount } = body as {
     sessionId?: string;
     paymentMethod?: string;
     tip?: number;
+    // Cashier-entered discount for this round, in resolved EGP.
+    // The UI converts a percentage to EGP before sending.
+    discount?: number;
   };
 
   if (!sessionId) {
@@ -151,16 +154,23 @@ export async function PATCH(request: NextRequest) {
   const tipAmount = typeof tip === "number" && tip > 0 && isFinite(tip)
     ? Math.round(tip)
     : 0;
+  // Cashier-entered discount for this round (already in EGP — % was
+  // resolved client-side against the live round total). Negative or
+  // non-finite values become 0.
+  const discountAmount = typeof discount === "number" && discount > 0 && isFinite(discount)
+    ? Math.round(discount)
+    : 0;
 
   try {
     const result = await useCases.sessions.confirmPayRound({
       sessionId,
       paymentMethod: paymentMethod || "CASH",
       tipAmount,
+      discountAmount,
     });
 
     if (result.noop) {
-      return NextResponse.json({ success: true, paidOrders: 0, sessionClosed: false, confirmedTotal: 0 });
+      return NextResponse.json({ success: true, paidOrders: 0, sessionClosed: false, confirmedTotal: 0, discount: 0 });
     }
 
     await maybeCloseSession(sessionId);
@@ -172,6 +182,7 @@ export async function PATCH(request: NextRequest) {
       paidOrders: result.orders.length,
       sessionClosed: anyUnpaid === 0,
       confirmedTotal: result.confirmedTotal,
+      discount: result.discount,
       tableNumber: sessionInfo?.table?.number ?? null,
     });
   } catch (err) {

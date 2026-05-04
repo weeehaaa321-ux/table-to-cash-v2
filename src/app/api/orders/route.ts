@@ -73,6 +73,15 @@ export async function POST(request: NextRequest) {
       }
     }
 
+    // ACTIVITY orders skip kitchen/bar prep entirely. We auto-mark them
+    // SERVED and start any per-hour timers. No-op for KITCHEN/BAR.
+    const orderIdForActivity = Array.isArray(order) ? order[0]?.id : order.id;
+    if (orderIdForActivity) {
+      await useCases.orders.finalizeActivityOrder(orderIdForActivity).catch((err) =>
+        console.error("Activity finalize failed:", err),
+      );
+    }
+
     return NextResponse.json(order, { status: 201 });
   } catch (err) {
     if (err instanceof SessionClosedError) {

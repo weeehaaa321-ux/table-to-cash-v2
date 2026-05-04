@@ -79,6 +79,12 @@ model MenuItem {
   descAr      String?
   descRu      String?
   price       Decimal  @db.Decimal(10, 2)
+  // EGP/hour for time-billed activity items (kayak, board, massage).
+  // When non-null, ordering this item starts a timer on the OrderItem
+  // (activityStartedAt) and the bill prorates by elapsed minutes.
+  // Null for ordinary food/drinks AND for flat-priced activity items
+  // (e.g. pool ticket — single fixed fee, no timer).
+  pricePerHour Decimal? @db.Decimal(10, 2)
   image       String?
   available   Boolean  @default(true)
   bestSeller  Boolean  @default(false)
@@ -128,6 +134,14 @@ model Order {
   tax          Decimal     @default(0) @db.Decimal(10, 2)
   total        Decimal     @db.Decimal(10, 2)
   tip          Decimal     @default(0) @db.Decimal(10, 2)
+  // Cashier-applied discount on this order, in EGP. Stored as the
+  // resolved EGP amount (not %), so revenue rollups can subtract it
+  // without having to re-evaluate "was this 10% of what?". Settles
+  // semantically alongside `tip`: total stays the gross subtotal
+  // (what the guest consumed), and the cashier collects total - discount.
+  // 0 by default; set on the first order of a round at confirmPayRound
+  // time.
+  discount     Decimal     @default(0) @db.Decimal(10, 2)
   // Flat delivery fee bundled into `total`. Stored separately so the
   // receipt / driver UI / cashier ledger can show the breakdown
   // without each surface re-deriving it from the orderType + a magic
@@ -198,6 +212,13 @@ model OrderItem {
   compReason   String?
   compedBy     String?   // Staff.id of whoever authorised the comp
   compedAt     DateTime?
+  // Time-billed activity tracking. Set on creation when the item's
+  // MenuItem has pricePerHour. activityStoppedAt is null while the
+  // timer is still running; the cashier or floor manager taps "Stop"
+  // to set it, after which the bill prorates against the elapsed
+  // duration. While running, the bill prorates against (now - start).
+  activityStartedAt DateTime?
+  activityStoppedAt DateTime?
 
   @@index([orderId])
   @@index([menuItemId])
@@ -413,6 +434,11 @@ model VipGuest {
 enum Station {
   KITCHEN
   BAR
+  // Activities (pool ticket, kayak/board hire, massage). Rendered as
+  // a third tab in the guest menu; never routes to the kitchen or bar
+  // prep screens. Hourly items billed prorated by the timer pair on
+  // OrderItem (activityStartedAt / activityStoppedAt).
+  ACTIVITY
 }
 
 model CashSettlement {

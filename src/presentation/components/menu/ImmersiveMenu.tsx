@@ -337,7 +337,7 @@ function CartBar({ tableNumber, lang = "en" }: { tableNumber: string; lang?: str
 
 export function ImmersiveMenu({ tableNumber, restaurantSlug, sessionId }: { tableNumber: string; restaurantSlug?: string; sessionId?: string }) {
   const { lang, toggleLang, t, dir } = useLanguage();
-  const [superCategory, setSuperCategory] = useState<"food" | "drinks">("food");
+  const [superCategory, setSuperCategory] = useState<"food" | "drinks" | "activities">("food");
   const [activeCategory, setActiveCategory] = useState("all");
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedItem, setSelectedItem] = useState<MenuItem | null>(null);
@@ -366,6 +366,9 @@ export function ImmersiveMenu({ tableNumber, restaurantSlug, sessionId }: { tabl
 
   const kitchenOpen = activeStations.includes("KITCHEN");
   const barOpen = activeStations.includes("BAR");
+  // Activities are independent of kitchen/bar shifts — they don't have
+  // a prep station, so they're available whenever the menu loads.
+  const activitiesOpen = activeStations.includes("ACTIVITY");
 
   const [sessionClosed, setSessionClosed] = useState(false);
   const [movedToTable, setMovedToTable] = useState<number | null>(null);
@@ -396,12 +399,21 @@ export function ImmersiveMenu({ tableNumber, restaurantSlug, sessionId }: { tabl
     return startPoll(() => { refreshMenu().then(purgeStale); }, 60_000);
   }, [menuLoaded, refreshMenu]);
 
-  // Auto-switch to available tab when a station is off
+  // Auto-switch to available tab when a station is off. Activities
+  // never close, so falling through to "activities" is the safe last
+  // resort if both kitchen and bar are off (e.g. restaurant runs only
+  // the activity offerings overnight).
   useEffect(() => {
     if (!menuLoaded) return;
-    if (superCategory === "food" && !kitchenOpen && barOpen) setSuperCategory("drinks");
-    if (superCategory === "drinks" && !barOpen && kitchenOpen) setSuperCategory("food");
-  }, [menuLoaded, kitchenOpen, barOpen, superCategory]);
+    if (superCategory === "food" && !kitchenOpen) {
+      if (barOpen) setSuperCategory("drinks");
+      else if (activitiesOpen) setSuperCategory("activities");
+    }
+    if (superCategory === "drinks" && !barOpen) {
+      if (kitchenOpen) setSuperCategory("food");
+      else if (activitiesOpen) setSuperCategory("activities");
+    }
+  }, [menuLoaded, kitchenOpen, barOpen, activitiesOpen, superCategory]);
 
   // Mark session as "browsing"
   useEffect(() => {
@@ -481,8 +493,12 @@ export function ImmersiveMenu({ tableNumber, restaurantSlug, sessionId }: { tabl
   // on whatever section was at the top of the list.
   const filteredCategories = useMemo(
     () => categories.filter((c) => {
-      const stationOk = superCategory === "food" ? c.station === "KITCHEN" : c.station === "BAR";
-      if (!stationOk) return false;
+      const wanted = superCategory === "food"
+        ? "KITCHEN"
+        : superCategory === "drinks"
+          ? "BAR"
+          : "ACTIVITY";
+      if (c.station !== wanted) return false;
       return c.items.some((i) => i.available);
     }),
     [categories, superCategory]
@@ -731,7 +747,7 @@ export function ImmersiveMenu({ tableNumber, restaurantSlug, sessionId }: { tabl
           )}
         </AnimatePresence>
 
-        {/* Food / Drinks toggle */}
+        {/* Food / Drinks / Activities toggle */}
         <div className="flex gap-2 px-4 pt-2 pb-1">
           <button
             onClick={() => { if (kitchenOpen) { setSuperCategory("food"); setActiveCategory("all"); scrollContainerRef.current?.scrollTo({ top: 0 }); } }}
@@ -761,6 +777,19 @@ export function ImmersiveMenu({ tableNumber, restaurantSlug, sessionId }: { tabl
             {lang === "ar" ? "🥤 مشروبات" : "🥤 Drinks"}
             {!barOpen && <span className="block text-[9px] font-normal mt-0.5">{lang === "ar" ? "مغلق" : "Closed"}</span>}
           </button>
+          <button
+            onClick={() => { if (activitiesOpen) { setSuperCategory("activities"); setActiveCategory("all"); scrollContainerRef.current?.scrollTo({ top: 0 }); } }}
+            disabled={!activitiesOpen}
+            className={`flex-1 py-2.5 rounded-xl text-sm font-bold transition-all ${
+              !activitiesOpen
+                ? "bg-sand-100 text-text-muted cursor-not-allowed"
+                : superCategory === "activities"
+                  ? "bg-sand-900 text-white shadow-md"
+                  : "bg-sand-100 text-text-muted"
+            }`}
+          >
+            {lang === "ar" ? "🏖️ أنشطة" : "🏖️ Activities"}
+          </button>
         </div>
 
         {/* Category tiles — horizontally scrolling, icon-on-top.
@@ -777,7 +806,7 @@ export function ImmersiveMenu({ tableNumber, restaurantSlug, sessionId }: { tabl
             const tiles: { slug: string; icon: string; label: string; count: number }[] = [
               {
                 slug: "all",
-                icon: superCategory === "food" ? "🍽️" : "🥤",
+                icon: superCategory === "food" ? "🍽️" : superCategory === "drinks" ? "🥤" : "🏖️",
                 label: lang === "ar" ? "الكل" : "All",
                 count: filteredItems.filter((i) => i.available).length,
               },

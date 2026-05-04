@@ -36,6 +36,21 @@ export function useFloorData(loggedInStaff: LoggedInStaff) {
   const [deliveries, setDeliveries] = useState<DeliveryOrder[]>([]);
   const [recentMessages, setRecentMessages] = useState<RecentMessage[]>([]);
   const [clockedInIds, setClockedInIds] = useState<Set<string>>(new Set());
+  // PENDING JoinRequests across the whole restaurant. Surfaced in the
+  // floor view's "stuck at gate" banner — guests scanning an existing
+  // table whose owner is away (pool / sea / phone in pocket). Polled
+  // every 10s so the floor manager can admit them in near-real-time
+  // without the guest physically tracking down a staff member.
+  const [pendingJoinRequests, setPendingJoinRequests] = useState<{
+    id: string;
+    guestId: string;
+    sessionId: string;
+    createdAt: string;
+    tableNumber: number | null;
+    vipGuestName: string | null;
+    orderType: string;
+    guestCount: number;
+  }[]>([]);
   const [dismissedAlerts, setDismissedAlerts] = useState<Set<string>>(new Set());
   const [now, setNow] = useState(Date.now());
   const [commsText, setCommsText] = useState("");
@@ -116,6 +131,26 @@ export function useFloorData(loggedInStaff: LoggedInStaff) {
     const stop = startPoll(fetchClocked, 30000);
     return () => { cancelled = true; stop(); };
   }, []);
+
+  // Pending join requests. 10s cadence — the typical "stuck at gate"
+  // experience is short (the friend stands at the table phone in
+  // hand), so the floor manager wants to see them quickly. The
+  // endpoint is restricted to OWNER / FLOOR_MANAGER server-side.
+  useEffect(() => {
+    let cancelled = false;
+    async function fetchPending() {
+      try {
+        const res = await staffFetch(loggedInStaff.id, `/api/sessions/join?scope=all&restaurantId=${RESTAURANT_SLUG}`);
+        if (res.ok && !cancelled) {
+          const data = await res.json();
+          setPendingJoinRequests(data.requests || []);
+        }
+      } catch {}
+    }
+    fetchPending();
+    const stop = startPoll(fetchPending, 10000);
+    return () => { cancelled = true; stop(); };
+  }, [loggedInStaff.id]);
 
   useEffect(() => {
     return startPoll(() => {
@@ -292,17 +327,24 @@ export function useFloorData(loggedInStaff: LoggedInStaff) {
     } catch {}
   }, [loggedInStaff.id]);
 
-  const handleReassign = useCallback(async (sessionId: string, waiterId: string) => {
+  const handleReassign = useCallback(async (sessionId: string, waiterId: string): Promise<{ ok: boolean; message?: string }> => {
     try {
-      await staffFetch(loggedInStaff.id, "/api/sessions", {
+      const res = await staffFetch(loggedInStaff.id, "/api/sessions", {
         method: "PATCH",
         body: JSON.stringify({ sessionId, action: "assign_waiter", waiterId }),
       });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        return { ok: false, message: data.message || data.error || "Assign failed" };
+      }
       const s = sessions.find((ss) => ss.id === sessionId);
       const w = allStaff.find((st) => st.id === waiterId);
       logAction("reassign", `Reassigned T${s?.tableNumber ?? "?"} → ${w?.name ?? "?"}`, sessionId);
       refreshSessions();
-    } catch {}
+      return { ok: true };
+    } catch {
+      return { ok: false, message: "Network error" };
+    }
   }, [loggedInStaff.id, sessions, allStaff, logAction, refreshSessions]);
 
   const handleSendWaiter = useCallback(async (tableId: number) => {
@@ -371,6 +413,115 @@ export function useFloorData(loggedInStaff: LoggedInStaff) {
       logAction("change_table", `Moved T${s?.tableNumber ?? "?"} → T${newTableNumber}`, sessionId);
       refreshSessions();
     } catch {}
+  }, [loggedInStaff.id, sessions, logAction, refreshSessions]);
+
+  // Move a single named guest with all their orders (placed, served,
+  // even already-paid) from one table session to another. The server
+  // resolves the target session — joining an existing one or creating
+  // a fresh one — based on the target table's current state.
+  const handleMoveGuest = useCallback(async (
+    sessionId: string,
+    guest: { guestNumber: number | null; guestName: string | null },
+    targetTableNumber: number,
+  ) => {
+    try {
+      const res = await staffFetch(loggedInStaff.id, "/api/sessions", {
+        method: "PATCH",
+        body: JSON.stringify({
+          sessionId,
+          action: "move_guest",
+          guestNumber: guest.guestNumber ?? undefined,
+          guestName: guest.guestName ?? undefined,
+          targetTableNumber,
+        }),
+      });
+      if (!res.ok) return { ok: false, message: (await res.json().catch(() => ({}))).error || "Move failed" };
+      const s = sessions.find((ss) => ss.id === sessionId);
+      const guestLabel = guest.guestName?.trim() || `Guest ${guest.guestNumber ?? "?"}`;
+      logAction("change_table", `${guestLabel}: T${s?.tableNumber ?? "?"} → T${targetTableNumber}`, sessionId);
+      refreshSessions();
+      return { ok: true };
+    } catch {
+      return { ok: false, message: "Network error" };
+    }
+  }, [loggedInStaff.id, sessions, logAction, refreshSessions]);
+
+  // Admit (approve) a stuck-at-gate guest's join request. Floor
+  // manager / owner override — bypasses the session-owner approval
+  // path. Optimistically clears the request from the local list so
+  // the banner collapses immediately; the next poll reconciles with
+  // server state.
+  const handleAdmitJoinRequest = useCallback(async (requestId: string) => {
+    try {
+      setPendingJoinRequests((prev) => prev.filter((r) => r.id !== requestId));
+      const res = await staffFetch(loggedInStaff.id, "/api/sessions/join", {
+        method: "PATCH",
+        body: JSON.stringify({ requestId, action: "approve" }),
+      });
+      if (!res.ok) {
+        // Restore on failure so the banner shows again.
+        await refreshSessions();
+        const refetch = await staffFetch(loggedInStaff.id, `/api/sessions/join?scope=all&restaurantId=${RESTAURANT_SLUG}`);
+        if (refetch.ok) {
+          const data = await refetch.json();
+          setPendingJoinRequests(data.requests || []);
+        }
+        return { ok: false, message: "Admit failed" };
+      }
+      logAction("change_table", `Admitted guest at T${pendingJoinRequests.find((r) => r.id === requestId)?.tableNumber ?? "?"}`);
+      return { ok: true };
+    } catch {
+      return { ok: false, message: "Network error" };
+    }
+  }, [loggedInStaff.id, pendingJoinRequests, refreshSessions, logAction]);
+
+  // Reject a stuck-at-gate join request. Same gate as admit (staff
+  // override), but stamps REJECTED instead of APPROVED — used when
+  // the floor manager recognises the requester as not part of the
+  // group (e.g. a wandering guest who scanned the wrong QR).
+  const handleRejectJoinRequest = useCallback(async (requestId: string) => {
+    try {
+      setPendingJoinRequests((prev) => prev.filter((r) => r.id !== requestId));
+      const res = await staffFetch(loggedInStaff.id, "/api/sessions/join", {
+        method: "PATCH",
+        body: JSON.stringify({ requestId, action: "reject" }),
+      });
+      if (!res.ok) return { ok: false, message: "Reject failed" };
+      return { ok: true };
+    } catch {
+      return { ok: false, message: "Network error" };
+    }
+  }, [loggedInStaff.id]);
+
+  // Merge two tables: source folds INTO target, source closes. Used
+  // when one group physically joins another. The UI passes the picked-
+  // up table as source and the destination as target.
+  const handleMergeTables = useCallback(async (
+    sourceSessionId: string,
+    targetSessionId: string,
+  ) => {
+    try {
+      const res = await staffFetch(loggedInStaff.id, "/api/sessions", {
+        method: "PATCH",
+        body: JSON.stringify({
+          sessionId: sourceSessionId,
+          action: "merge_tables",
+          targetSessionId,
+        }),
+      });
+      if (!res.ok) return { ok: false, message: (await res.json().catch(() => ({}))).error || "Merge failed" };
+      const src = sessions.find((ss) => ss.id === sourceSessionId);
+      const tgt = sessions.find((ss) => ss.id === targetSessionId);
+      logAction(
+        "change_table",
+        `Merged T${src?.tableNumber ?? "?"} → T${tgt?.tableNumber ?? "?"}`,
+        targetSessionId,
+      );
+      refreshSessions();
+      return { ok: true };
+    } catch {
+      return { ok: false, message: "Network error" };
+    }
   }, [loggedInStaff.id, sessions, logAction, refreshSessions]);
 
   const handleIncrementGuests = useCallback(async (sessionId: string) => {
@@ -475,6 +626,7 @@ export function useFloorData(loggedInStaff: LoggedInStaff) {
     tables, orders, kitchen, bar, metrics,
     // Raw data
     sessions, allStaff, deliveries, recentMessages, now,
+    pendingJoinRequests,
     shiftInfo,
     // Comms state (hoisted so footer bar + broadcast handler share it)
     commsText, setCommsText, commsTarget, setCommsTarget,
@@ -487,7 +639,9 @@ export function useFloorData(loggedInStaff: LoggedInStaff) {
     waiterMetrics, loadSummary, highValueTables, revenuePerHour, shiftProgressPct, staffPresence,
     // Handlers
     handleReassign, handleSendWaiter, handlePrioritize, handleEndSession,
-    handleCancelItem, handleChangeTable, handleIncrementGuests, handleAdvanceStatus,
+    handleCancelItem, handleChangeTable, handleMoveGuest, handleMergeTables,
+    handleAdmitJoinRequest, handleRejectJoinRequest,
+    handleIncrementGuests, handleAdvanceStatus,
     handleAssignDriver, handleUpdateDeliveryStatus, handleBroadcast, handleLogIssue,
     handleAlertAction, handleDismissAlert,
   };

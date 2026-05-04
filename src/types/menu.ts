@@ -7,6 +7,11 @@ export type MenuItem = {
   descAr?: string | null;
   descRu?: string | null;
   price: number;
+  // Time-billed activity rate (EGP/hour). When set, ordering this item
+  // starts a timer on the OrderItem and bills prorated by elapsed
+  // duration; the static `price` is then a minimum-1-hour fallback
+  // shown in the menu UI.
+  pricePerHour?: number | null;
   image?: string | null;
   available: boolean;
   bestSeller: boolean;
@@ -35,7 +40,7 @@ export type Category = {
   slug: string;
   sortOrder: number;
   icon?: string | null;
-  station?: "KITCHEN" | "BAR";
+  station?: "KITCHEN" | "BAR" | "ACTIVITY";
   items: MenuItem[];
 };
 

@@ -117,13 +117,27 @@ function minsAgo(ts: string | number): number {
   return Math.max(0, Math.round((Date.now() - t) / 60000));
 }
 
-type InvoiceItem = { name: string; nameAr: string | null; quantity: number; price: number; addOns: string[]; notes: string | null };
+type InvoiceItem = {
+  name: string;
+  nameAr: string | null;
+  quantity: number;
+  price: number;
+  addOns: string[];
+  notes: string | null;
+  // Optional time-billing metadata for activity items. When present,
+  // the receipt prints a "(1h 32m) @ 500/hr" line under the item name
+  // so the guest sees how the prorated charge was calculated.
+  activity?: { minutes: number; pricePerHour: number; running: boolean };
+};
 type InvoiceRound = {
   index: number;
   paidAt: string;
   paymentMethod: string | null;
   items: InvoiceItem[];
   subtotal: number;
+  // Per-round discount in EGP. 0 when none was applied. Receipt prints
+  // it as a separate "Discount −X EGP" line above the collected total.
+  discount?: number;
   guestNumber?: number | null;
   guestName?: string | null;
 };
@@ -140,6 +154,10 @@ type InvoiceData = {
   paymentMethod: string | null;
   items: InvoiceItem[];
   subtotal: number;
+  // Lifetime discount across all rounds (sum of round.discount). Used
+  // by the full-receipt print so a session with multiple discounted
+  // rounds shows one summed line.
+  discount?: number;
   total: number;
   orderCount: number;
   sessionId: string;
@@ -173,7 +191,7 @@ type PrintAgentOutcome = {
   paperLow?: boolean;
 };
 
-async function tryAgentPrint(sessionId: string): Promise<PrintAgentOutcome> {
+async function tryAgentPrint(sessionId: string, mode: "round" | "full" = "round"): Promise<PrintAgentOutcome> {
   const agentUrl =
     (typeof localStorage !== "undefined" && localStorage.getItem("cashier_print_agent")) ||
     "http://localhost:9911";
@@ -181,7 +199,7 @@ async function tryAgentPrint(sessionId: string): Promise<PrintAgentOutcome> {
     const res = await fetch(`${agentUrl}/print`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ sessionId }),
+      body: JSON.stringify({ sessionId, mode }),
     });
     const json = await res.json().catch(() => ({}));
     if (!res.ok || !json.ok) {
@@ -222,7 +240,13 @@ async function probeAgentHealth(): Promise<PrintAgentOutcome> {
 
 // Returns true if the print window opened (popup wasn't blocked); false
 // if the browser refused (popup blocker is the most common cause).
-function printInvoice(inv: InvoiceData): boolean {
+//
+// mode "round" (default): prints the latest paid round in detail with a
+// compact "Previously paid" footer — the per-settlement receipt.
+// mode "full": prints every round's items in detail, with the lifetime
+// total. For reprinting a session paid in parts when the operator needs
+// one paper that shows everything the table consumed.
+function printInvoice(inv: InvoiceData, mode: "round" | "full" = "round"): boolean {
   // RECEIPT POLICY: print order items + their TOTAL only. Never show a
   // tip line. Tip is a private cashier↔guest matter and stays in the
   // app; the printed paper is for the customer's records of what they
@@ -235,6 +259,7 @@ function printInvoice(inv: InvoiceData): boolean {
   // just collected AND what the table has paid lifetime.
   const current = rounds[rounds.length - 1];
   const prior = rounds.slice(0, -1);
+  const isFullMode = mode === "full" && rounds.length > 0;
 
   const date = new Date(current?.paidAt || inv.closedAt || inv.openedAt);
   const dateStr = date.toLocaleDateString("en-GB", { day: "2-digit", month: "2-digit", year: "numeric" });
@@ -251,20 +276,33 @@ function printInvoice(inv: InvoiceData): boolean {
   // for half the order and English-only rows for the other half —
   // looked like a bug. Stick to the canonical English `name` field;
   // the bottom-of-receipt thank-you line carries the Arabic touch.
+  const formatDuration = (minutes: number): string => {
+    const h = Math.floor(minutes / 60);
+    const m = minutes % 60;
+    return h > 0 ? `${h}h ${m}m` : `${m}m`;
+  };
   const renderItemRows = (items: InvoiceItem[]) =>
     items.map((item) => {
       const line = `${item.quantity}x ${escapeHtml(item.name)}`;
       const price = `${Math.round(item.price * item.quantity)}`;
       const addOns = item.addOns.length > 0 ? item.addOns.map((a) => { try { const p = JSON.parse(a); return p.name || a; } catch { return a; } }).join(", ") : "";
+      // Activity duration line under the item — e.g. "(1h 32m) @
+      // 500/hr". Lets the guest reconcile the printed price against
+      // the time on their own watch.
+      const activityLine = item.activity
+        ? `<br><span style="font-size:10px;color:#666;">  (${formatDuration(item.activity.minutes)}) @ ${item.activity.pricePerHour}/hr${item.activity.running ? " · running" : ""}</span>`
+        : "";
       return `
       <tr>
-        <td style="text-align:left;padding:2px 0;font-size:12px;">${line}${addOns ? `<br><span style="font-size:10px;color:#666;">  + ${escapeHtml(addOns)}</span>` : ""}${item.notes ? `<br><span style="font-size:10px;color:#666;">  "${escapeHtml(item.notes)}"</span>` : ""}</td>
+        <td style="text-align:left;padding:2px 0;font-size:12px;">${line}${activityLine}${addOns ? `<br><span style="font-size:10px;color:#666;">  + ${escapeHtml(addOns)}</span>` : ""}${item.notes ? `<br><span style="font-size:10px;color:#666;">  "${escapeHtml(item.notes)}"</span>` : ""}</td>
         <td style="text-align:right;padding:2px 0;font-size:12px;white-space:nowrap;">${price}</td>
       </tr>`;
     }).join("");
 
   const currentItems = current?.items ?? inv.items;
   const currentSubtotal = current?.subtotal ?? inv.total;
+  const currentDiscount = (current?.discount ?? 0) > 0 ? (current!.discount as number) : 0;
+  const currentCollected = Math.max(0, currentSubtotal - currentDiscount);
   const currentMethod = current?.paymentMethod ?? inv.paymentMethod;
   // Per-round guest label — name when the guest entered one at scan
   // time, fall back to "Guest N", or empty when neither is known
@@ -280,11 +318,47 @@ function printInvoice(inv: InvoiceData): boolean {
   const currentGuest = guestLabelFor(current);
 
   const isMultiRound = rounds.length > 1;
-  const roundLabel = isMultiRound
-    ? `ROUND ${current?.index ?? rounds.length} OF ${rounds.length}`
-    : "";
+  const roundLabel = isFullMode
+    ? (isMultiRound ? `FULL RECEIPT · ${rounds.length} ROUNDS` : "FULL RECEIPT")
+    : isMultiRound
+      ? `ROUND ${current?.index ?? rounds.length} OF ${rounds.length}`
+      : "";
 
-  const priorBlock = prior.length > 0 ? `
+  // Per-round detail block — used in full mode so every item the table
+  // consumed is on the paper, grouped by which round paid for it.
+  const roundsDetailBlock = isFullMode ? rounds.map((r) => {
+    const g = guestLabelFor(r);
+    const meta = [r.paymentMethod, g].filter(Boolean).join(" · ");
+    const rDisc = (r.discount ?? 0) > 0 ? (r.discount as number) : 0;
+    const rCollected = Math.max(0, r.subtotal - rDisc);
+    return `
+  <div style="font-size:11px;font-weight:bold;margin:6px 0 2px;border-bottom:1px solid #000;padding-bottom:2px;">
+    Round ${r.index}${meta ? ` <span style="font-weight:normal;color:#444;">· ${escapeHtml(meta)}</span>` : ""}
+  </div>
+  <table>
+    <tbody>
+      ${renderItemRows(r.items)}
+    </tbody>
+    <tr>
+      <td style="font-size:11px;text-align:left;padding-top:3px;">Subtotal</td>
+      <td style="font-size:11px;text-align:right;padding-top:3px;">${r.subtotal} ${inv.currency}</td>
+    </tr>
+    ${rDisc > 0 ? `
+    <tr>
+      <td style="font-size:11px;text-align:left;">Discount</td>
+      <td style="font-size:11px;text-align:right;">−${rDisc} ${inv.currency}</td>
+    </tr>` : ""}
+    <tr>
+      <td style="font-size:11px;text-align:left;padding-top:1px;"><b>Round ${r.index} total</b></td>
+      <td style="font-size:11px;text-align:right;padding-top:1px;"><b>${rCollected} ${inv.currency}</b></td>
+    </tr>
+  </table>`;
+  }).join("") : "";
+
+  // Footer for round mode — compact list of prior rounds the cashier
+  // can see at a glance. Skipped in full mode (the body already shows
+  // every round in detail).
+  const priorBlock = (!isFullMode && prior.length > 0) ? `
   <div class="divider"></div>
   <div style="font-size:10px;color:#444;margin:4px 0 2px;"><b>Previously paid on this table:</b></div>
   <table>
@@ -304,11 +378,14 @@ function printInvoice(inv: InvoiceData): boolean {
   </table>
   ` : "";
 
+  const titleSuffix = isFullMode ? " · Full" : (isMultiRound ? ` · R${current?.index}` : "");
+  const invoiceSuffix = isFullMode ? "-FULL" : (isMultiRound ? `-R${current?.index}` : "");
+
   const html = `<!DOCTYPE html>
 <html>
 <head>
   <meta charset="UTF-8">
-  <title>Invoice - ${inv.tableNumber != null ? `Table ${inv.tableNumber}` : (inv.vipGuestName || "VIP")}${isMultiRound ? ` · R${current?.index}` : ""}</title>
+  <title>Invoice - ${inv.tableNumber != null ? `Table ${inv.tableNumber}` : (inv.vipGuestName || "VIP")}${titleSuffix}</title>
   <style>
     @media print {
       @page { margin: 5mm; size: 80mm auto; }
@@ -331,12 +408,12 @@ function printInvoice(inv: InvoiceData): boolean {
     <div><b>${inv.tableNumber != null ? `Table:</b> ${inv.tableNumber}` : `Guest:</b> ${inv.vipGuestName || "VIP"}`}${inv.guestCount > 0 ? ` &nbsp; <b>Guests:</b> ${inv.guestCount}` : ""}</div>
     ${inv.waiterName ? `<div><b>Server:</b> ${inv.waiterName}</div>` : ""}
     <div><b>Date:</b> ${dateStr} ${timeStr}</div>
-    <div><b>Invoice:</b> ${inv.sessionId.slice(-8).toUpperCase()}${isMultiRound ? `-R${current?.index}` : ""}</div>
+    <div><b>Invoice:</b> ${inv.sessionId.slice(-8).toUpperCase()}${invoiceSuffix}</div>
   </div>
 
   ${roundLabel ? `<div class="round-banner">${roundLabel}</div>` : `<div class="divider"></div>`}
 
-  <table>
+  ${isFullMode ? roundsDetailBlock : `<table>
     <thead>
       <tr style="font-size:11px;font-weight:bold;border-bottom:1px solid #000;">
         <td style="text-align:left;padding-bottom:3px;">Item</td>
@@ -346,17 +423,35 @@ function printInvoice(inv: InvoiceData): boolean {
     <tbody>
       ${renderItemRows(currentItems)}
     </tbody>
-  </table>
+  </table>`}
 
   <div class="divider"></div>
 
   <table>
-    <tr class="total-row">
-      <td style="text-align:left;">${isMultiRound ? "THIS ROUND" : "TOTAL"}</td>
-      <td style="text-align:right;">${currentSubtotal} ${inv.currency}</td>
+    ${(!isFullMode && currentDiscount > 0) ? `
+    <tr>
+      <td style="font-size:11px;text-align:left;">Subtotal</td>
+      <td style="font-size:11px;text-align:right;">${currentSubtotal} ${inv.currency}</td>
     </tr>
-    ${currentMethod ? `<tr><td style="font-size:11px;text-align:left;padding-top:4px;">Paid by</td><td style="font-size:11px;text-align:right;padding-top:4px;">${currentMethod}</td></tr>` : ""}
-    ${currentGuest ? `<tr><td style="font-size:11px;text-align:left;padding-top:2px;">Guest</td><td style="font-size:11px;text-align:right;padding-top:2px;">${escapeHtml(currentGuest)}</td></tr>` : ""}
+    <tr>
+      <td style="font-size:11px;text-align:left;">Discount</td>
+      <td style="font-size:11px;text-align:right;">−${currentDiscount} ${inv.currency}</td>
+    </tr>` : ""}
+    ${(isFullMode && (inv.discount ?? 0) > 0) ? `
+    <tr>
+      <td style="font-size:11px;text-align:left;">Items subtotal</td>
+      <td style="font-size:11px;text-align:right;">${(inv.subtotal ?? inv.total + (inv.discount || 0))} ${inv.currency}</td>
+    </tr>
+    <tr>
+      <td style="font-size:11px;text-align:left;">Total discounts</td>
+      <td style="font-size:11px;text-align:right;">−${inv.discount} ${inv.currency}</td>
+    </tr>` : ""}
+    <tr class="total-row">
+      <td style="text-align:left;">${isFullMode ? "LIFETIME TOTAL" : isMultiRound ? "THIS ROUND" : "TOTAL"}</td>
+      <td style="text-align:right;">${isFullMode ? inv.total : currentCollected} ${inv.currency}</td>
+    </tr>
+    ${(!isFullMode && currentMethod) ? `<tr><td style="font-size:11px;text-align:left;padding-top:4px;">Paid by</td><td style="font-size:11px;text-align:right;padding-top:4px;">${currentMethod}</td></tr>` : ""}
+    ${(!isFullMode && currentGuest) ? `<tr><td style="font-size:11px;text-align:left;padding-top:2px;">Guest</td><td style="font-size:11px;text-align:right;padding-top:2px;">${escapeHtml(currentGuest)}</td></tr>` : ""}
   </table>
 
   ${priorBlock}
@@ -481,9 +576,9 @@ type PaymentMethodChoice = "CASH" | "CARD" | "INSTAPAY";
 
 function AcceptPaymentPanel({ sessions, onAcceptPayment, onReversePayment, recentlyPaidSessions, busyRef, staffId }: {
   sessions: SessionInfo[];
-  onAcceptPayment: (sessionId: string, method: PaymentMethodChoice, tip: number) => Promise<{ confirmedTotal: number } | null>;
+  onAcceptPayment: (sessionId: string, method: PaymentMethodChoice, tip: number, discount: number) => Promise<{ confirmedTotal: number } | null>;
   onReversePayment: (sessionId: string, reason: string) => Promise<boolean>;
-  recentlyPaidSessions: { id: string; tableNumber: number | null; orderType?: string; vipGuestName?: string | null; total: number }[];
+  recentlyPaidSessions: { id: string; tableNumber: number | null; orderType?: string; vipGuestName?: string | null; total: number; roundCount: number }[];
   busyRef: React.MutableRefObject<boolean>;
   staffId?: string;
 }) {
@@ -593,6 +688,13 @@ function AcceptPaymentPanel({ sessions, onAcceptPayment, onReversePayment, recen
   // Reset every time the modal opens so a tip from the previous
   // transaction never bleeds into the next one.
   const [tipInput, setTipInput] = useState<string>("");
+  // Cashier-applied discount on this round. The mode toggle decides
+  // how to interpret the typed number — "%" sends a percentage of the
+  // round total, "EGP" sends a flat deduction. Both are resolved to an
+  // absolute EGP amount before the server call so the storage layer
+  // doesn't need to know which mode the cashier picked.
+  const [discountInput, setDiscountInput] = useState<string>("");
+  const [discountMode, setDiscountMode] = useState<"PCT" | "FLAT">("PCT");
   // Reverse-payment confirmation state. Cashier has to type a reason,
   // so accidental taps can't roll back a correctly settled bill.
   const [reversing, setReversing] = useState<{
@@ -612,27 +714,34 @@ function AcceptPaymentPanel({ sessions, onAcceptPayment, onReversePayment, recen
     kind: "fail" | "low";
     reason?: PrintAgentOutcome["reason"];
     sessionId?: string;
+    mode?: "round" | "full";
   } | null>(null);
 
   // Run a print attempt and surface the outcome. Tries the local
   // thermal agent first; falls back to the browser's print window;
   // only declares success when one of those actually worked.
-  const runPrint = async (sessionId: string) => {
-    const agent = await tryAgentPrint(sessionId);
+  //
+  // mode "round" (default): per-settlement receipt — the just-paid
+  // round's items + total, with prior rounds folded into a footer.
+  // mode "full": every round in detail + the lifetime total — used
+  // when the operator is reprinting a session that paid in parts and
+  // needs one paper that covers the whole table.
+  const runPrint = async (sessionId: string, mode: "round" | "full" = "round") => {
+    const agent = await tryAgentPrint(sessionId, mode);
     if (agent.ok) {
       if (agent.paperLow) setPrintAlert({ kind: "low" });
       return;
     }
     // Agent path failed — try the browser fallback.
     const inv = await fetchInvoice(sessionId, staffId);
-    if (inv && printInvoice(inv)) {
+    if (inv && printInvoice(inv, mode)) {
       // Popup opened — receipt may still print, but we still warn
       // because the agent path is the supported one.
-      setPrintAlert({ kind: "fail", reason: agent.reason, sessionId });
+      setPrintAlert({ kind: "fail", reason: agent.reason, sessionId, mode });
       return;
     }
     // Neither path worked.
-    setPrintAlert({ kind: "fail", reason: agent.reason || "unknown", sessionId });
+    setPrintAlert({ kind: "fail", reason: agent.reason || "unknown", sessionId, mode });
   };
 
   // Tell the reliability hook we're mid-transaction — no reloads allowed
@@ -643,13 +752,13 @@ function AcceptPaymentPanel({ sessions, onAcceptPayment, onReversePayment, recen
     busyRef.current = !!pendingConfirm || settling;
   }, [pendingConfirm, settling, busyRef]);
 
-  const handlePrint = async (sessionId: string) => {
+  const handlePrint = async (sessionId: string, mode: "round" | "full" = "round") => {
     setPrinting(sessionId);
     // Prefer the thermal print agent on the cashier PC — silent, no
     // print dialog. Falls back to the browser print window if the
     // agent isn't reachable. runPrint surfaces failures and paper-low
     // warnings via the printAlert banner.
-    await runPrint(sessionId);
+    await runPrint(sessionId, mode);
     setPrinting(null);
   };
 
@@ -679,6 +788,11 @@ function AcceptPaymentPanel({ sessions, onAcceptPayment, onReversePayment, recen
     // what gets stamped (SET, not incremented), so there's no double-
     // counting risk.
     setTipInput(session.pendingTip && session.pendingTip > 0 ? String(session.pendingTip) : "");
+    // Discount resets every modal open. A discount on the previous
+    // round must NOT carry into this one — that would silently
+    // re-apply it without the cashier confirming.
+    setDiscountInput("");
+    setDiscountMode("PCT");
     // Round-scoped collect amount, in priority order:
     //   1. cashier picker subset (walk-up split)
     //   2. guest-signalled pending round
@@ -716,10 +830,18 @@ function AcceptPaymentPanel({ sessions, onAcceptPayment, onReversePayment, recen
   // settle it cleanly — recoverable).
   const handleConfirmReceived = async () => {
     if (!pendingConfirm || settling) return;
-    const { sessionId, tableNumber, method, splitItemIds } = pendingConfirm;
+    const { sessionId, tableNumber, method, splitItemIds, total: roundGross } = pendingConfirm;
     // Parse once at confirm time. Anything that isn't a finite positive
     // number becomes 0 — the server will also defensively discard it.
     const parsedTip = Math.max(0, Math.round(Number(tipInput) || 0));
+    // Resolve the discount to absolute EGP. A "10" in PCT mode against
+    // a 250 round becomes 25 EGP. Cap at the round total so the cashier
+    // can't punch in a bigger discount than the bill itself.
+    const rawDiscount = Number(discountInput) || 0;
+    const resolvedDiscount = discountMode === "PCT"
+      ? Math.round((Math.max(0, Math.min(100, rawDiscount)) / 100) * roundGross)
+      : Math.max(0, Math.round(rawDiscount));
+    const parsedDiscount = Math.max(0, Math.min(roundGross, resolvedDiscount));
     setSettling(true);
     setPendingConfirm(null);
 
@@ -749,7 +871,7 @@ function AcceptPaymentPanel({ sessions, onAcceptPayment, onReversePayment, recen
       }
     }
 
-    const result = await onAcceptPayment(sessionId, method, parsedTip);
+    const result = await onAcceptPayment(sessionId, method, parsedTip, parsedDiscount);
     setSettling(false);
     if (result) {
       // Drop the picker selection — the items the cashier just settled
@@ -813,7 +935,7 @@ function AcceptPaymentPanel({ sessions, onAcceptPayment, onReversePayment, recen
           <div className="flex flex-col gap-1.5 shrink-0">
             {printAlert.kind === "fail" && printAlert.sessionId && (
               <button
-                onClick={() => { if (printAlert.sessionId) runPrint(printAlert.sessionId); }}
+                onClick={() => { if (printAlert.sessionId) runPrint(printAlert.sessionId, printAlert.mode || "round"); }}
                 className="px-3 py-1.5 rounded-lg bg-status-bad-600 text-white text-[11px] font-bold active:scale-95"
               >
                 {t("cashier.retryPrint")}
@@ -881,6 +1003,58 @@ function AcceptPaymentPanel({ sessions, onAcceptPayment, onReversePayment, recen
                 <span className="text-xs font-bold text-text-secondary">{t("common.egp")}</span>
               </div>
             </div>
+            {/* Optional discount. Mode toggle — % of round or flat EGP
+                — resolved client-side to absolute EGP and capped at
+                the round total before being sent to the server. The
+                live preview shows what the cashier will actually
+                collect (gross − discount), so a "type 100% by mistake"
+                doesn't slip past unnoticed. */}
+            {(() => {
+              const grossRound = pendingConfirm.total;
+              const rawDiscount = Number(discountInput) || 0;
+              const resolved = discountMode === "PCT"
+                ? Math.round((Math.max(0, Math.min(100, rawDiscount)) / 100) * grossRound)
+                : Math.max(0, Math.round(rawDiscount));
+              const capped = Math.min(grossRound, resolved);
+              const collected = Math.max(0, grossRound - capped);
+              return (
+                <div className="mb-4">
+                  <label className="text-[10px] font-bold text-text-muted uppercase tracking-wider mb-1 block">
+                    {t("cashier.discountOptional")}
+                  </label>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="number"
+                      inputMode="numeric"
+                      min={0}
+                      step={discountMode === "PCT" ? 5 : 1}
+                      max={discountMode === "PCT" ? 100 : grossRound}
+                      value={discountInput}
+                      onChange={(e) => setDiscountInput(e.target.value)}
+                      placeholder="0"
+                      className="flex-1 rounded-xl border border-sand-200 bg-white px-3 py-2 text-sm font-bold text-text-primary tabular-nums focus:outline-none focus:ring-2 focus:ring-status-warn-500"
+                    />
+                    <div className="flex rounded-xl border border-sand-200 overflow-hidden text-xs font-bold">
+                      <button
+                        type="button"
+                        onClick={() => setDiscountMode("PCT")}
+                        className={`px-2.5 py-2 ${discountMode === "PCT" ? "bg-status-warn-500 text-white" : "bg-white text-text-secondary"}`}
+                      >%</button>
+                      <button
+                        type="button"
+                        onClick={() => setDiscountMode("FLAT")}
+                        className={`px-2.5 py-2 ${discountMode === "FLAT" ? "bg-status-warn-500 text-white" : "bg-white text-text-secondary"}`}
+                      >{t("common.egp")}</button>
+                    </div>
+                  </div>
+                  {capped > 0 && (
+                    <p className="text-[11px] text-text-muted mt-1.5 tabular-nums font-semibold">
+                      −{formatEGP(capped)} {t("common.egp")} · {t("cashier.collectsTo")} <b className="text-text-primary">{formatEGP(collected)} {t("common.egp")}</b>
+                    </p>
+                  )}
+                </div>
+              );
+            })()}
             <p className="text-sm text-text-secondary mb-5">
               {t("cashier.confirmOnlyAfter")}{" "}
               <b>{pendingConfirm.roundLabel}</b> {t("cashier.andPrintsReceipt")}
@@ -948,6 +1122,17 @@ function AcceptPaymentPanel({ sessions, onAcceptPayment, onReversePayment, recen
                     className="px-4 py-2 rounded-xl bg-status-good-600 text-white text-sm font-bold active:scale-95 disabled:opacity-50">
                     {printing === s.id ? "..." : `🖨 ${t("cashier.print")}`}
                   </button>
+                  {/* Full-receipt reprint — surfaces only when the session
+                      paid in multiple rounds. Without it, the per-round
+                      print at settlement was the LAST paper for each round
+                      and the table's full bill couldn't be reprinted. */}
+                  {s.roundCount > 1 && (
+                    <button onClick={() => handlePrint(s.id, "full")} disabled={printing === s.id}
+                      title={t("cashier.printFullReceiptTitle")}
+                      className="px-3 py-2 rounded-xl bg-white text-status-good-700 border border-status-good-300 text-xs font-bold active:scale-95 hover:bg-status-good-50 disabled:opacity-50">
+                      {printing === s.id ? "..." : `🖨 ${t("cashier.printFull")}`}
+                    </button>
+                  )}
                   <button
                     onClick={() => { setReversing({ sessionId: s.id, tableNumber: s.tableNumber, orderType: s.orderType, vipGuestName: s.vipGuestName, total: s.total }); setReverseReason(""); }}
                     title={t("cashier.reversePaymentTitle")}
@@ -1556,7 +1741,7 @@ function CashierSystem({ staff, onLogout }: { staff: LoggedInStaff; onLogout: ()
 
   const restaurantSlug = process.env.NEXT_PUBLIC_RESTAURANT_SLUG || "neom-dahab";
   const [sessions, setSessions] = useState<SessionInfo[]>([]);
-  const [recentlyPaid, setRecentlyPaid] = useState<{ id: string; tableNumber: number | null; orderType?: string; vipGuestName?: string | null; total: number }[]>([]);
+  const [recentlyPaid, setRecentlyPaid] = useState<{ id: string; tableNumber: number | null; orderType?: string; vipGuestName?: string | null; total: number; roundCount: number }[]>([]);
   const [dayRevenue, setDayRevenue] = useState(0);
   const [shiftRevenue, setShiftRevenue] = useState(0);
   const [shiftOrders, setShiftOrders] = useState(0);
@@ -1639,7 +1824,7 @@ function CashierSystem({ staff, onLogout }: { staff: LoggedInStaff; onLogout: ()
         const allSessions: SessionInfo[] = data.sessions || [];
         setSessions(allSessions);
         const closed = allSessions.filter((s) => s.status === "CLOSED" && (s.orderTotal || 0) > 0);
-        setRecentlyPaid(closed.slice(0, 5).map((s) => ({ id: s.id, tableNumber: s.tableNumber, orderType: s.orderType, vipGuestName: s.vipGuestName, total: s.orderTotal || 0 })));
+        setRecentlyPaid(closed.slice(0, 5).map((s) => ({ id: s.id, tableNumber: s.tableNumber, orderType: s.orderType, vipGuestName: s.vipGuestName, total: s.orderTotal || 0, roundCount: s.paidRounds?.length || 0 })));
       } else {
         failCountRef.current += 1;
         if (failCountRef.current >= 3) setConnectionLost(true);
@@ -1751,6 +1936,7 @@ function CashierSystem({ staff, onLogout }: { staff: LoggedInStaff; onLogout: ()
     sessionId: string,
     method: PaymentMethodChoice,
     tip: number,
+    discount: number,
   ): Promise<{ confirmedTotal: number } | null> => {
     setSessions((prev) => prev.map((s) =>
       s.id === sessionId ? { ...s, paymentReceived: true, unpaidTotal: 0 } : s,
@@ -1758,7 +1944,7 @@ function CashierSystem({ staff, onLogout }: { staff: LoggedInStaff; onLogout: ()
     try {
       const res = await staffFetch(staff.id, "/api/sessions/pay", {
         method: "PATCH",
-        body: JSON.stringify({ sessionId, paymentMethod: method, tip }),
+        body: JSON.stringify({ sessionId, paymentMethod: method, tip, discount }),
       });
       if (!res.ok) {
         const text = await res.text();

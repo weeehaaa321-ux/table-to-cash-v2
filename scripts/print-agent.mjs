@@ -64,7 +64,13 @@ function row(left, right, width = 48) {
 }
 const divider = (w = 48) => "-".repeat(w);
 
-function buildInvoice(inv) {
+// mode "round" (default): print the latest round's items, with prior
+// rounds folded into a compact footer. This is the per-settlement
+// receipt the cashier hands to the guest at the moment of payment.
+// mode "full": print every round's items in full detail, with the
+// lifetime total. For reprinting a session that paid in parts, when
+// the operator needs one paper that covers the entire table.
+function buildInvoice(inv, mode = "round") {
   const out = [];
   push(out, ESC, 0x40);           // reset
   push(out, ESC, 0x74, 0x13);     // CP858
@@ -86,55 +92,127 @@ function buildInvoice(inv) {
   push(out, LF);
   if (inv.waiterName) { text(out, `Server: ${inv.waiterName}`); push(out, LF); }
   text(out, `Date:   ${dateStr} ${timeStr}`); push(out, LF);
-  text(out, `Inv:    ${String(inv.sessionId).slice(-8).toUpperCase()}`); push(out, LF);
+  const invSuffix = mode === "full" ? "-FULL" : "";
+  text(out, `Inv:    ${String(inv.sessionId).slice(-8).toUpperCase()}${invSuffix}`); push(out, LF);
 
   const rounds = inv.rounds || [];
   const current = rounds[rounds.length - 1];
   const prior = rounds.slice(0, -1);
   const isMultiRound = rounds.length > 1;
+  const isFullMode = mode === "full" && rounds.length > 0;
 
-  if (isMultiRound && current) {
+  if (isFullMode) {
     push(out, LF);
     push(out, ESC, 0x61, 0x01);
     push(out, ESC, 0x21, 0x08);
-    text(out, `-- ROUND ${current.index} OF ${rounds.length} --`);
+    text(out, isMultiRound ? `-- FULL RECEIPT - ${rounds.length} ROUNDS --` : "-- FULL RECEIPT --");
     push(out, ESC, 0x21, 0x00);
     push(out, ESC, 0x61, 0x00);
     push(out, LF);
-  } else {
+
+    for (const r of rounds) {
+      const guestLabel = r.guestName?.trim()
+        ? r.guestName.trim()
+        : r.guestNumber
+          ? `Guest ${r.guestNumber}`
+          : "";
+      const meta = [r.paymentMethod, guestLabel].filter(Boolean).join(" / ");
+      const header = `Round ${r.index}${meta ? ` - ${meta}` : ""}`;
+      text(out, header); push(out, LF);
+      text(out, divider()); push(out, LF);
+      for (const it of (r.items || [])) {
+        const left = `${it.quantity}x ${it.name}`.slice(0, 36);
+        const right = `${Math.round(it.price * it.quantity)}`;
+        text(out, row(left, right)); push(out, LF);
+        if (it.activity) {
+          const m = it.activity.minutes;
+          const h = Math.floor(m / 60);
+          const mm = m % 60;
+          const dur = h > 0 ? `${h}h ${mm}m` : `${mm}m`;
+          text(out, `  (${dur}) @ ${it.activity.pricePerHour}/hr`);
+          push(out, LF);
+        }
+      }
+      const rDisc = Number(r.discount || 0);
+      const rCollected = Math.max(0, Number(r.subtotal) - rDisc);
+      if (rDisc > 0) {
+        text(out, row("Subtotal", `${r.subtotal} ${inv.currency}`)); push(out, LF);
+        text(out, row("Discount", `-${rDisc} ${inv.currency}`)); push(out, LF);
+      }
+      text(out, row(`Round ${r.index} total`, `${rCollected} ${inv.currency}`)); push(out, LF);
+      push(out, LF);
+    }
+
     text(out, divider()); push(out, LF);
-  }
+    const totalDiscount = Number(inv.discount || 0);
+    if (totalDiscount > 0) {
+      const itemsSubtotal = Number(inv.subtotal != null ? inv.subtotal : inv.total + totalDiscount);
+      text(out, row("Items subtotal", `${itemsSubtotal} ${inv.currency}`)); push(out, LF);
+      text(out, row("Total discounts", `-${totalDiscount} ${inv.currency}`)); push(out, LF);
+    }
+    push(out, ESC, 0x21, 0x30);
+    text(out, row("LIFETIME TOTAL", `${inv.total} ${inv.currency}`, 24)); push(out, LF);
+    push(out, ESC, 0x21, 0x00);
+  } else {
+    if (isMultiRound && current) {
+      push(out, LF);
+      push(out, ESC, 0x61, 0x01);
+      push(out, ESC, 0x21, 0x08);
+      text(out, `-- ROUND ${current.index} OF ${rounds.length} --`);
+      push(out, ESC, 0x21, 0x00);
+      push(out, ESC, 0x61, 0x00);
+      push(out, LF);
+    } else {
+      text(out, divider()); push(out, LF);
+    }
 
-  text(out, row("Item", inv.currency)); push(out, LF);
-  text(out, divider()); push(out, LF);
+    text(out, row("Item", inv.currency)); push(out, LF);
+    text(out, divider()); push(out, LF);
 
-  const items = current?.items ?? [];
-  for (const it of items) {
-    const left = `${it.quantity}x ${it.name}`.slice(0, 36);
-    const right = `${Math.round(it.price * it.quantity)}`;
-    text(out, row(left, right)); push(out, LF);
-  }
-  text(out, divider()); push(out, LF);
-
-  push(out, ESC, 0x21, 0x30);
-  const totalLabel = isMultiRound ? "THIS ROUND" : "TOTAL";
-  const totalValue = `${current?.subtotal ?? inv.total} ${inv.currency}`;
-  text(out, row(totalLabel, totalValue, 24)); push(out, LF);
-  push(out, ESC, 0x21, 0x00);
-
-  if (current?.paymentMethod) {
-    text(out, row("Paid by", current.paymentMethod)); push(out, LF);
-  }
-
-  if (prior.length > 0) {
-    push(out, LF);
-    text(out, "Previously paid:"); push(out, LF);
-    for (const r of prior) {
-      const label = `Round ${r.index}${r.paymentMethod ? ` (${r.paymentMethod})` : ""}`;
-      text(out, row(label, `${r.subtotal} ${inv.currency}`)); push(out, LF);
+    const items = current?.items ?? [];
+    for (const it of items) {
+      const left = `${it.quantity}x ${it.name}`.slice(0, 36);
+      const right = `${Math.round(it.price * it.quantity)}`;
+      text(out, row(left, right)); push(out, LF);
+      if (it.activity) {
+        const m = it.activity.minutes;
+        const h = Math.floor(m / 60);
+        const mm = m % 60;
+        const dur = h > 0 ? `${h}h ${mm}m` : `${mm}m`;
+        text(out, `  (${dur}) @ ${it.activity.pricePerHour}/hr${it.activity.running ? ' running' : ''}`);
+        push(out, LF);
+      }
     }
     text(out, divider()); push(out, LF);
-    text(out, row("Lifetime total", `${inv.total} ${inv.currency}`)); push(out, LF);
+
+    const roundDiscount = Number(current?.discount || 0);
+    const roundSubtotal = Number(current?.subtotal ?? inv.total);
+    const roundCollected = Math.max(0, roundSubtotal - roundDiscount);
+    if (roundDiscount > 0) {
+      text(out, row("Subtotal", `${roundSubtotal} ${inv.currency}`)); push(out, LF);
+      text(out, row("Discount", `-${roundDiscount} ${inv.currency}`)); push(out, LF);
+    }
+
+    push(out, ESC, 0x21, 0x30);
+    const totalLabel = isMultiRound ? "THIS ROUND" : "TOTAL";
+    const totalValue = `${roundCollected} ${inv.currency}`;
+    text(out, row(totalLabel, totalValue, 24)); push(out, LF);
+    push(out, ESC, 0x21, 0x00);
+
+    if (current?.paymentMethod) {
+      text(out, row("Paid by", current.paymentMethod)); push(out, LF);
+    }
+
+    if (prior.length > 0) {
+      push(out, LF);
+      text(out, "Previously paid:"); push(out, LF);
+      for (const r of prior) {
+        const label = `Round ${r.index}${r.paymentMethod ? ` (${r.paymentMethod})` : ""}`;
+        text(out, row(label, `${r.subtotal} ${inv.currency}`)); push(out, LF);
+      }
+      text(out, divider()); push(out, LF);
+      text(out, row("Lifetime total", `${inv.total} ${inv.currency}`)); push(out, LF);
+    }
   }
 
   push(out, LF);
@@ -245,8 +323,9 @@ const server = http.createServer(async (req, res) => {
     req.on("data", (c) => (body += c));
     req.on("end", async () => {
       try {
-        const { sessionId } = JSON.parse(body || "{}");
+        const { sessionId, mode } = JSON.parse(body || "{}");
         if (!sessionId) throw new Error("sessionId required");
+        const printMode = mode === "full" ? "full" : "round";
 
         // Pre-flight: ask the printer if it's actually able to print.
         // We don't FAIL on a "no_response" from the status query —
@@ -277,8 +356,10 @@ const server = http.createServer(async (req, res) => {
           sessionId: inv.sessionId,
           paidAt: current?.paidAt || inv.closedAt || new Date().toISOString(),
           rounds: inv.rounds || [],
+          subtotal: inv.subtotal,
+          discount: inv.discount,
           total: inv.total,
-        });
+        }, printMode);
         await sendToPrinter(bytes);
         res.writeHead(200, { "content-type": "application/json" });
         res.end(JSON.stringify({

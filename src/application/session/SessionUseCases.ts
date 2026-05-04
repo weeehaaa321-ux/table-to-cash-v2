@@ -197,7 +197,7 @@ export class SessionUseCases {
         vipGuest: { select: { name: true } },
         orders: {
           select: {
-            id: true, orderNumber: true, total: true, status: true, paymentMethod: true, paidAt: true, tip: true, guestNumber: true, guestName: true,
+            id: true, orderNumber: true, total: true, status: true, paymentMethod: true, paidAt: true, tip: true, discount: true, guestNumber: true, guestName: true,
             items: {
               where: { cancelled: false },
               select: {
@@ -504,6 +504,324 @@ export class SessionUseCases {
         currentSession,
         oldTableNumber: currentSession.table?.number ?? 0,
         newTableNumber,
+      };
+    });
+  }
+
+  /**
+   * Verify a guest is the approved owner of a session. Used to gate
+   * guest self-actions (e.g. their own change-table) without requiring
+   * staff credentials. Returns true only when the JoinRequest table
+   * carries an APPROVED row for this (sessionId, guestId) pair.
+   */
+  async isSessionOwnerGuest(sessionId: string, guestId: string): Promise<boolean> {
+    if (!sessionId || !guestId) return false;
+    const row = await db.joinRequest.findFirst({
+      where: { sessionId, guestId, status: "APPROVED" },
+      select: { id: true },
+    });
+    return !!row;
+  }
+
+  /**
+   * Move a single guest (identified by guestNumber, or by guestName as
+   * a fallback) and ALL of their orders — placed, served, or paid —
+   * from one table session to another. Used when one member of a group
+   * decides to switch tables mid-night.
+   *
+   * Rules:
+   *   - Source session stays open (it may still have other guests).
+   *   - Paid orders stay paid; their paidAt is unchanged. Revenue stays
+   *     correctly attributed to whoever was waiting that table at pay-
+   *     time, and merging into the new table doesn't reset their bill.
+   *   - Target session is auto-resolved at the new table:
+   *       · existing OPEN session at that table  → join it
+   *       · no session yet                       → create a fresh one
+   *   - GuestNumber collisions are avoided: the moved orders get the
+   *     next free guestNumber in the target session (so a "Guest 1" who
+   *     joins another "Guest 1"'s table becomes Guest 2/3/etc there).
+   *   - A guest with no matched orders (typo, already moved) → 404.
+   *
+   * Returns enough info for the route to push notifications.
+   */
+  async moveGuestToTable(input: {
+    sessionId: string;
+    guestNumber?: number | null;
+    guestName?: string | null;
+    targetTableNumber: number;
+    waiterIdForNewSession?: string | null;
+  }) {
+    const { sessionId, guestNumber, guestName, targetTableNumber } = input;
+    return db.$transaction(async (tx) => {
+      // Lock source session first so a concurrent payment / split / move
+      // can't race us. Same lock namespace (1) every other session
+      // mutator uses.
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${sessionId}, 1))`;
+
+      const source = await tx.tableSession.findUnique({
+        where: { id: sessionId },
+        include: {
+          table: { select: { number: true } },
+          waiter: { select: { id: true, name: true } },
+        },
+      });
+      if (!source) return { error: "Session not found" as const };
+      if (source.orderType === "DELIVERY") return { error: "DELIVERY_NO_TABLE" as const };
+
+      // Find the target table.
+      const targetTable = await tx.table.findUnique({
+        where: {
+          restaurantId_number: { restaurantId: source.restaurantId, number: targetTableNumber },
+        },
+      });
+      if (!targetTable) return { error: "Target table not found" as const };
+
+      // Lock the target table — same as changeTable. Prevents a parallel
+      // scan from opening a new OPEN session on it between our find and
+      // our create.
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${targetTable.id}, 2))`;
+
+      // Find or create the target session. Don't move into the SAME
+      // session we started in — that's a no-op that would loop in the
+      // collision-avoidance loop below.
+      let target = await tx.tableSession.findFirst({
+        where: { tableId: targetTable.id, status: "OPEN" },
+        include: {
+          table: { select: { number: true } },
+          waiter: { select: { id: true, name: true } },
+        },
+      });
+      if (target && target.id === sessionId) {
+        return { error: "Already at this table" as const };
+      }
+      // Track whether we created the target ourselves so the guestCount
+      // increment below knows not to double-count a session we just
+      // initialised with guestCount=1.
+      let targetWasCreated = false;
+      if (!target) {
+        const created = await tx.tableSession.create({
+          data: {
+            tableId: targetTable.id,
+            restaurantId: source.restaurantId,
+            guestType: "walkin",
+            guestCount: 1,
+            // Default to source's waiter so the kitchen-side waiter
+            // assignment doesn't churn. The floor manager can reassign
+            // afterwards if the new table belongs to a different section.
+            waiterId: input.waiterIdForNewSession ?? source.waiterId ?? null,
+          },
+          include: {
+            table: { select: { number: true } },
+            waiter: { select: { id: true, name: true } },
+          },
+        });
+        target = created;
+        targetWasCreated = true;
+      }
+
+      // Match the guest's orders. Prefer guestNumber when given (it's
+      // the canonical per-session identifier the cart writes); fall
+      // back to guestName for legacy rows or walk-in tags.
+      const orderMatch: Prisma.OrderWhereInput = { sessionId };
+      const matchClauses: Prisma.OrderWhereInput[] = [];
+      if (guestNumber != null) matchClauses.push({ guestNumber });
+      if (guestName && guestName.trim()) matchClauses.push({ guestName: guestName.trim() });
+      if (matchClauses.length === 0) return { error: "Missing guest identifier" as const };
+      orderMatch.OR = matchClauses;
+
+      const movingOrders = await tx.order.findMany({
+        where: orderMatch,
+        select: { id: true, guestNumber: true, guestName: true, status: true, paidAt: true },
+      });
+      if (movingOrders.length === 0) return { error: "Guest not found on source table" as const };
+
+      // Find the next free guestNumber on the target side. A target
+      // session that already has Guests 1, 2, 3 means the moving guest
+      // becomes Guest 4 there.
+      const targetGuestRows = await tx.order.findMany({
+        where: { sessionId: target.id, guestNumber: { not: null } },
+        select: { guestNumber: true },
+      });
+      const usedNumbers = new Set<number>();
+      for (const r of targetGuestRows) {
+        if (r.guestNumber != null) usedNumbers.add(r.guestNumber);
+      }
+      let nextGuest = 1;
+      while (usedNumbers.has(nextGuest)) nextGuest += 1;
+
+      // Move all the matched orders. Update tableId so the kitchen / waiter
+      // pages route correctly, sessionId so the bill aggregates with the
+      // target session's other rounds, and guestNumber so the floor view
+      // labels them under their new slot. guestName is preserved as a
+      // soft label.
+      await tx.order.updateMany({
+        where: { id: { in: movingOrders.map((o) => o.id) } },
+        data: {
+          sessionId: target.id,
+          tableId: targetTable.id,
+          guestNumber: nextGuest,
+        },
+      });
+
+      // Bump target guestCount when this is a brand-new guest there.
+      // Skip the bump entirely when WE just created the target with
+      // guestCount=1 — that initial 1 already accounts for the moving
+      // guest, and incrementing again would land at 2 with one warm
+      // body. Otherwise, only count when at least one moved order was
+      // unpaid (paid-only carryovers — e.g. their bill follows them
+      // but they themselves haven't ordered anything new yet — don't
+      // change live occupancy).
+      const hasUnpaidMove = movingOrders.some((o) => !o.paidAt);
+      if (!targetWasCreated && hasUnpaidMove) {
+        await tx.tableSession.update({
+          where: { id: target.id },
+          data: { guestCount: { increment: 1 } },
+        });
+      }
+
+      return {
+        ok: true as const,
+        sourceSession: source,
+        targetSession: target,
+        sourceTableNumber: source.table?.number ?? 0,
+        targetTableNumber,
+        movedOrderIds: movingOrders.map((o) => o.id),
+        newGuestNumber: nextGuest,
+        guestLabel: guestName?.trim() || (guestNumber != null ? `Guest ${guestNumber}` : "Guest"),
+      };
+    });
+  }
+
+  /**
+   * Merge two table sessions: source session is folded into target
+   * session, then the source is closed. Used when two adjacent groups
+   * decide to combine — e.g. table 2 walks over to join table 1 for
+   * the rest of the night.
+   *
+   * Rules:
+   *   - Both sessions must be OPEN and live at the same restaurant.
+   *   - Neither side can be DELIVERY or VIP_DINE_IN — those don't
+   *     have a table the way merge expects.
+   *   - All source orders move to the target session and its table.
+   *     Paid orders stay paid (paidAt preserved); revenue stays
+   *     correctly attributed to who served them.
+   *   - GuestNumber collisions: source guests are renumbered above
+   *     the highest guestNumber in target so each former guest stays
+   *     a distinct row in the merged bill.
+   *   - Target's guestCount is incremented by the source's guestCount.
+   *   - Source is then closed (closedAt = now). Closing-vs-deleting:
+   *     we close so the move is auditable — a manager can see the
+   *     source session in the day's history and trace who merged.
+   */
+  async mergeTables(sourceSessionId: string, targetSessionId: string) {
+    if (sourceSessionId === targetSessionId) {
+      return { error: "Cannot merge a session into itself" as const };
+    }
+    return db.$transaction(async (tx) => {
+      // Lock both sessions in a deterministic order to avoid deadlock
+      // when two managers call mergeTables(A,B) and mergeTables(B,A)
+      // concurrently. Smaller-id-first is our convention.
+      const [first, second] = [sourceSessionId, targetSessionId].sort();
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${first}, 1))`;
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${second}, 1))`;
+
+      const source = await tx.tableSession.findUnique({
+        where: { id: sourceSessionId },
+        include: { table: { select: { number: true } } },
+      });
+      const target = await tx.tableSession.findUnique({
+        where: { id: targetSessionId },
+        include: {
+          table: { select: { number: true } },
+          waiter: { select: { id: true, name: true } },
+        },
+      });
+      if (!source) return { error: "Source session not found" as const };
+      if (!target) return { error: "Target session not found" as const };
+      if (source.status !== "OPEN") return { error: "Source session not open" as const };
+      if (target.status !== "OPEN") return { error: "Target session not open" as const };
+      if (source.restaurantId !== target.restaurantId) {
+        return { error: "Sessions belong to different restaurants" as const };
+      }
+      if (source.orderType !== "TABLE" || target.orderType !== "TABLE") {
+        return { error: "Only TABLE sessions can be merged" as const };
+      }
+      if (!target.tableId) return { error: "Target session has no table" as const };
+
+      // Find the highest guestNumber on the target so we can shift the
+      // source's guests above it.
+      const targetGuestRows = await tx.order.findMany({
+        where: { sessionId: target.id, guestNumber: { not: null } },
+        select: { guestNumber: true },
+      });
+      const targetMax = targetGuestRows.reduce(
+        (m, r) => (r.guestNumber != null && r.guestNumber > m ? r.guestNumber : m),
+        0,
+      );
+
+      // Re-number source guests in-place. Each distinct source
+      // guestNumber maps to (targetMax + that number) so the relative
+      // ordering between source guests is preserved on the merged bill.
+      const sourceGuestRows = await tx.order.findMany({
+        where: { sessionId: source.id, guestNumber: { not: null } },
+        select: { id: true, guestNumber: true },
+      });
+      const distinctSourceGuests = new Set<number>();
+      for (const r of sourceGuestRows) {
+        if (r.guestNumber != null) distinctSourceGuests.add(r.guestNumber);
+      }
+      // Update each source guestNumber to its shifted value.
+      for (const oldNum of distinctSourceGuests) {
+        const newNum = targetMax + oldNum;
+        await tx.order.updateMany({
+          where: { sessionId: source.id, guestNumber: oldNum },
+          data: { guestNumber: newNum },
+        });
+      }
+
+      // Move every source order onto the target session + table.
+      await tx.order.updateMany({
+        where: { sessionId: source.id },
+        data: { sessionId: target.id, tableId: target.tableId },
+      });
+
+      // Combine guestCounts. Source's count represents the people who
+      // walked over to the target.
+      await tx.tableSession.update({
+        where: { id: target.id },
+        data: { guestCount: { increment: source.guestCount } },
+      });
+
+      // Close the source session. closedAt + status mirror the same
+      // closure the cashier path writes, so daily-close / dashboard
+      // queries treat it like any other resolved session.
+      const closedSource = await tx.tableSession.update({
+        where: { id: source.id },
+        data: { status: "CLOSED", closedAt: new Date() },
+      });
+
+      // Move any pending join requests to the target so guest devices
+      // following the source token still find their bill.
+      await tx.joinRequest.updateMany({
+        where: { sessionId: source.id, status: { in: ["APPROVED", "PENDING"] } },
+        data: { sessionId: target.id },
+      });
+
+      const refreshedTarget = await tx.tableSession.findUnique({
+        where: { id: target.id },
+        include: {
+          table: { select: { number: true } },
+          waiter: { select: { id: true, name: true } },
+        },
+      });
+
+      return {
+        ok: true as const,
+        source: closedSource,
+        target: refreshedTarget!,
+        sourceTableNumber: source.table?.number ?? 0,
+        targetTableNumber: target.table?.number ?? 0,
+        mergedGuestCount: source.guestCount,
       };
     });
   }
@@ -894,18 +1212,32 @@ export class SessionUseCases {
   }
 
   /**
-   * Cashier confirms a pay round atomically. Tip goes to the first
-   * order in the round. Returns the orders that were stamped + total.
+   * Cashier confirms a pay round atomically. Tip and discount are
+   * stamped on the first order in the round (the round's "head"); the
+   * rest carry tip=0/discount=0 so the receipt has a single source of
+   * truth per round.
+   *
+   * Discount semantics:
+   *   - Always passed in as a resolved EGP amount (the cashier UI
+   *     converts a percentage to EGP before calling). Anything else
+   *     keeps the math centralised in one place.
+   *   - Capped at the round's gross subtotal so the cashier can't
+   *     accidentally type "1000" on a 500 EGP bill and produce a
+   *     negative collected amount.
+   *   - `confirmedTotal` returned here is what the cashier actually
+   *     collects — gross minus discount. Down-stream surfaces (cash
+   *     drawer reconciliation, post-settle flash) read this number.
    */
   async confirmPayRound(input: {
     sessionId: string;
     paymentMethod: string;
     tipAmount: number;
+    discountAmount?: number;
   }): Promise<
-    | { noop: true; orders: never[]; confirmedTotal: 0 }
-    | { noop: false; orders: Array<{ id: string; status: string; total: unknown }>; confirmedTotal: number; method: string }
+    | { noop: true; orders: never[]; confirmedTotal: 0; discount: 0 }
+    | { noop: false; orders: Array<{ id: string; status: string; total: unknown }>; confirmedTotal: number; discount: number; method: string }
   > {
-    const { sessionId, paymentMethod, tipAmount } = input;
+    const { sessionId, paymentMethod, tipAmount, discountAmount } = input;
     return db.$transaction(async (tx) => {
       // Per-session lock so a fresh order POST or a session close
       // can't race the settle. Without this, a guest placing
@@ -935,12 +1267,90 @@ export class SessionUseCases {
         });
       }
       if (orders.length === 0) {
-        return { noop: true, orders: [] as never[], confirmedTotal: 0 } as const;
+        return { noop: true, orders: [] as never[], confirmedTotal: 0, discount: 0 } as const;
       }
 
       const now = new Date();
       const method = (paymentMethod || "CASH") as "CASH" | "CARD" | "INSTAPAY" | "APPLE_PAY" | "GOOGLE_PAY";
       const tipTargetId = orders[0]?.id;
+
+      // Auto-stop any still-running activity timers on the orders being
+      // settled. The bill prorates against (now - startedAt) regardless,
+      // but writing activityStoppedAt makes the receipt show a static
+      // duration ("(1h 32m)" instead of "(1h 32m) · running") and lets
+      // the recomputed total below stay stable across re-fetches.
+      const orderIds = orders.map((o) => o.id);
+      const runningActivityItems = await tx.orderItem.findMany({
+        where: {
+          orderId: { in: orderIds },
+          activityStartedAt: { not: null },
+          activityStoppedAt: null,
+        },
+        select: {
+          id: true,
+          orderId: true,
+          quantity: true,
+          activityStartedAt: true,
+          menuItem: { select: { pricePerHour: true } },
+        },
+      });
+      if (runningActivityItems.length > 0) {
+        for (const it of runningActivityItems) {
+          await tx.orderItem.update({
+            where: { id: it.id },
+            data: { activityStoppedAt: now },
+          });
+        }
+        // Recompute order totals for any order whose items changed.
+        const affectedOrderIds = new Set(runningActivityItems.map((it) => it.orderId));
+        for (const oid of affectedOrderIds) {
+          const allItems = await tx.orderItem.findMany({
+            where: { orderId: oid, cancelled: false },
+            select: {
+              quantity: true,
+              price: true,
+              comped: true,
+              activityStartedAt: true,
+              activityStoppedAt: true,
+              menuItem: { select: { pricePerHour: true } },
+            },
+          });
+          const newSubtotal = allItems.reduce((sum, it) => {
+            if (it.comped) return sum;
+            const pph = it.menuItem?.pricePerHour ? Number(it.menuItem.pricePerHour) : 0;
+            if (pph > 0 && it.activityStartedAt) {
+              const end = it.activityStoppedAt ?? now;
+              const minutes = Math.max(1, Math.ceil((end.getTime() - it.activityStartedAt.getTime()) / 60000));
+              return sum + Math.ceil((minutes / 60) * pph) * it.quantity;
+            }
+            return sum + Number(it.price) * it.quantity;
+          }, 0);
+          const ord = await tx.order.findUnique({
+            where: { id: oid },
+            select: { tax: true, deliveryFee: true },
+          });
+          const tax = Number(ord?.tax ?? 0);
+          const fee = Number(ord?.deliveryFee ?? 0);
+          await tx.order.update({
+            where: { id: oid },
+            data: { subtotal: newSubtotal, total: newSubtotal + tax + fee },
+          });
+        }
+        // Re-read the updated totals so the round subtotal below uses
+        // the finalized prorated numbers, not the stale at-creation
+        // values.
+        orders = await tx.order.findMany({
+          where: { id: { in: orderIds } },
+          select: { id: true, status: true, total: true },
+        });
+      }
+
+      // Round subtotal first — needed to cap the discount.
+      const grossTotal = orders.reduce((sum, o) => sum + Number(o.total ?? 0), 0);
+      const cleanDiscount = typeof discountAmount === "number" && discountAmount > 0 && isFinite(discountAmount)
+        ? Math.min(Math.round(discountAmount), Math.round(grossTotal))
+        : 0;
+
       // SET tip (not increment) — the cashier's input is the
       // authoritative value at confirm time. The guest may have
       // pre-stamped a tip when they tapped "Pay X EGP" on /track;
@@ -956,6 +1366,7 @@ export class SessionUseCases {
               paymentMethod: method,
               paidAt: now,
               ...(isTipTarget ? { tip: Math.max(0, Math.round(tipAmount)) } : { tip: 0 }),
+              ...(isTipTarget ? { discount: cleanDiscount } : { discount: 0 }),
             },
           });
         } else {
@@ -965,13 +1376,14 @@ export class SessionUseCases {
               paymentMethod: method,
               paidAt: now,
               ...(isTipTarget ? { tip: Math.max(0, Math.round(tipAmount)) } : { tip: 0 }),
+              ...(isTipTarget ? { discount: cleanDiscount } : { discount: 0 }),
             },
           });
         }
       }
 
-      const confirmedTotal = orders.reduce((sum, o) => sum + Number(o.total ?? 0), 0);
-      return { noop: false, orders, confirmedTotal, method } as const;
+      const confirmedTotal = grossTotal - cleanDiscount;
+      return { noop: false, orders, confirmedTotal, discount: cleanDiscount, method } as const;
     });
   }
 
@@ -1228,6 +1640,40 @@ export class SessionUseCases {
   async listPendingJoinRequests(sessionId: string) {
     return db.joinRequest.findMany({
       where: { sessionId, status: "PENDING" },
+      orderBy: { createdAt: "asc" },
+    });
+  }
+
+  /**
+   * List every pending join request across the whole restaurant. Used
+   * by the floor manager's "stuck at gate" panel — shows each guest
+   * who tapped to join while the session owner is somewhere not
+   * looking at their phone (pool, bathroom, etc), so the floor
+   * manager can admit them directly.
+   *
+   * Joins on the session + table so the panel can show "Table 7, 8m
+   * waiting" without an extra round-trip per row. Filters out CLOSED
+   * sessions defensively (session.delete cascades JoinRequest rows so
+   * this should only matter mid-close-race, but it costs nothing).
+   */
+  async listPendingJoinRequestsForRestaurant(restaurantId: string) {
+    return db.joinRequest.findMany({
+      where: {
+        status: "PENDING",
+        session: { restaurantId, status: "OPEN" },
+      },
+      include: {
+        session: {
+          select: {
+            id: true,
+            tableId: true,
+            guestCount: true,
+            table: { select: { number: true } },
+            vipGuest: { select: { name: true } },
+            orderType: true,
+          },
+        },
+      },
       orderBy: { createdAt: "asc" },
     });
   }

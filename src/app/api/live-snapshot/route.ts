@@ -238,13 +238,18 @@ async function loadSessions(realId: string) {
       closedAt: s.closedAt?.toISOString() || null,
       status: s.status,
       orderCount: s.orders.filter((o) => o.status !== "CANCELLED").length,
-      orderTotal: s.orders.filter((o) => o.status !== "CANCELLED").reduce((sum, o) => sum + toNum(o.total), 0),
+      // Net of cashier-applied discounts so the floor view's revenue
+      // numbers match the actual amount collected (matches the same
+      // computation in /api/sessions/all).
+      orderTotal: s.orders
+        .filter((o) => o.status !== "CANCELLED")
+        .reduce((sum, o) => sum + toNum(o.total) - toNum(o.discount ?? 0), 0),
       unpaidTotal: s.orders
         .filter((o) => o.status !== "CANCELLED" && o.paidAt == null)
         .reduce((sum, o) => sum + toNum(o.total), 0),
       cashTotal: s.orders
         .filter((o) => o.paymentMethod === "CASH" && o.status !== "CANCELLED" && o.paidAt != null)
-        .reduce((sum, o) => sum + toNum(o.total), 0),
+        .reduce((sum, o) => sum + toNum(o.total) - toNum(o.discount ?? 0), 0),
       paymentReceived:
         s.orders.length > 0 &&
         s.orders.every((o) => o.status === "CANCELLED" || o.paidAt != null),

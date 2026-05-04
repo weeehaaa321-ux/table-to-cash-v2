@@ -9,7 +9,7 @@ export type CategoryId = Identifier<"Category">;
  * in schema.prisma. Bar items skip the kitchen screen; kitchen items skip
  * the bar screen.
  */
-export type Station = "KITCHEN" | "BAR";
+export type Station = "KITCHEN" | "BAR" | "ACTIVITY";
 
 /**
  * Category groups menu items. Carries:

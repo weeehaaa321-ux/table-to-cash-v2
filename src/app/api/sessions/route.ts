@@ -1,5 +1,32 @@
 import { NextRequest, NextResponse } from "next/server";
 import { useCases } from "@/infrastructure/composition";
+import { db } from "@/lib/db";
+
+// Resolve the caller's role for the PATCH actions that need it. Returns
+// either a role string (when a staff member is signed in via x-staff-id)
+// or "guest" when the caller has provided a guestId in the body and
+// holds an APPROVED JoinRequest on the session being mutated. Returns
+// null when neither path validates — the route then 401s.
+async function resolveCallerRole(
+  request: NextRequest,
+  sessionId: string,
+  bodyGuestId?: string | null,
+): Promise<{ kind: "staff"; role: string; staffId: string } | { kind: "guest" } | null> {
+  const staffId = request.headers.get("x-staff-id");
+  if (staffId) {
+    const staff = await db.staff.findUnique({
+      where: { id: staffId },
+      select: { id: true, role: true, active: true },
+    });
+    if (!staff || !staff.active) return null;
+    return { kind: "staff", role: staff.role, staffId: staff.id };
+  }
+  if (bodyGuestId && typeof bodyGuestId === "string") {
+    const ok = await useCases.sessions.isSessionOwnerGuest(sessionId, bodyGuestId);
+    if (ok) return { kind: "guest" };
+  }
+  return null;
+}
 
 async function autoAssignWaiter(restaurantId: string): Promise<string | null> {
   const realId = await useCases.sessions.resolveRestaurantId(restaurantId);
@@ -232,6 +259,21 @@ export async function PATCH(request: NextRequest) {
     }
 
     if (action === "change_table" && body.newTableNumber) {
+      // Auth: guest who owns the session, OR OWNER / FLOOR_MANAGER.
+      // Waiters are explicitly NOT allowed to move tables — table
+      // moves are a floor-level decision (group physically relocating)
+      // and a waiter doing it silently can confuse the rest of the
+      // floor's session-by-table mental model.
+      const caller = await resolveCallerRole(request, sessionId, body.guestId);
+      if (!caller) {
+        return NextResponse.json({ error: "Authentication required" }, { status: 401 });
+      }
+      if (caller.kind === "staff" && caller.role !== "OWNER" && caller.role !== "FLOOR_MANAGER") {
+        return NextResponse.json(
+          { error: "Only floor manager, owner, or the session's guest can move tables" },
+          { status: 403 },
+        );
+      }
       const newTableNumber = parseInt(body.newTableNumber, 10);
       const result = await useCases.sessions.changeTable(sessionId, newTableNumber);
       if ("error" in result) {
@@ -274,6 +316,139 @@ export async function PATCH(request: NextRequest) {
     if (action === "menu_opened") {
       const session = await useCases.sessions.setMenuOpened(sessionId);
       return NextResponse.json(session);
+    }
+
+    if (action === "move_guest") {
+      // Floor-only action — only OWNER / FLOOR_MANAGER can move a guest
+      // to a different table mid-session. Waiters and guests cannot
+      // (the explicit guest self-move flow is "change_table" for the
+      // entire group, not a single member).
+      const caller = await resolveCallerRole(request, sessionId, null);
+      if (!caller || caller.kind !== "staff") {
+        return NextResponse.json({ error: "Authentication required" }, { status: 401 });
+      }
+      if (caller.role !== "OWNER" && caller.role !== "FLOOR_MANAGER") {
+        return NextResponse.json(
+          { error: "Only floor manager or owner can move guests" },
+          { status: 403 },
+        );
+      }
+      const targetTableNumber = parseInt(body.targetTableNumber, 10);
+      if (!targetTableNumber || Number.isNaN(targetTableNumber)) {
+        return NextResponse.json({ error: "targetTableNumber required" }, { status: 400 });
+      }
+      const guestNumber =
+        body.guestNumber != null && body.guestNumber !== ""
+          ? parseInt(body.guestNumber, 10)
+          : null;
+      const guestName =
+        typeof body.guestName === "string" && body.guestName.trim().length > 0
+          ? body.guestName.trim()
+          : null;
+      if (guestNumber == null && !guestName) {
+        return NextResponse.json(
+          { error: "guestNumber or guestName required" },
+          { status: 400 },
+        );
+      }
+      const result = await useCases.sessions.moveGuestToTable({
+        sessionId,
+        guestNumber,
+        guestName,
+        targetTableNumber,
+      });
+      if ("error" in result) {
+        if (result.error === "Session not found") return NextResponse.json(result, { status: 404 });
+        if (result.error === "Target table not found") return NextResponse.json(result, { status: 404 });
+        if (result.error === "Guest not found on source table") return NextResponse.json(result, { status: 404 });
+        if (result.error === "Already at this table") return NextResponse.json(result, { status: 409 });
+        if (result.error === "DELIVERY_NO_TABLE") return NextResponse.json({ error: "Delivery sessions cannot move guests" }, { status: 400 });
+        if (result.error === "Missing guest identifier") return NextResponse.json(result, { status: 400 });
+        return NextResponse.json({ error: result.error }, { status: 400 });
+      }
+      // Notify both waiters + the kitchen so the new table assignment
+      // reaches every screen without waiting for the next poll.
+      try {
+        const { sendPushToStaff, sendPushToRole } = await import("@/lib/web-push");
+        const moveTitle = { en: "Guest moved", ar: "تم نقل ضيف" };
+        const bodyMsg = {
+          en: `${result.guestLabel}: Table ${result.sourceTableNumber} → Table ${result.targetTableNumber}`,
+          ar: `${result.guestLabel}: طاولة ${result.sourceTableNumber} ← طاولة ${result.targetTableNumber}`,
+        };
+        if (result.sourceSession.waiterId) {
+          await sendPushToStaff(result.sourceSession.waiterId, {
+            title: moveTitle,
+            body: bodyMsg,
+            tag: `guest-move-${sessionId}`,
+            url: "/waiter",
+          });
+        }
+        if (result.targetSession.waiterId && result.targetSession.waiterId !== result.sourceSession.waiterId) {
+          await sendPushToStaff(result.targetSession.waiterId, {
+            title: moveTitle,
+            body: bodyMsg,
+            tag: `guest-move-${result.targetSession.id}`,
+            url: "/waiter",
+          });
+        }
+        await sendPushToRole("KITCHEN", result.sourceSession.restaurantId, {
+          title: moveTitle,
+          body: bodyMsg,
+          tag: `guest-move-kitchen-${sessionId}`,
+          url: "/kitchen",
+        });
+      } catch { /* push not critical */ }
+      return NextResponse.json(result);
+    }
+
+    if (action === "merge_tables") {
+      // Floor-only — folding two open sessions together is a
+      // material change to revenue attribution and table state, so
+      // only OWNER / FLOOR_MANAGER can do it.
+      const caller = await resolveCallerRole(request, sessionId, null);
+      if (!caller || caller.kind !== "staff") {
+        return NextResponse.json({ error: "Authentication required" }, { status: 401 });
+      }
+      if (caller.role !== "OWNER" && caller.role !== "FLOOR_MANAGER") {
+        return NextResponse.json(
+          { error: "Only floor manager or owner can merge tables" },
+          { status: 403 },
+        );
+      }
+      const targetSessionId = typeof body.targetSessionId === "string" ? body.targetSessionId : "";
+      if (!targetSessionId) {
+        return NextResponse.json({ error: "targetSessionId required" }, { status: 400 });
+      }
+      // sessionId is the SOURCE (the one folded in / closed). target is
+      // the survivor. The UI passes the picked-up session as source and
+      // the destination as target.
+      const result = await useCases.sessions.mergeTables(sessionId, targetSessionId);
+      if ("error" in result) {
+        if (result.error === "Source session not found") return NextResponse.json(result, { status: 404 });
+        if (result.error === "Target session not found") return NextResponse.json(result, { status: 404 });
+        if (result.error === "Cannot merge a session into itself") return NextResponse.json(result, { status: 400 });
+        if (result.error === "Sessions belong to different restaurants") return NextResponse.json(result, { status: 400 });
+        if (result.error === "Only TABLE sessions can be merged") return NextResponse.json(result, { status: 400 });
+        if (result.error === "Target session has no table") return NextResponse.json(result, { status: 400 });
+        return NextResponse.json({ error: result.error }, { status: 409 });
+      }
+      try {
+        const { sendPushToStaff, sendPushToRole } = await import("@/lib/web-push");
+        const title = { en: "Tables Merged", ar: "تم دمج الطاولات" };
+        const bodyMsg = {
+          en: `Table ${result.sourceTableNumber} folded into Table ${result.targetTableNumber} (+${result.mergedGuestCount} guest)`,
+          ar: `طاولة ${result.sourceTableNumber} انضمت لطاولة ${result.targetTableNumber} (+${result.mergedGuestCount} ضيف)`,
+        };
+        if (result.target.waiterId) {
+          await sendPushToStaff(result.target.waiterId, {
+            title, body: bodyMsg, tag: `merge-${result.target.id}`, url: "/waiter",
+          });
+        }
+        await sendPushToRole("KITCHEN", result.target.restaurantId, {
+          title, body: bodyMsg, tag: `merge-kitchen-${result.target.id}`, url: "/kitchen",
+        });
+      } catch { /* push not critical */ }
+      return NextResponse.json(result);
     }
 
     return NextResponse.json({ error: "Unknown action" }, { status: 400 });

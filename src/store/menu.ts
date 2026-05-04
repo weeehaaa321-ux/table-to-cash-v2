@@ -21,7 +21,7 @@ type MenuStore = {
 export const useMenu = create<MenuStore>((set, get) => ({
   categories: [],
   allItems: [],
-  activeStations: ["KITCHEN", "BAR"],
+  activeStations: ["KITCHEN", "BAR", "ACTIVITY"],
   restaurantId: null,
   restaurantSlug: null,
   loaded: false,
@@ -37,7 +37,7 @@ export const useMenu = create<MenuStore>((set, get) => ({
       if (!menuRes.ok) return;
       const menuData = await menuRes.json();
       const categories: Category[] = menuData.categories || menuData;
-      const activeStations: string[] = menuData.activeStations || ["KITCHEN", "BAR"];
+      const activeStations: string[] = menuData.activeStations || ["KITCHEN", "BAR", "ACTIVITY"];
       const allItems = categories.flatMap((c) => c.items);
       set({ categories, allItems, activeStations, lastRefresh: Date.now() });
     } catch { /* silent */ }
@@ -70,7 +70,7 @@ export const useMenu = create<MenuStore>((set, get) => ({
       if (!menuRes.ok) throw new Error("Failed to load menu");
       const menuData = await menuRes.json();
       const categories: Category[] = menuData.categories || menuData;
-      const activeStations: string[] = menuData.activeStations || ["KITCHEN", "BAR"];
+      const activeStations: string[] = menuData.activeStations || ["KITCHEN", "BAR", "ACTIVITY"];
       const allItems = categories.flatMap((c) => c.items);
 
       set({

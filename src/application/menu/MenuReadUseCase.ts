@@ -21,6 +21,10 @@ export class MenuReadUseCase {
     const activeStations: string[] = [];
     if (isStationAcceptingOrders("KITCHEN", kitchenShifts)) activeStations.push("KITCHEN");
     if (isStationAcceptingOrders("BAR", barShifts)) activeStations.push("BAR");
+    // Activities don't depend on a station's shift coverage — there's
+    // no kitchen / bar staff to be on duty for them. They're always
+    // open as long as the restaurant is.
+    activeStations.push("ACTIVITY");
     return { categories: menu, activeStations };
   }
 

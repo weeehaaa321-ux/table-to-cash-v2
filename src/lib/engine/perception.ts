@@ -62,7 +62,7 @@ export type LiveOrder = {
   delayMinutes?: number;
   notes?: string;
   source?: "real";
-  station?: "KITCHEN" | "BAR";
+  station?: "KITCHEN" | "BAR" | "ACTIVITY";
   groupId?: string | null;
   orderType?: string;
   vipGuestName?: string | null;

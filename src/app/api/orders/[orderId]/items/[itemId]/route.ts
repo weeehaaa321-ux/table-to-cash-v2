@@ -8,6 +8,10 @@ import { requireStaffAuth } from "@/lib/api-auth";
 // (KITCHEN/BAR) must flag the floor instead of self-authorising a comp.
 const CANCEL_ROLES = ["OWNER", "FLOOR_MANAGER", "WAITER", "CASHIER"];
 const COMP_ROLES = ["OWNER", "FLOOR_MANAGER", "CASHIER"];
+// Stopping an activity timer is part of the routine billing flow;
+// waiters need it too (they run the kayak / pool / massage handoffs
+// and stop the clock when the guest hands the gear back).
+const STOP_ACTIVITY_ROLES = ["OWNER", "FLOOR_MANAGER", "WAITER", "CASHIER"];
 
 export async function PATCH(
   request: NextRequest,
@@ -20,17 +24,19 @@ export async function PATCH(
     reason?: string;
   };
 
-  if (action !== "cancel" && action !== "comp") {
+  if (action !== "cancel" && action !== "comp" && action !== "stop_activity") {
     return NextResponse.json(
-      { error: "action must be 'cancel' or 'comp'" },
+      { error: "action must be 'cancel', 'comp', or 'stop_activity'" },
       { status: 400 },
     );
   }
 
-  const authed = await requireStaffAuth(
-    request,
-    action === "comp" ? COMP_ROLES : CANCEL_ROLES,
-  );
+  const allowedRoles = action === "comp"
+    ? COMP_ROLES
+    : action === "stop_activity"
+      ? STOP_ACTIVITY_ROLES
+      : CANCEL_ROLES;
+  const authed = await requireStaffAuth(request, allowedRoles);
   if (authed instanceof NextResponse) return authed;
 
   const orderScope = await useCases.orders.getRestaurantOfOrder(orderId);
@@ -39,6 +45,14 @@ export async function PATCH(
   }
 
   try {
+    if (action === "stop_activity") {
+      const result = await useCases.orders.stopActivityTimer(orderId, itemId);
+      if (!result.ok) {
+        const code = result.reason === "not_found" ? 404 : 400;
+        return NextResponse.json({ error: result.reason || "stop failed" }, { status: code });
+      }
+      return NextResponse.json({ ok: true });
+    }
     const result = await useCases.orders.cancelOrCompItem({
       orderId,
       itemId,

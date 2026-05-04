@@ -16,6 +16,7 @@ import { OrderActionSheet } from "./OrderActionSheet";
 import { DeliveryCard } from "./DeliveryCard";
 import { IssueLogForm } from "./IssueLogForm";
 import { MenuControlPanel } from "./MenuControlPanel";
+import { JoinGatePanel } from "./JoinGatePanel";
 import type { LoggedInStaff, TableState, LiveOrder, SessionInfo, WaiterMetric, StaffInfo, DeliveryOrder, RecentMessage } from "./types";
 import type { FloorAlert } from "@/lib/floor-alerts";
 
@@ -117,7 +118,15 @@ export function FloorManagerView({ staff }: { staff: LoggedInStaff }) {
         </section>
 
         {/* LEFT — ATTENTION */}
-        <aside id="jump-alerts" className="lg:min-h-0 lg:overflow-y-auto lg:no-scrollbar">
+        <aside id="jump-alerts" className="lg:min-h-0 lg:overflow-y-auto lg:no-scrollbar space-y-3">
+          {/* Stuck-at-gate guests waiting on an absent session owner.
+              Hidden when the queue is empty so the column stays
+              clean during the normal-case flow. */}
+          <JoinGatePanel
+            requests={d.pendingJoinRequests}
+            onAdmit={d.handleAdmitJoinRequest}
+            onReject={d.handleRejectJoinRequest}
+          />
           <AttentionQueue
             alerts={d.alerts}
             urgentOrders={d.urgentOrders}
@@ -299,6 +308,7 @@ export function FloorManagerView({ staff }: { staff: LoggedInStaff }) {
             table={selectedTable}
             orders={d.orders}
             session={d.sessions.find((s) => s.tableNumber === selectedTable.id && s.status === "OPEN")}
+            sessions={d.sessions}
             staff={d.allStaff}
             allTables={d.tables}
             onClose={() => setSelectedTable(null)}
@@ -308,6 +318,8 @@ export function FloorManagerView({ staff }: { staff: LoggedInStaff }) {
             onEndSession={d.handleEndSession}
             onCancelItem={d.handleCancelItem}
             onChangeTable={d.handleChangeTable}
+            onMoveGuest={d.handleMoveGuest}
+            onMergeTables={d.handleMergeTables}
             onIncrementGuests={d.handleIncrementGuests}
             onAdvanceStatus={d.handleAdvanceStatus}
           />
@@ -1159,7 +1171,7 @@ function StaffLivePanel({
   staffPresence: import("./types").StaffPresence[];
   loadSummary: { idle: number; busy: number; heavy: number; overloaded: number; total: number };
   unassignedSessions: SessionInfo[];
-  onReassign: (sessionId: string, waiterId: string) => void;
+  onReassign: (sessionId: string, waiterId: string) => Promise<{ ok: boolean; message?: string }> | void;
   onMessage: (staffId: string) => void;
   onSelectWaiterTable: (s: SessionInfo) => void;
 }) {
@@ -1428,10 +1440,12 @@ function WaiterRow({
 }: {
   w: WaiterMetric;
   unassignedSessions: SessionInfo[];
-  onReassign: (sessionId: string, waiterId: string) => void;
+  onReassign: (sessionId: string, waiterId: string) => Promise<{ ok: boolean; message?: string }> | void;
   onMessage: (staffId: string) => void;
 }) {
   const { t } = useLanguage();
+  const [assignError, setAssignError] = useState<string | null>(null);
+  const [assignBusy, setAssignBusy] = useState(false);
 
   // Capacity assumption: 5 tables = 100% load. Overloaded > 100%.
   const loadPct = Math.min(100, (w.tables / 5) * 100);
@@ -1533,12 +1547,26 @@ function WaiterRow({
 
       {/* One-tap rebalance — only when this idle waiter could take a real unassigned table */}
       {idleWithUnassigned && unassignedSessions[0] && (
-        <button
-          onClick={() => onReassign(unassignedSessions[0].id, w.id)}
-          className="mt-2.5 w-full h-10 rounded-lg bg-status-good-500 hover:bg-status-good-600 text-white text-[11px] font-extrabold uppercase tracking-wider active:scale-95 transition"
-        >
-          {t("floor.assignTable")} T{unassignedSessions[0].tableNumber} → {w.name.split(" ")[0]}
-        </button>
+        <>
+          <button
+            disabled={assignBusy}
+            onClick={async () => {
+              setAssignError(null);
+              setAssignBusy(true);
+              const result = await onReassign(unassignedSessions[0].id, w.id);
+              setAssignBusy(false);
+              if (result && result.ok === false) setAssignError(result.message || "Assign failed");
+            }}
+            className="mt-2.5 w-full h-10 rounded-lg bg-status-good-500 hover:bg-status-good-600 text-white text-[11px] font-extrabold uppercase tracking-wider active:scale-95 transition disabled:opacity-50"
+          >
+            {t("floor.assignTable")} T{unassignedSessions[0].tableNumber} → {w.name.split(" ")[0]}
+          </button>
+          {assignError && (
+            <div className="mt-1.5 px-2.5 py-1.5 rounded-lg bg-status-bad-50 border border-status-bad-200 text-status-bad-700 text-[10px] font-semibold">
+              {assignError}
+            </div>
+          )}
+        </>
       )}
     </div>
   );

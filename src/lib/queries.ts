@@ -78,6 +78,10 @@ export async function getMenuForRestaurant(restaurantId: string) {
       descAr: item.descAr,
       descRu: item.descRu,
       price: toNum(item.price),
+      // Activity items use this rate alongside the OrderItem timer to
+      // compute prorated billing. null for ordinary food/drinks AND
+      // for flat-priced activities (pool ticket).
+      pricePerHour: item.pricePerHour == null ? null : toNum(item.pricePerHour),
       image: item.image,
       available: item.available,
       bestSeller: item.bestSeller,
@@ -181,13 +185,14 @@ export async function createOrder(data: {
     where: { id: { in: data.items.map((i) => i.menuItemId) } },
     select: { id: true, price: true, category: { select: { station: true } } },
   });
-  const stationById = new Map<string, "KITCHEN" | "BAR">();
+  const stationById = new Map<string, "KITCHEN" | "BAR" | "ACTIVITY">();
   const priceById = new Map<string, number>();
   for (const m of menuItems) {
     stationById.set(m.id, m.category.station);
     priceById.set(m.id, toNum(m.price));
   }
-  const resolveStation = (id: string): "KITCHEN" | "BAR" => stationById.get(id) ?? "KITCHEN";
+  const resolveStation = (id: string): "KITCHEN" | "BAR" | "ACTIVITY" =>
+    stationById.get(id) ?? "KITCHEN";
 
   // Enforce server-side prices — ignore client-supplied prices to prevent
   // manipulation via stale menus or tampered requests.
@@ -198,16 +203,28 @@ export async function createOrder(data: {
     }
   }
 
+  // Partition items across three station buckets. ACTIVITY orders are
+  // peeled off into their own Order row so they bypass kitchen / bar
+  // prep screens and so their per-hour timer fields land on a single
+  // row (mixing them into the kitchen bucket would tag activity items
+  // with station=KITCHEN and surface them on the prep screen by
+  // mistake).
   const kitchenItems = data.items.filter((i) => resolveStation(i.menuItemId) === "KITCHEN");
   const barItems = data.items.filter((i) => resolveStation(i.menuItemId) === "BAR");
-  const isSplit = kitchenItems.length > 0 && barItems.length > 0;
+  const activityItems = data.items.filter((i) => resolveStation(i.menuItemId) === "ACTIVITY");
+  const distinctStations = [
+    kitchenItems.length > 0 ? 1 : 0,
+    barItems.length > 0 ? 1 : 0,
+    activityItems.length > 0 ? 1 : 0,
+  ].reduce((a, b) => a + b, 0);
+  const isSplit = distinctStations > 1;
   const groupId = isSplit ? `grp_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}` : null;
 
   const sumItems = (items: typeof data.items) =>
     items.reduce((s, i) => s + i.price * i.quantity, 0);
 
   const buckets: {
-    station: "KITCHEN" | "BAR";
+    station: "KITCHEN" | "BAR" | "ACTIVITY";
     items: typeof data.items;
     subtotal: number;
     total: number;
@@ -221,19 +238,36 @@ export async function createOrder(data: {
   const deliveryFee = isDelivery ? DELIVERY_FEE : 0;
 
   if (isSplit) {
-    const kSub = sumItems(kitchenItems);
-    const bSub = sumItems(barItems);
-    // Fee rides on the kitchen sub-order so the bar half stays
-    // food-only — matches how tip is attached to the first bucket.
-    buckets.push({ station: "KITCHEN", items: kitchenItems, subtotal: kSub, total: kSub + deliveryFee });
-    buckets.push({ station: "BAR", items: barItems, subtotal: bSub, total: bSub });
+    // Fee rides on whichever bucket lands first. Activity-only orders
+    // shouldn't ever combine with delivery (no deliverable activity)
+    // but the math stays consistent if it ever does.
+    let feeApplied = false;
+    if (kitchenItems.length > 0) {
+      const sub = sumItems(kitchenItems);
+      const fee = !feeApplied ? deliveryFee : 0;
+      buckets.push({ station: "KITCHEN", items: kitchenItems, subtotal: sub, total: sub + fee });
+      feeApplied = true;
+    }
+    if (barItems.length > 0) {
+      const sub = sumItems(barItems);
+      const fee = !feeApplied ? deliveryFee : 0;
+      buckets.push({ station: "BAR", items: barItems, subtotal: sub, total: sub + fee });
+      feeApplied = true;
+    }
+    if (activityItems.length > 0) {
+      const sub = sumItems(activityItems);
+      const fee = !feeApplied ? deliveryFee : 0;
+      buckets.push({ station: "ACTIVITY", items: activityItems, subtotal: sub, total: sub + fee });
+      feeApplied = true;
+    }
   } else {
     // Recompute server-side from server-priced items. Trusting the
     // client's `data.subtotal`/`data.total` lets a tampered request pay
     // 1 EGP for a 400 EGP cart — the kitchen cooks the real items, the
     // cashier sees the fake total. The split branch above already does
     // this; the non-split branch must too.
-    const station = barItems.length > 0 ? "BAR" : "KITCHEN";
+    const station: "KITCHEN" | "BAR" | "ACTIVITY" =
+      activityItems.length > 0 ? "ACTIVITY" : barItems.length > 0 ? "BAR" : "KITCHEN";
     const sub = sumItems(data.items);
     buckets.push({ station, items: data.items, subtotal: sub, total: sub + deliveryFee });
   }
