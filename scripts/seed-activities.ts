@@ -31,14 +31,24 @@ async function main() {
     update: { station: "ACTIVITY" },
   });
 
+  // Unsplash CDN URLs — same `?w=600&h=450&fit=crop&q=80` shape the
+  // breakfast / mains menu uses, so the menu UI's image renderer treats
+  // them identically. Picked from Unsplash search by activity term;
+  // each is the top free (non-Plus) result.
+  const img = (id: string) => `https://images.unsplash.com/${id}?w=600&h=450&fit=crop&q=80`;
+
   const items = [
     { name: "Pool Ticket",    nameAr: "تذكرة مسبح",   price: 300,  pricePerHour: null,
+      image: img("photo-1562016600-ece13e8ba570"),
       desc: "Daily pool access. Single ticket — flat fee, no timer." },
     { name: "Kayak",          nameAr: "كاياك",        price: 500,  pricePerHour: 500,
+      image: img("photo-1569965335962-2317ff2a7658"),
       desc: "Per-hour kayak hire. Billed prorated on return." },
     { name: "Board",          nameAr: "لوح",          price: 500,  pricePerHour: 500,
+      image: img("photo-1670606409379-bd5185d95096"),
       desc: "Per-hour board hire. Billed prorated on return." },
     { name: "Massage (1 hr)", nameAr: "مساج (ساعة)",  price: 1800, pricePerHour: 1800,
+      image: img("photo-1598901986949-f593ff2a31a6"),
       desc: "Massage session. Per-hour rate; staff stops the timer at the end." },
   ];
 
@@ -55,6 +65,7 @@ async function main() {
           description: it.desc,
           price: it.price,
           pricePerHour: it.pricePerHour,
+          image: it.image,
           available: true,
         },
       });
@@ -67,6 +78,7 @@ async function main() {
           description: it.desc,
           price: it.price,
           pricePerHour: it.pricePerHour,
+          image: it.image,
           available: true,
         },
       });
