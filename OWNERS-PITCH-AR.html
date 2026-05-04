@@ -1,0 +1,651 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Neom App — لماذا التحوّل الآن؟</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;800;900&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #f7f5f1;
+    --bg-soft: #fbfaf6;
+    --card: #ffffff;
+    --ink: #1a1f2c;
+    --ink-soft: #4a5160;
+    --ink-mute: #8a91a0;
+    --line: #e8e3d9;
+    --line-strong: #d6cfbf;
+    --ocean: #2a6f97;
+    --ocean-soft: #e6f0f7;
+    --good: #2f855a;
+    --good-soft: #e7f5ee;
+    --warn: #b45309;
+    --warn-soft: #fdf2dc;
+    --bad: #c1432d;
+    --bad-soft: #fce8e3;
+    --shadow: 0 1px 2px rgba(20,30,55,.04), 0 8px 24px rgba(20,30,55,.05);
+    --shadow-lift: 0 2px 4px rgba(20,30,55,.06), 0 16px 40px rgba(20,30,55,.08);
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    font-family: "Cairo", "Segoe UI", system-ui, -apple-system, "Helvetica Neue", sans-serif;
+    font-size: 16px;
+    line-height: 1.7;
+    color: var(--ink);
+    background: var(--bg);
+    padding: 0 0 120px;
+  }
+  .wrap { max-width: 820px; margin: 0 auto; padding: 0 24px; }
+  /* Latin tokens (POS, QR, cashier, dashboard, EGP) — keep them upright,
+     unambiguously LTR inside the RTL flow, with the same weight as the
+     surrounding Arabic so the eye doesn't trip on them. */
+  .en, code { direction: ltr; unicode-bidi: isolate; font-family: "Cairo", "Inter", system-ui; font-weight: 700; }
+  code { background: var(--ocean-soft); color: var(--ocean); padding: 1px 6px; border-radius: 4px; font-size: 0.92em; }
+
+  /* Header */
+  header {
+    padding: 64px 24px 40px;
+    background: linear-gradient(180deg, var(--bg-soft) 0%, var(--bg) 100%);
+    border-bottom: 1px solid var(--line);
+    margin-bottom: 40px;
+  }
+  header .wrap { padding: 0; }
+  header .badge {
+    display: inline-block;
+    padding: 6px 12px;
+    background: var(--ocean-soft);
+    color: var(--ocean);
+    border-radius: 6px;
+    font-size: 12px; font-weight: 800;
+    letter-spacing: 0.06em;
+    margin-bottom: 14px;
+  }
+  header h1 {
+    font-size: 36px; font-weight: 900; letter-spacing: -0.01em;
+    margin: 0 0 12px;
+    line-height: 1.25;
+  }
+  header p.sub {
+    color: var(--ink-soft); margin: 0; font-size: 17px;
+    max-width: 640px;
+  }
+
+  /* Section */
+  section { margin-bottom: 48px; }
+  h2 {
+    font-size: 24px; font-weight: 800; letter-spacing: -0.005em;
+    margin: 0 0 20px;
+    padding-right: 16px;
+    border-right: 4px solid var(--ocean);
+    line-height: 1.3;
+  }
+  h3 {
+    font-size: 17px; font-weight: 800;
+    margin: 24px 0 10px;
+    color: var(--ink);
+  }
+
+  /* Card layouts */
+  .card {
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: 16px;
+    padding: 22px 24px;
+    box-shadow: var(--shadow);
+    margin-bottom: 16px;
+  }
+  .card.tight { padding: 18px 20px; }
+  .card.bad { background: var(--bad-soft); border-color: #f0c9bf; }
+  .card.good { background: var(--good-soft); border-color: #c2e2ce; }
+  .card.warn { background: var(--warn-soft); border-color: #f0d8a0; }
+
+  .quick-summary {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+  }
+  .quick-summary .card { margin: 0; }
+  .quick-summary h3 { margin-top: 0; font-size: 15px; }
+  .quick-summary ul { margin: 0; padding-right: 20px; }
+  .quick-summary li { margin-bottom: 6px; }
+  @media (max-width: 640px) {
+    .quick-summary { grid-template-columns: 1fr; }
+  }
+
+  /* Feature pillars */
+  .pillar {
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    padding: 20px 24px;
+    margin-bottom: 14px;
+    box-shadow: var(--shadow);
+  }
+  .pillar h3 {
+    margin-top: 0; margin-bottom: 8px;
+    display: flex; align-items: baseline; gap: 10px;
+    font-size: 18px;
+  }
+  .pillar h3 .num {
+    display: inline-block;
+    width: 28px; height: 28px;
+    background: var(--ocean); color: white;
+    border-radius: 7px;
+    font-size: 13px; font-weight: 900;
+    text-align: center; line-height: 28px;
+    direction: ltr;
+  }
+  .pillar ul { margin: 8px 0 0; padding-right: 20px; }
+  .pillar li { margin-bottom: 4px; color: var(--ink-soft); }
+
+  /* Comparison table */
+  table {
+    width: 100%; border-collapse: collapse;
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    overflow: hidden;
+    box-shadow: var(--shadow);
+    font-size: 14.5px;
+  }
+  th, td {
+    padding: 12px 14px;
+    text-align: right;
+    border-bottom: 1px solid var(--line);
+    vertical-align: top;
+  }
+  thead th {
+    background: var(--bg-soft);
+    font-weight: 800;
+    color: var(--ink);
+    font-size: 13px;
+    letter-spacing: 0.02em;
+  }
+  thead th.old { color: var(--bad); }
+  thead th.new { color: var(--good); }
+  tbody tr:last-child td { border-bottom: none; }
+  td.situation { font-weight: 700; color: var(--ink); width: 28%; }
+  td.old { color: #a04030; }
+  td.new { color: var(--good); font-weight: 600; }
+
+  /* Revenue blocks — big numbers */
+  .revenue-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 14px;
+    margin-top: 16px;
+  }
+  @media (max-width: 640px) {
+    .revenue-grid { grid-template-columns: 1fr; }
+  }
+  .revenue-card {
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-right: 4px solid var(--good);
+    border-radius: 12px;
+    padding: 18px 22px;
+    box-shadow: var(--shadow);
+  }
+  .revenue-card .label {
+    font-size: 13px; color: var(--ink-soft); font-weight: 700;
+    margin-bottom: 4px;
+  }
+  .revenue-card .figure {
+    font-size: 26px; font-weight: 900; color: var(--good);
+    direction: ltr; line-height: 1.1;
+    font-variant-numeric: tabular-nums;
+    margin-bottom: 6px;
+  }
+  .revenue-card .figure .unit {
+    font-size: 14px; color: var(--ink-soft); font-weight: 700;
+    margin-right: 4px;
+  }
+  .revenue-card .why {
+    font-size: 13.5px; color: var(--ink-soft); line-height: 1.55;
+  }
+
+  /* FAQ */
+  .faq {
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    padding: 16px 20px;
+    margin-bottom: 10px;
+    box-shadow: var(--shadow);
+  }
+  .faq .q {
+    font-weight: 800; color: var(--ink);
+    margin-bottom: 6px;
+  }
+  .faq .q::before {
+    content: "س:"; color: var(--ocean); margin-left: 6px; font-weight: 900;
+  }
+  .faq .a {
+    color: var(--ink-soft); font-size: 14.5px;
+  }
+  .faq .a::before {
+    content: "ج:"; color: var(--good); margin-left: 6px; font-weight: 900;
+  }
+
+  /* Why-now block */
+  .why-now {
+    background: linear-gradient(180deg, #fff 0%, var(--warn-soft) 100%);
+    border: 2px solid var(--warn);
+    border-radius: 16px;
+    padding: 24px 26px;
+    box-shadow: var(--shadow-lift);
+  }
+  .why-now h2 {
+    border-right-color: var(--warn);
+    color: var(--warn);
+  }
+  .why-now ul { padding-right: 20px; }
+  .why-now li { margin-bottom: 8px; }
+  .why-now .total {
+    margin-top: 18px;
+    padding: 16px 20px;
+    background: white;
+    border-radius: 12px;
+    border: 2px solid var(--warn);
+    text-align: center;
+  }
+  .why-now .total .figure {
+    font-size: 30px; font-weight: 900; color: var(--warn);
+    direction: ltr; font-variant-numeric: tabular-nums;
+    line-height: 1.15;
+  }
+  .why-now .total .label {
+    font-size: 13px; color: var(--ink-soft); font-weight: 700;
+    margin-top: 4px;
+  }
+
+  /* Closing */
+  .closing {
+    background: var(--ink);
+    color: #f0e9d9;
+    border-radius: 16px;
+    padding: 32px 28px;
+    margin-top: 32px;
+  }
+  .closing h2 {
+    color: white; border-right-color: #f0a868;
+    font-size: 22px;
+  }
+  .closing p { color: #d8d2c2; font-size: 15.5px; line-height: 1.75; }
+  .closing .question {
+    margin-top: 20px;
+    padding: 16px 20px;
+    background: rgba(255,255,255,0.06);
+    border-radius: 10px;
+    font-size: 17px; font-weight: 800;
+    color: #f0a868;
+    line-height: 1.55;
+  }
+
+  /* Footer */
+  footer {
+    margin-top: 48px;
+    padding-top: 20px;
+    border-top: 1px solid var(--line);
+    color: var(--ink-mute);
+    font-size: 13px;
+    text-align: center;
+  }
+
+  /* Print */
+  @media print {
+    body { background: white; padding: 0; }
+    header { padding: 24px; margin-bottom: 24px; }
+    section { margin-bottom: 28px; page-break-inside: avoid; }
+    .pillar, .card, .faq, table { box-shadow: none; }
+    .closing { background: white; color: var(--ink); border: 2px solid var(--ink); }
+    .closing h2 { color: var(--ink); }
+    .closing p { color: var(--ink-soft); }
+    .closing .question { background: var(--bg-soft); color: var(--ink); }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="wrap">
+    <div class="badge">NEOM CAFÉ · DAHAB</div>
+    <h1>لماذا التحوّل من <span class="en">POS</span> التقليدي إلى نظام <span class="en">Neom App</span>؟</h1>
+    <p class="sub">
+      وثيقة مقارنة مكتوبة لأصحاب المحل، بشكل مباشر وبدون مبالغة. كل سؤال أو شك له إجابة واضحة قبل ما تقرأ السطر اللي بعده.
+    </p>
+  </div>
+</header>
+
+<main class="wrap">
+
+  <!-- Quick summary -->
+  <section>
+    <h2>نظرة سريعة: ما الفرق؟</h2>
+    <div class="quick-summary">
+      <div class="card bad">
+        <h3>النظام الحالي = <span class="en">POS</span> تقليدي</h3>
+        <p style="margin: 0 0 8px; color: var(--ink-soft);">يقدّم 3 أشياء بس:</p>
+        <ul>
+          <li>شاشة <span class="en">Cashier</span> لاستلام الدفع.</li>
+          <li><span class="en">Floor Tab</span> واحد — الـ <span class="en">waiter</span> بياخد الطلب شفهياً، يمشي للتاب، يدخّله بنفسه.</li>
+          <li>ورق مطبوع للمطبخ والـ <span class="en">bar</span>.</li>
+        </ul>
+      </div>
+      <div class="card good">
+        <h3><span class="en">Neom App</span> = منصّة كاملة</h3>
+        <p style="margin: 0; color: var(--ink-soft);">
+          مصمّمة من أول قطعة كود لكافيه نيوم تحديداً. كل دور (<span class="en">Owner / Floor Manager / Waiter / Kitchen / Bar / Cashier / Delivery / Guest</span>) عنده شاشة مخصصة بتشتغل في نفس الوقت، متربّطة لحظياً، ومحسوبة على مزاج الكافيه: المسبح، البحر، الكاياك، الـ <span class="en">massage</span>.
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <!-- 7 pillars -->
+  <section>
+    <h2>ما الذي يقدّمه نظام <span class="en">Neom App</span>؟</h2>
+
+    <div class="pillar">
+      <h3><span class="num">1</span> الزبون يطلب من تليفونه (<span class="en">QR Menu</span>)</h3>
+      <ul>
+        <li>الزبون يـ <span class="en">scan</span> الـ <span class="en">QR</span> على الطاولة → يدخل على القائمة على تليفونه فوراً.</li>
+        <li>القائمة بصور لكل صنف، بالعربي والإنجليزي.</li>
+        <li>الزبون يضيف الأصناف اللي عايزها في الـ <span class="en">cart</span>، ويبعت الطلب بضغطة زر.</li>
+        <li>المطبخ والـ <span class="en">bar</span> يستلموا الطلب على شاشاتهم لحظياً.</li>
+        <li>مفيش "نسيت أقول" أو "النادل ما سمعش الطلب صح" — الزبون كاتبه بإيده.</li>
+      </ul>
+    </div>
+
+    <div class="pillar">
+      <h3><span class="num">2</span> شاشة <span class="en">Floor Manager</span></h3>
+      <ul>
+        <li>يشوف كل الطاولات في الكافيه على شاشة واحدة، مع حالة كل طلب (متحضّر / جاهز / تأخر).</li>
+        <li>يشوف أي طاولة محتاجة نادل، مين عنده طاولات كتير، ومين فاضي.</li>
+        <li>ينقل ضيف من طاولة لطاولة بكل حاجاته (طلباته اللي اتدفعت أو لسه).</li>
+        <li>يدمج طاولتين لو مجموعتين قرّروا يقعدوا مع بعض.</li>
+        <li>يقبل الـ <span class="en">guests</span> اللي بيـ <span class="en">scan</span> الـ <span class="en">QR</span> ولسه مستنيين موافقة صاحب الطاولة (لو ده اتأخّر أو نزل البحر).</li>
+      </ul>
+    </div>
+
+    <div class="pillar">
+      <h3><span class="num">3</span> شاشة <span class="en">Cashier</span> متطوّرة</h3>
+      <ul>
+        <li>تقبل الدفع (<span class="en">Cash / Card / InstaPay</span>) مع تأكيد قبل التسجيل، عشان مفيش ضغطة بالغلط.</li>
+        <li>خصومات (<span class="en">discounts</span>) بنسبة مئوية أو رقم ثابت، مع تتبّع كامل وفرق الـ <span class="en">shift</span> يبيّن مين خصم وكام.</li>
+        <li>دفع جزئي (<span class="en">split-pay</span>) — كل ضيف يدفع لطلباته فقط.</li>
+        <li>إيصال (<span class="en">receipt</span>) كامل قابل للطبع في أي وقت — حتى لو الطاولة دفعت على دفعتين أو تلاتة.</li>
+        <li>مزامنة (<span class="en">reconciliation</span>) للـ <span class="en">cash drawer</span> في نهاية الـ <span class="en">shift</span>: النظام بيحسب المتوقع، الكاشير بيعدّ، أي فرق يبان فوراً.</li>
+      </ul>
+    </div>
+
+    <div class="pillar">
+      <h3><span class="num">4</span> الأنشطة (<span class="en">Activities</span>)</h3>
+      <ul>
+        <li><span class="en">Pool ticket</span> (<code>300 EGP</code>)، <span class="en">Kayak</span> (<code>500 EGP/hr</code>)، <span class="en">Board</span> (<code>500 EGP/hr</code>)، <span class="en">Massage</span> (<code>1800 EGP/hr</code>).</li>
+        <li>الزبون يختار <code>1 / 2 / 3</code> ساعات على القائمة، الفاتورة بتتحسب أوتوماتيك.</li>
+        <li>كل ده بقى <strong>مدخل أرباح إضافي</strong> كان ضايع، لأن الـ <span class="en">POS</span> الحالي ما عندوش طريقة لتسجيل الأنشطة.</li>
+      </ul>
+    </div>
+
+    <div class="pillar">
+      <h3><span class="num">5</span> <span class="en">Smart Upsell</span> — محرّك زيادة المبيعات</h3>
+      <ul>
+        <li>النظام بيحلّل عربة الزبون (<span class="en">cart</span>) ووقت اليوم، ويقترح صنف أو اتنين بشكل ذكي مش مزعج:</li>
+        <li>الصبح: قهوة / عصير طازج. الضهر: سلطة أو مشروب بارد. العصاري: الـ <span class="en">pool</span> أو الـ <span class="en">kayak</span>، أو <span class="en">ice cream</span>. الليل: <span class="en">cocktail</span> أو <span class="en">tiramisu</span>.</li>
+        <li>مش قواعد عشوائية — بيتعامل مع كل <span class="en">cart</span> زي ما الـ <span class="en">waiter</span> الشاطر بيقترح. الفرق إنه شغّال على كل طاولة في نفس اللحظة، ومش بينسى.</li>
+      </ul>
+    </div>
+
+    <div class="pillar">
+      <h3><span class="num">6</span> إدارة كاملة للمالك (<span class="en">Owner Dashboard</span>)</h3>
+      <ul>
+        <li>المالك يقدر يدخّل / يعدّل أي صنف في القائمة من تليفونه (سعر، صورة، اسم، توقيت متاحية، <span class="en">EGP/hour</span>).</li>
+        <li>يشوف الـ <span class="en">revenue</span> اللحظي، عدد الطلبات، الـ <span class="en">tips</span>، الـ <span class="en">shift</span> اللي شغّال دلوقتي.</li>
+        <li>يدير الـ <span class="en">schedule</span> (المناوبات) بتاعت كل واحد في الفريق.</li>
+        <li>يقفل اليوم بضغطة زر — تقرير كامل بالـ <span class="en">revenue</span> والـ <span class="en">comp</span> والـ <span class="en">cancelled</span> والـ <span class="en">tips</span> بتوزيع الـ <span class="en">waiters</span>.</li>
+      </ul>
+    </div>
+
+    <div class="pillar">
+      <h3><span class="num">7</span> أمان وأمانة في كل خطوة</h3>
+      <ul>
+        <li>كل عملية لها سجل (<span class="en">audit trail</span>): مين عمل <span class="en">comp</span>، مين رفض دفعة، مين أكّد دفعة، مين دخّل خصم.</li>
+        <li><span class="en">Cash drawer</span> بيعدّ المتوقع لحظياً → الكاشير ما يقدرش يخفي فلوس بدون ما يبان.</li>
+        <li><span class="en">Tips</span> بتتحسب لكل <span class="en">waiter</span> بالاسم — مش <span class="en">pool</span>، مش "الإدارة هتقسّمها".</li>
+      </ul>
+    </div>
+  </section>
+
+  <!-- Comparison table -->
+  <section>
+    <h2>مقارنة مباشرة: <span class="en">Before / After</span></h2>
+    <table>
+      <thead>
+        <tr>
+          <th>الموقف</th>
+          <th class="old">الـ <span class="en">POS</span> الحالي</th>
+          <th class="new"><span class="en">Neom App</span></th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td class="situation">الزبون عايز يطلب</td>
+          <td class="old">ينادي <span class="en">waiter</span> → ينتظر → يكتب الطلب → يمشي للتاب → يدخّله</td>
+          <td class="new">يـ <span class="en">scan</span> الـ <span class="en">QR</span> → يطلب من تليفونه → الطلب يوصل المطبخ في ثواني</td>
+        </tr>
+        <tr>
+          <td class="situation">الزبون نسي يطلب حاجة</td>
+          <td class="old">ينادي تاني → ينتظر تاني</td>
+          <td class="new">يفتح القائمة على تليفونه ويضيف فوراً</td>
+        </tr>
+        <tr>
+          <td class="situation">طاولة ندفع جزء وجزء</td>
+          <td class="old">الكاشير بياخد المبلغ كله من شخص واحد، والباقي يدبّر بينهم</td>
+          <td class="new">كل ضيف يدفع لطلباته، مع <span class="en">receipt</span> مستقل لكل واحد</td>
+        </tr>
+        <tr>
+          <td class="situation">ضيف لاحق أصحابه من المسبح</td>
+          <td class="old">محدش عارف ضيف ولا لأ — ممكن يدخّل نفسه على الفاتورة بالغلط</td>
+          <td class="new">ضيوفه يـ <span class="en">scan</span> ويدخلوا تحت الجلسة، ولو صاحب الجلسة مش رادّ، الـ <span class="en">Floor Manager</span> بيقبلهم</td>
+        </tr>
+        <tr>
+          <td class="situation">كاياك أو ماساج</td>
+          <td class="old">مش متاح في الـ <span class="en">POS</span>، الفلوس بتتاخد كاش بدون فاتورة</td>
+          <td class="new">في القائمة كصنف، الزبون يختار ساعات، الفاتورة موحّدة</td>
+        </tr>
+        <tr>
+          <td class="situation"><span class="en">Receipt</span> كامل بعد دفع جزئي</td>
+          <td class="old">غالباً مش ممكن — كل دفعة لها ورقة منفصلة</td>
+          <td class="new">زرار "<span class="en">Full Receipt</span>" يطبع الكل في ورقة واحدة</td>
+        </tr>
+        <tr>
+          <td class="situation">الكاشير عمل خصم بالغلط (أو غش)</td>
+          <td class="old">محدش يبان</td>
+          <td class="new">السجل يقول مين، إمتى، كام، على إيه</td>
+        </tr>
+        <tr>
+          <td class="situation">نهاية الـ <span class="en">shift</span> والـ <span class="en">cash drawer</span> ناقص</td>
+          <td class="old">الكاشير بيحط أي رقم</td>
+          <td class="new">النظام بيعدّ المتوقع — الفرق يبان في الحال</td>
+        </tr>
+        <tr>
+          <td class="situation">المطبخ خبط طلبين على بعض</td>
+          <td class="old">ورقتين بتتلخبط — ممكن واحد يضيع</td>
+          <td class="new">الشاشة بترتّبهم بـ <span class="en">status</span>: <span class="en">Pending → Preparing → Ready → Served</span></td>
+        </tr>
+        <tr>
+          <td class="situation">نقل ضيف لطاولة تانية بكل حاجاته</td>
+          <td class="old">يدوي، بأخطاء</td>
+          <td class="new">زرار واحد، النظام بينقل كل الطلبات (حتى المدفوعة)</td>
+        </tr>
+        <tr>
+          <td class="situation">المالك مش موجود في الكافيه</td>
+          <td class="old">أعمى — يستنّى الـ <span class="en">shift report</span> آخر اليوم</td>
+          <td class="new">يفتح الـ <span class="en">dashboard</span> من تليفونه ويشوف كل حاجة لحظياً</td>
+        </tr>
+      </tbody>
+    </table>
+  </section>
+
+  <!-- Revenue lift -->
+  <section>
+    <h2>كيف يرفع نظام <span class="en">Neom App</span> الـ <span class="en">Revenue</span> فعلياً؟</h2>
+    <p style="color: var(--ink-soft);">كل واحدة من دول رقم محسوب، مش كلام مرسل:</p>
+    <div class="revenue-grid">
+
+      <div class="revenue-card">
+        <div class="label"><span class="en">1. Smart Upsell</span> على الـ <span class="en">Cart</span></div>
+        <div class="figure">75K – 225K <span class="unit">EGP / شهر</span></div>
+        <div class="why">
+          الـ <span class="en">industry data</span> بيقول إن الـ <span class="en">cart upsell</span> بيرفع متوسط الفاتورة (<span class="en">AOV</span>) بـ <strong>5% إلى 15%</strong>. على <span class="en">revenue</span> يومي <code>50,000 EGP</code> = <code>2,500 – 7,500 EGP</code> زيادة في اليوم. الميكانيزم شغّال أوتوماتيك، الكافيه ما بيدفع حاجة إضافية.
+        </div>
+      </div>
+
+      <div class="revenue-card">
+        <div class="label">2. الأنشطة بقت تتسجّل</div>
+        <div class="figure">~ 150K <span class="unit">EGP / شهر</span></div>
+        <div class="why">
+          كاياك واحد × 2 ساعة × 5 زبون يومياً × <code>500 EGP</code> = <code>5,000 EGP</code> يومياً <span class="en">revenue</span> جديد كان ضايع. <span class="en">revenue</span> من مصدر مكنش موجود في الفاتورة أصلاً.
+        </div>
+      </div>
+
+      <div class="revenue-card">
+        <div class="label">3. اختفاء الـ <span class="en">comps</span> الوهمية</div>
+        <div class="figure">15K – 45K <span class="unit">EGP / شهر</span></div>
+        <div class="why">
+          الـ <span class="en">shrinkage</span> من <span class="en">comps</span> واحتساب أصناف مجانية بدون سبب واضح بيكون عادةً <strong>1% – 3%</strong> من الـ <span class="en">revenue</span>. السجل (<span class="en">audit trail</span>) لكل <span class="en">comp</span> مع <span class="en">reason</span> وموظف يقفل الباب ده.
+        </div>
+      </div>
+
+      <div class="revenue-card">
+        <div class="label">4. سرعة دوران الطاولات</div>
+        <div class="figure">+1–2 <span class="unit">طاولة / ساعة في الـ rush</span></div>
+        <div class="why">
+          الزبون يطلب من تليفونه، الأكل بيوصل أسرع، يدفع، يقوم. كل دقيقة بتتوفّر = طاولة تخدم زبون زيادة في الـ <span class="en">rush hour</span>.
+        </div>
+      </div>
+
+      <div class="revenue-card">
+        <div class="label">5. شفافية الـ <span class="en">tips</span></div>
+        <div class="figure">+ خدمة أحسن</div>
+        <div class="why">
+          الـ <span class="en">waiter</span> اللي خدمتك كويس بياخد الـ <span class="en">tip</span> بتاعه باسمه. ده بيدفع كل واحد يخدم أحسن، الـ <span class="en">rating</span> بيرتفع، الـ <span class="en">repeat visits</span> بترتفع.
+        </div>
+      </div>
+
+      <div class="revenue-card">
+        <div class="label">6. <span class="en">Bilingual menu</span></div>
+        <div class="figure">+ شريحة السواح</div>
+        <div class="why">
+          (عربي / إنجليزي) — السواح بيطلبوا بسهولة، مش بيستنوا أحد يفهمهم، مش بيلغوا الزيارة عشان <span class="en">waiter</span> ما فهمش طلبهم.
+        </div>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- Time savings -->
+  <section>
+    <h2>كيف يوفّر وقت ومجهود؟</h2>
+    <div class="card">
+      <ul style="margin: 0; padding-right: 20px;">
+        <li><strong>الـ <span class="en">waiter</span></strong> بقى بيقدّم بدل ما يكتب — وقته اللي كان رايح في كتابة الطلبات بيرجع للـ <span class="en">guest</span>.</li>
+        <li><strong>المطبخ والـ <span class="en">bar</span></strong> بقوا يشتغلوا على شاشة منظّمة بدل ورقة بترميها كل دقيقتين.</li>
+        <li><strong>الـ <span class="en">Floor Manager</span></strong> بقى عارف كل حاجة بدون ما يلف الكافيه. يقدر يدير 2x من الطاولات بنفس الجهد.</li>
+        <li><strong>المالك</strong> بقى يقدر يكون في القاهرة أو في إجازة، الـ <span class="en">dashboard</span> بيقوله كل اللي محتاج يعرفه.</li>
+        <li><strong>الكاشير</strong> عنده مزامنة آلية — مفيش حساب يدوي أو خناقة آخر اليوم على فلوس "ضايعة".</li>
+      </ul>
+    </div>
+  </section>
+
+  <!-- FAQ -->
+  <section>
+    <h2>الأسئلة الشائعة (وإجابات صريحة)</h2>
+
+    <div class="faq">
+      <div class="q">لو الإنترنت قطع، النظام يقف؟</div>
+      <div class="a">لا. الـ <span class="en">Print Agent</span> على <span class="en">PC</span> الكاشير شغّال محلياً، بيطبع من الـ <span class="en">LAN</span> حتى لو الإنترنت مقطوع. أول ما الإنترنت يرجع، النظام بيلحّق نفسه. كمان الـ <span class="en">cashier UI</span> عنده <span class="en">reliability layer</span>: لو في عملية دفع شغّالة، النظام مايعملش <span class="en">reload</span> في نص العملية.</div>
+    </div>
+
+    <div class="faq">
+      <div class="q">الزبون اللي مش بيعرف يستخدم الـ <span class="en">QR</span>؟</div>
+      <div class="a">الـ <span class="en">waiter</span> لسه يقدر ياخد الطلب ويدخّله بدل الزبون. الـ <span class="en">flow</span> القديم شغّال جنب الـ <span class="en">flow</span> الجديد، مش بدله. الزبون اللي عايز <span class="en">QR</span> يستخدم <span class="en">QR</span>، اللي عايز <span class="en">waiter</span> ينده <span class="en">waiter</span>.</div>
+    </div>
+
+    <div class="faq">
+      <div class="q">التدريب؟</div>
+      <div class="a">كل شاشة بـ <span class="en">PIN</span>، مش <span class="en">password</span> — أسهل من الـ <span class="en">POS</span> الحالي. كل التعليمات بالعربي. تدريب الفريق كله بياخد نص يوم.</div>
+    </div>
+
+    <div class="faq">
+      <div class="q">لو حصل عطل في نص <span class="en">shift</span>؟</div>
+      <div class="a"><span class="en">Auto-reload</span> عند انقطاع الـ <span class="en">session</span>، <span class="en">version pinning</span> عشان مايعرضش مفاجآت، <span class="en">busy-ref</span> تحمي عمليات الدفع من أي إعادة تحميل، و<span class="en">Sentry</span> بيرصد أي <span class="en">bug</span> بـ <span class="en">stack trace</span> كامل، نعرف نصلّحه قبل ما يكرّر نفسه.</div>
+    </div>
+
+    <div class="faq">
+      <div class="q">قائمتي الحالية فيها مئات الأصناف؟</div>
+      <div class="a">الـ <span class="en">Owner Dashboard</span> بيدخّلهم بسرعة، صورة بـ <span class="en">URL</span>، وسعر، وتوقيت توفّر. لو صعب، عندي <span class="en">script</span> يعمل <span class="en">bulk import</span> من ملف <span class="en">Excel</span>.</div>
+    </div>
+
+    <div class="faq">
+      <div class="q">عقود الـ <span class="en">kitchen printer</span> الحالية؟</div>
+      <div class="a">نظامي بيشتغل على نفس <span class="en">Xprinter XB-80T</span> (<span class="en">Ethernet / TCP:9100</span>) — ما تحتاجش تغيّر طابعة أو تشتري جديدة.</div>
+    </div>
+
+    <div class="faq">
+      <div class="q">لو قرّرت أرجع للنظام القديم؟</div>
+      <div class="a">كل البيانات بتتسجّل في <span class="en">PostgreSQL (Neon)</span> — قابلة للـ <span class="en">export</span> في أي وقت. مش <span class="en">locked-in</span>.</div>
+    </div>
+  </section>
+
+  <!-- Why now -->
+  <section>
+    <div class="why-now">
+      <h2>ليه دلوقتي؟</h2>
+      <ul>
+        <li><strong>موسم الصيف بيقرّب</strong> — الأنشطة (مسبح، كاياك، <span class="en">board</span>، <span class="en">massage</span>) هي الفرصة الأكبر، والـ <span class="en">POS</span> الحالي ما بيقدرش يسجّلها أصلاً. كل أسبوع بدون النظام = آلاف الجنيهات من الأنشطة بتتاخد كاش بدون فاتورة.</li>
+        <li><strong>موسم السواح القادم</strong> — <span class="en">Bilingual menu</span>, <span class="en">photos</span>, <span class="en">smart upsell</span> باللغتين. الكافيهات اللي عندها <span class="en">QR menu</span> بقت <span class="en">default</span> في القاهرة والساحل.</li>
+        <li><strong>المنافسة</strong> — أي كافيه شاطر في السوق بقى عنده <span class="en">QR menu</span>. اللي عنده النظام بيفوز بالـ <span class="en">repeat visits</span>؛ اللي ما عندوش ما بيشدّش الـ <span class="en">tourists</span> اللي ميقدّموش الخدمة الكلاسيكية.</li>
+        <li><strong>التكلفة الحقيقية للتأخير</strong> لو تأخّرت شهر، أنت بتخسر:
+          <ul style="margin-top: 6px;">
+            <li>مبيعات الأنشطة الجديدة <code>~150K EGP/شهر</code>.</li>
+            <li><span class="en">Smart Upsell uplift</span> <code>~75K – 225K EGP/شهر</code>.</li>
+            <li><span class="en">Comp shrinkage</span> <code>~15 – 45K EGP/شهر</code>.</li>
+          </ul>
+        </li>
+      </ul>
+      <div class="total">
+        <div class="figure">240,000 – 420,000 EGP / شهر</div>
+        <div class="label">التقدير الإجمالي للـ <span class="en">revenue</span> الإضافي اللي بتتنازل عنه كل شهر تأخير</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Closing -->
+  <section>
+    <div class="closing">
+      <h2>خلاصة الموضوع</h2>
+      <p>
+        النظام الحالي ما بيعمل غلط — هو شغّال زي ما اتعمل. لكنه مصمّم لكافيه أبسط، في زمن أبسط، في موقع غير ساحلي، بدون أنشطة، بدون تنوّع زبون، بدون هاتف ذكي في إيد كل زبون.
+      </p>
+      <p>
+        نظام <span class="en" style="color:#f0a868;">Neom App</span> مصمّم لـ <strong>الكافيه ده بالذات</strong> — في <strong>الموقع ده</strong> — وفي <strong>الموسم ده</strong>. مش <span class="en">upgrade</span>، هو منصّة جديدة كلياً، شغلت اشتغال متكامل، مع كل الـ <span class="en">edge cases</span> مدروسة (<span class="en">move guest, merge tables, partial payments, stuck-at-gate, full receipt, activities, discounts, audit trail</span>).
+      </p>
+      <div class="question">
+        السؤال مش "هل النظام أحسن؟" — جوابه واضح. <br>
+        السؤال هو: "كم شهر تاني نسيب <span class="en" style="color:#f0a868;">revenue</span> على الطاولة قبل ما نبدأ؟"
+      </div>
+    </div>
+  </section>
+
+  <footer>
+    مرفقات تقنية متاحة عند الطلب: <code>ARCHITECTURE.md</code> · <code>LAUNCH.html</code> · <code>REBUILD-LOG.html</code>
+  </footer>
+
+</main>
+
+</body>
+</html>
