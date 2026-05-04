@@ -52,15 +52,18 @@ export class CashierUseCases {
   }
 
   async sumCashSince(restaurantId: string, since: Date): Promise<number> {
-    // Expected cash = order totals + tips that were collected in cash,
-    // minus any cashier-applied discounts on those orders. The tip
-    // column is per-order and gets stamped at confirmPayRound; for a
-    // CASH-paid order the cashier physically takes home (total + tip −
-    // discount), so the drawer must expect that net. Without the tip
-    // term every cash-tipped shift came out positive-variance, and
-    // without the discount term every discounted shift came out
-    // negative-variance — both made theft vs. gratuity vs. discount
-    // indistinguishable.
+    // Expected cash = total + tip + serviceCharge − discount, summed
+    // over CASH-paid orders. Each term is a separate column on Order:
+    //   total          — gross subtotal (what the items cost)
+    //   tip            — optional gratuity (WAITER mode)
+    //   serviceCharge  — mandatory % (RUNNER mode); pooled, distributed
+    //                    by management policy. The cashier still
+    //                    physically holds it at end of shift.
+    //   discount       — cashier-applied EGP off
+    // Without each term the drawer would show phantom variance:
+    // tip-night was positive, discount-night negative, service-charge-
+    // night positive. Each one folded in keeps reconciliation honest
+    // regardless of which mode the restaurant runs in.
     const agg = await db.order.aggregate({
       where: {
         restaurantId,
@@ -68,12 +71,13 @@ export class CashierUseCases {
         paidAt: { gte: since },
         status: { not: "CANCELLED" },
       },
-      _sum: { total: true, tip: true, discount: true },
+      _sum: { total: true, tip: true, discount: true, serviceCharge: true },
     });
     const total = agg._sum.total == null ? 0 : Number(agg._sum.total);
     const tip = agg._sum.tip == null ? 0 : Number(agg._sum.tip);
     const discount = agg._sum.discount == null ? 0 : Number(agg._sum.discount);
-    return total + tip - discount;
+    const sc = agg._sum.serviceCharge == null ? 0 : Number(agg._sum.serviceCharge);
+    return total + tip + sc - discount;
   }
 
   async createOpenDrawer(input: { restaurantId: string; cashierId: string; openingFloat: number }) {

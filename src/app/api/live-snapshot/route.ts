@@ -7,6 +7,7 @@ import { computeSessionRounds } from "@/lib/session-rounds";
 import { nowInRestaurantTz } from "@/lib/restaurant-config";
 import { toNum } from "@/lib/money";
 import { db } from "@/lib/db";
+import { readServiceModel } from "@/application/session/SessionUseCases";
 
 // ═══════════════════════════════════════════════════════
 // LIVE SNAPSHOT — combined endpoint
@@ -81,6 +82,14 @@ const REBALANCE_TOLERANCE = 1;
 // fires from the sweep, so a rebalance move is invisible to the
 // customer (only future routing changes).
 async function reassignSweep(realId: string, currentShift: number) {
+  // RUNNER mode has no concept of waiter-to-table assignment, so the
+  // sweep is a no-op. Saves the throttled DB roundtrip every poll.
+  // Toggling back to WAITER mode: the very next poll reactivates the
+  // sweep and any orphan sessions (existing or freshly opened) get
+  // adopted by the next eligible waiter.
+  const cfg = await readServiceModel(realId);
+  if (cfg.serviceModel === "RUNNER") return;
+
   const last = lastReassignAt.get(realId) || 0;
   if (Date.now() - last < REASSIGN_THROTTLE_MS) return;
 
@@ -238,18 +247,18 @@ async function loadSessions(realId: string) {
       closedAt: s.closedAt?.toISOString() || null,
       status: s.status,
       orderCount: s.orders.filter((o) => o.status !== "CANCELLED").length,
-      // Net of cashier-applied discounts so the floor view's revenue
-      // numbers match the actual amount collected (matches the same
-      // computation in /api/sessions/all).
+      // Net of cashier-applied discounts + service charge so the
+      // floor view's revenue numbers match the actual amount
+      // collected (matches the computation in /api/sessions/all).
       orderTotal: s.orders
         .filter((o) => o.status !== "CANCELLED")
-        .reduce((sum, o) => sum + toNum(o.total) - toNum(o.discount ?? 0), 0),
+        .reduce((sum, o) => sum + toNum(o.total) - toNum(o.discount ?? 0) + toNum(o.serviceCharge ?? 0), 0),
       unpaidTotal: s.orders
         .filter((o) => o.status !== "CANCELLED" && o.paidAt == null)
         .reduce((sum, o) => sum + toNum(o.total), 0),
       cashTotal: s.orders
         .filter((o) => o.paymentMethod === "CASH" && o.status !== "CANCELLED" && o.paidAt != null)
-        .reduce((sum, o) => sum + toNum(o.total) - toNum(o.discount ?? 0), 0),
+        .reduce((sum, o) => sum + toNum(o.total) - toNum(o.discount ?? 0) + toNum(o.serviceCharge ?? 0), 0),
       paymentReceived:
         s.orders.length > 0 &&
         s.orders.every((o) => o.status === "CANCELLED" || o.paidAt != null),

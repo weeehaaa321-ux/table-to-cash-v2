@@ -117,13 +117,14 @@ export async function GET(request: NextRequest) {
         }
 
         const isCash = order.paymentMethod === "CASH";
-        // Cashier-applied discount comes off the collected amount —
-        // the waiter's cash drawer holds (total - discount), not gross
-        // total. Without this, post-discount nights show a phantom
-        // negative variance.
+        // What the cashier actually holds: total − discount + service
+        // charge. Tip is tracked separately because it's accounted on
+        // its own row in the cashout breakdown.
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const oDiscount = toNum((order as any).discount ?? 0);
-        const amount = toNum(order.total) - oDiscount;
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const oServiceCharge = toNum((order as any).serviceCharge ?? 0);
+        const amount = toNum(order.total) - oDiscount + oServiceCharge;
         const orderTip = toNum(order.tip ?? 0);
 
         waiterEntry.totalRevenue += amount;

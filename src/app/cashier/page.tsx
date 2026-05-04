@@ -138,6 +138,9 @@ type InvoiceRound = {
   // Per-round discount in EGP. 0 when none was applied. Receipt prints
   // it as a separate "Discount −X EGP" line above the collected total.
   discount?: number;
+  // Per-round mandatory service charge (RUNNER mode). 0 in WAITER
+  // mode. Renders as a separate "+ Service charge" line.
+  serviceCharge?: number;
   guestNumber?: number | null;
   guestName?: string | null;
 };
@@ -158,6 +161,9 @@ type InvoiceData = {
   // by the full-receipt print so a session with multiple discounted
   // rounds shows one summed line.
   discount?: number;
+  // Lifetime service charge across all rounds. Used by the full
+  // receipt; per-round service charge lives on InvoiceRound.
+  serviceCharge?: number;
   total: number;
   orderCount: number;
   sessionId: string;
@@ -302,7 +308,8 @@ function printInvoice(inv: InvoiceData, mode: "round" | "full" = "round"): boole
   const currentItems = current?.items ?? inv.items;
   const currentSubtotal = current?.subtotal ?? inv.total;
   const currentDiscount = (current?.discount ?? 0) > 0 ? (current!.discount as number) : 0;
-  const currentCollected = Math.max(0, currentSubtotal - currentDiscount);
+  const currentServiceCharge = (current?.serviceCharge ?? 0) > 0 ? (current!.serviceCharge as number) : 0;
+  const currentCollected = Math.max(0, currentSubtotal - currentDiscount + currentServiceCharge);
   const currentMethod = current?.paymentMethod ?? inv.paymentMethod;
   // Per-round guest label — name when the guest entered one at scan
   // time, fall back to "Guest N", or empty when neither is known
@@ -428,24 +435,32 @@ function printInvoice(inv: InvoiceData, mode: "round" | "full" = "round"): boole
   <div class="divider"></div>
 
   <table>
-    ${(!isFullMode && currentDiscount > 0) ? `
+    ${(!isFullMode && (currentDiscount > 0 || currentServiceCharge > 0)) ? `
     <tr>
       <td style="font-size:11px;text-align:left;">Subtotal</td>
       <td style="font-size:11px;text-align:right;">${currentSubtotal} ${inv.currency}</td>
     </tr>
-    <tr>
+    ${currentDiscount > 0 ? `<tr>
       <td style="font-size:11px;text-align:left;">Discount</td>
       <td style="font-size:11px;text-align:right;">−${currentDiscount} ${inv.currency}</td>
     </tr>` : ""}
-    ${(isFullMode && (inv.discount ?? 0) > 0) ? `
+    ${currentServiceCharge > 0 ? `<tr>
+      <td style="font-size:11px;text-align:left;">Service charge</td>
+      <td style="font-size:11px;text-align:right;">+${currentServiceCharge} ${inv.currency}</td>
+    </tr>` : ""}` : ""}
+    ${(isFullMode && ((inv.discount ?? 0) > 0 || (inv.serviceCharge ?? 0) > 0)) ? `
     <tr>
       <td style="font-size:11px;text-align:left;">Items subtotal</td>
-      <td style="font-size:11px;text-align:right;">${(inv.subtotal ?? inv.total + (inv.discount || 0))} ${inv.currency}</td>
+      <td style="font-size:11px;text-align:right;">${(inv.subtotal ?? inv.total + (inv.discount || 0) - (inv.serviceCharge || 0))} ${inv.currency}</td>
     </tr>
-    <tr>
+    ${(inv.discount ?? 0) > 0 ? `<tr>
       <td style="font-size:11px;text-align:left;">Total discounts</td>
       <td style="font-size:11px;text-align:right;">−${inv.discount} ${inv.currency}</td>
     </tr>` : ""}
+    ${(inv.serviceCharge ?? 0) > 0 ? `<tr>
+      <td style="font-size:11px;text-align:left;">Service charge</td>
+      <td style="font-size:11px;text-align:right;">+${inv.serviceCharge} ${inv.currency}</td>
+    </tr>` : ""}` : ""}
     <tr class="total-row">
       <td style="text-align:left;">${isFullMode ? "LIFETIME TOTAL" : isMultiRound ? "THIS ROUND" : "TOTAL"}</td>
       <td style="text-align:right;">${isFullMode ? inv.total : currentCollected} ${inv.currency}</td>

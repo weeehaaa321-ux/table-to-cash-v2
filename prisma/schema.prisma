@@ -31,7 +31,25 @@ model Restaurant {
   waiterCapacity   Int      @default(15)
   instapayHandle   String?
   instapayPhone    String?
+  // Service model toggle. WAITER (default) preserves the current
+  // behavior — sessions auto-assign a waiter, the waiter app routes
+  // ready dishes to a specific person, tips credit per-waiter.
+  // RUNNER swaps to a pickup-queue model: nobody is assigned to a
+  // table; ready dishes light up the shared /runner queue; any free
+  // runner takes the next one. Service charge replaces tipping.
+  // Switching either direction is a single column update — no code
+  // path is destroyed, just gated.
+  serviceModel     ServiceModel @default(WAITER)
+  // Auto-applied at confirmPayRound when serviceModel = RUNNER.
+  // 0 = no service charge. Stored as a percentage (0..100), resolved
+  // to absolute EGP at settle time and stamped on Order.serviceCharge.
+  serviceChargePercent Decimal @default(0) @db.Decimal(5, 2)
   createdAt        DateTime @default(now())
+}
+
+enum ServiceModel {
+  WAITER
+  RUNNER
 }
 
 model Table {
@@ -134,6 +152,12 @@ model Order {
   tax          Decimal     @default(0) @db.Decimal(10, 2)
   total        Decimal     @db.Decimal(10, 2)
   tip          Decimal     @default(0) @db.Decimal(10, 2)
+  // Mandatory service charge auto-added at confirmPayRound when the
+  // restaurant runs in RUNNER mode. Distinct from `tip` (which is
+  // optional and credits a specific waiter) — service charge is
+  // pooled and distributed by management policy. 0 by default; set
+  // on the round head's order at settle time.
+  serviceCharge Decimal    @default(0) @db.Decimal(10, 2)
   // Cashier-applied discount on this order, in EGP. Stored as the
   // resolved EGP amount (not %), so revenue rollups can subtract it
   // without having to re-evaluate "was this 10% of what?". Settles
@@ -250,6 +274,12 @@ model Staff {
   role            StaffRole  @default(WAITER)
   active          Boolean    @default(true)
   shift           Int        @default(0) // 0=unassigned, 1=00:00-08:00, 2=08:00-16:00, 3=16:00-00:00 Cairo time
+  // In hybrid service mode (RUNNER + a few captains), captains keep
+  // table-side ownership for VIP / anniversary / large-party tables
+  // while the rest of the floor runs on the runner queue. False by
+  // default — flips on per-staff via the dashboard. Dormant in pure
+  // WAITER mode and pure RUNNER mode.
+  isCaptain       Boolean    @default(false)
   deliveryOnline  Boolean    @default(false) // Delivery drivers: true = accepting orders
   restaurant      Restaurant @relation(fields: [restaurantId], references: [id])
   restaurantId    String

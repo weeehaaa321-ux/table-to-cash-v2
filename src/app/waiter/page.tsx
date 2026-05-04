@@ -2102,6 +2102,14 @@ function StaffLoginScreen({ onLogin }: { onLogin: (staff: LoggedInStaff) => void
         return;
       }
       const staff = await res.json();
+      // RUNNER mode: WAITER staff jump to the runner queue instead.
+      // The waiter app stays mounted at /waiter for instant rollback;
+      // the only thing changing is which screen this login lands on.
+      // Captains stay on /waiter even in RUNNER mode (hybrid case).
+      if (staff.serviceModel === "RUNNER" && staff.role === "WAITER" && !staff.isCaptain) {
+        window.location.href = "/runner";
+        return;
+      }
       onLogin(staff);
     } catch {
       setError(t("login.networkError"));

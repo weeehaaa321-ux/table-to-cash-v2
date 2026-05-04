@@ -1694,6 +1694,13 @@ function StaffPanel({ staff, onRefresh, restaurantId, restaurantSlug, ownerId }:
   const [instapayHandle, setInstapayHandle] = useState("");
   const [instapayPhone, setInstapayPhone] = useState("");
   const [instapaySaveState, setInstapaySaveState] = useState<"idle" | "saving" | "saved" | "error">("idle");
+  // Service-model toggle (WAITER ↔ RUNNER) + the auto-applied service
+  // charge percent. Switching is instant: server cache invalidates,
+  // login routes pick up the new value, all gating flips. Reverse is
+  // identical — owner taps WAITER again and the legacy flow resumes.
+  const [serviceModel, setServiceModel] = useState<"WAITER" | "RUNNER">("WAITER");
+  const [serviceChargePct, setServiceChargePct] = useState<string>("");
+  const [serviceModelSaveState, setServiceModelSaveState] = useState<"idle" | "saving" | "saved" | "error">("idle");
 
   useEffect(() => {
     fetch(`/api/restaurant?slug=${restaurantSlug}`)
@@ -1702,9 +1709,35 @@ function StaffPanel({ staff, onRefresh, restaurantId, restaurantSlug, ownerId }:
         if (d.waiterCapacity) setWaiterCapacity(d.waiterCapacity);
         if (typeof d.instapayHandle === "string") setInstapayHandle(d.instapayHandle);
         if (typeof d.instapayPhone === "string") setInstapayPhone(d.instapayPhone);
+        if (d.serviceModel === "WAITER" || d.serviceModel === "RUNNER") setServiceModel(d.serviceModel);
+        if (typeof d.serviceChargePercent === "number") setServiceChargePct(String(d.serviceChargePercent));
       })
       .catch(() => {});
   }, [restaurantSlug]);
+
+  const saveServiceModel = async (nextModel: "WAITER" | "RUNNER", nextPct: string) => {
+    setServiceModelSaveState("saving");
+    try {
+      const pct = parseFloat(nextPct);
+      const res = await ownerFetch(ownerId, "/api/restaurant", {
+        method: "PATCH",
+        body: JSON.stringify({
+          slug: restaurantSlug,
+          serviceModel: nextModel,
+          // Only send pct if it parses to a sane value, otherwise
+          // leave the column unchanged.
+          ...(isFinite(pct) && pct >= 0 && pct <= 100 ? { serviceChargePercent: pct } : {}),
+        }),
+      });
+      if (!res.ok) throw new Error("save failed");
+      setServiceModel(nextModel);
+      setServiceModelSaveState("saved");
+      setTimeout(() => setServiceModelSaveState("idle"), 2000);
+    } catch {
+      setServiceModelSaveState("error");
+      setTimeout(() => setServiceModelSaveState("idle"), 3000);
+    }
+  };
 
   const updateWaiterCapacity = (next: number) => {
     const clamped = Math.max(1, Math.min(99, next));
@@ -1893,6 +1926,84 @@ function StaffPanel({ staff, onRefresh, restaurantId, restaurantSlug, ownerId }:
           className="p-3 rounded-xl bg-status-bad-50 border border-status-bad-200 text-status-bad-700 text-sm font-medium"
         >{deleteError}</motion.div>
       )}
+
+      {/* Service model toggle — flips the whole restaurant between
+          the legacy waiter flow and the runner-queue flow without a
+          redeploy. Switching back is identical: just tap WAITER again.
+          The cached cfg invalidates immediately so the next /api/sessions
+          request picks up the new value. */}
+      <div className="card-luxury p-4 space-y-3">
+        <div className="flex items-center justify-between flex-wrap gap-2">
+          <h4 className="text-[11px] font-extrabold uppercase tracking-[0.2em] text-text-secondary">
+            Service Model
+          </h4>
+          <span className="text-[10px] text-text-muted font-extrabold uppercase tracking-wider">
+            How the floor runs
+          </span>
+        </div>
+        <div className="grid grid-cols-2 gap-3">
+          <button
+            onClick={() => saveServiceModel("WAITER", serviceChargePct)}
+            disabled={serviceModelSaveState === "saving"}
+            className={`p-4 rounded-xl border-2 text-left transition active:scale-95 disabled:opacity-60 ${
+              serviceModel === "WAITER"
+                ? "bg-ocean-50 border-ocean-500 text-ocean-900"
+                : "bg-white border-sand-200 text-text-secondary hover:border-sand-400"
+            }`}
+          >
+            <div className="text-sm font-extrabold mb-1">WAITER</div>
+            <div className="text-[11px] font-semibold opacity-80 leading-snug">
+              Tables auto-assign to a specific waiter. Tips credit per-waiter. Default for table-service cafés.
+            </div>
+          </button>
+          <button
+            onClick={() => saveServiceModel("RUNNER", serviceChargePct)}
+            disabled={serviceModelSaveState === "saving"}
+            className={`p-4 rounded-xl border-2 text-left transition active:scale-95 disabled:opacity-60 ${
+              serviceModel === "RUNNER"
+                ? "bg-status-good-50 border-status-good-500 text-status-good-900"
+                : "bg-white border-sand-200 text-text-secondary hover:border-sand-400"
+            }`}
+          >
+            <div className="text-sm font-extrabold mb-1">RUNNER</div>
+            <div className="text-[11px] font-semibold opacity-80 leading-snug">
+              Shared READY queue at /runner. Anyone free takes the next dish. Service charge replaces tips.
+            </div>
+          </button>
+        </div>
+        {serviceModel === "RUNNER" && (
+          <div className="flex items-center gap-3 pt-1">
+            <label className="text-[10px] text-text-muted font-semibold uppercase tracking-wider whitespace-nowrap">
+              Service charge %
+            </label>
+            <input
+              type="number"
+              min={0}
+              max={100}
+              step="0.5"
+              value={serviceChargePct}
+              onChange={(e) => setServiceChargePct(e.target.value)}
+              onBlur={() => saveServiceModel(serviceModel, serviceChargePct)}
+              placeholder="0"
+              className="w-24 px-3 py-2 rounded-xl bg-sand-50 border border-sand-200 text-text-primary text-sm focus:outline-none focus:border-ocean-400 transition tabular-nums"
+            />
+            <span className="text-[11px] text-text-muted font-semibold">
+              auto-added at settle, included in printed receipt
+            </span>
+          </div>
+        )}
+        {serviceModelSaveState !== "idle" && (
+          <p className={`text-[11px] font-bold ${
+            serviceModelSaveState === "saved" ? "text-status-good-600" :
+            serviceModelSaveState === "error" ? "text-status-bad-600" :
+            "text-text-muted"
+          }`}>
+            {serviceModelSaveState === "saving" ? "Saving…" :
+             serviceModelSaveState === "saved" ? "Saved · effective immediately" :
+             "Save failed — try again"}
+          </p>
+        )}
+      </div>
 
       {/* InstaPay settings — owner pastes the cafe's alias and phone here.
           Both surface to the guest on /track when they pick INSTAPAY,

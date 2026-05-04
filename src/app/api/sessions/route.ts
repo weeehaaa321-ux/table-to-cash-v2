@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { useCases } from "@/infrastructure/composition";
 import { db } from "@/lib/db";
+import { readServiceModel } from "@/application/session/SessionUseCases";
 
 // Resolve the caller's role for the PATCH actions that need it. Returns
 // either a role string (when a staff member is signed in via x-staff-id)
@@ -31,6 +32,13 @@ async function resolveCallerRole(
 async function autoAssignWaiter(restaurantId: string): Promise<string | null> {
   const realId = await useCases.sessions.resolveRestaurantId(restaurantId);
   if (!realId) return null;
+
+  // RUNNER mode: nobody owns the table. Sessions open with waiterId
+  // = null and the floor runs off the shared READY queue at /runner.
+  // Switching back to WAITER mode is a single column update — this
+  // gate flips automatically.
+  const cfg = await readServiceModel(realId);
+  if (cfg.serviceModel === "RUNNER") return null;
 
   const currentShift = useCases.sessions.currentShift();
 
@@ -218,6 +226,20 @@ export async function PATCH(request: NextRequest) {
     }
 
     if (action === "assign_waiter" && body.waiterId) {
+      // Block manual assignment in RUNNER mode — there's no concept
+      // of "this table belongs to that waiter." Floor manager's UI
+      // hides the button when the flag is RUNNER, so this is the
+      // belt-and-braces server check.
+      const meta = await useCases.sessions.getMeta(sessionId);
+      if (meta) {
+        const cfg = await readServiceModel(meta.restaurantId);
+        if (cfg.serviceModel === "RUNNER") {
+          return NextResponse.json(
+            { error: "ASSIGN_DISABLED", message: "This restaurant runs in runner mode — tables are not assigned to specific staff." },
+            { status: 409 },
+          );
+        }
+      }
       // Manual assignment must match the same eligibility rules as
       // auto-assign: target must be clocked in AND scheduled for the
       // current shift (or shift=0). Otherwise the next reassign sweep

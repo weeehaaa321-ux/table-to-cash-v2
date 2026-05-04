@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { useCases } from "@/infrastructure/composition";
 import { closeSessionForOrder, StaleStatusTransitionError } from "@/lib/queries";
 import { sendPushToStaff, sendPushToRole } from "@/lib/web-push";
+import { readServiceModel } from "@/application/session/SessionUseCases";
 import { getShiftTimer } from "@/lib/shifts";
 import { requireStaffAuth } from "@/lib/api-auth";
 
@@ -90,16 +91,35 @@ export async function PATCH(
         // sends get dropped or stalled. Capped at 3s so a
         // weird endpoint can't stall the route response.
         const orderPushes: Promise<unknown>[] = [];
-        if (status === "READY" && fullOrder.session?.waiterId && !isDelivery) {
-          orderPushes.push(sendPushToStaff(fullOrder.session.waiterId, {
-            title: { en: "Order Ready", ar: "الطلب جاهز" },
-            body: {
-              en: `Order #${fullOrder.orderNumber} is ready — ${tableEn}`,
-              ar: `الطلب رقم ${fullOrder.orderNumber} جاهز — ${tableAr}`,
-            },
-            tag: `order-ready-${orderId}`,
-            url: "/waiter",
-          }).catch(() => {}));
+        if (status === "READY" && !isDelivery && restaurantId) {
+          // Routing depends on the restaurant's service model.
+          // WAITER mode: ping the assigned waiter on /waiter (the
+          // legacy 1:1 route).
+          // RUNNER mode: ping every WAITER-role staff (they're all
+          // runners now) so anyone free grabs it; their app
+          // (/runner) shows the shared queue.
+          const cfg = await readServiceModel(restaurantId).catch(() => null);
+          if (cfg?.serviceModel === "RUNNER") {
+            orderPushes.push(sendPushToRole("WAITER", restaurantId, {
+              title: { en: "Pickup ready", ar: "طبق جاهز للتقديم" },
+              body: {
+                en: `${tableEn} — order #${fullOrder.orderNumber}`,
+                ar: `${tableAr} — طلب رقم ${fullOrder.orderNumber}`,
+              },
+              tag: `order-ready-${orderId}`,
+              url: "/runner",
+            }).catch(() => {}));
+          } else if (fullOrder.session?.waiterId) {
+            orderPushes.push(sendPushToStaff(fullOrder.session.waiterId, {
+              title: { en: "Order Ready", ar: "الطلب جاهز" },
+              body: {
+                en: `Order #${fullOrder.orderNumber} is ready — ${tableEn}`,
+                ar: `الطلب رقم ${fullOrder.orderNumber} جاهز — ${tableAr}`,
+              },
+              tag: `order-ready-${orderId}`,
+              url: "/waiter",
+            }).catch(() => {}));
+          }
         }
         if (status === "CONFIRMED" && restaurantId) {
           const targetRole = fullOrder.station === "BAR" ? "BAR" : "KITCHEN";

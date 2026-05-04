@@ -100,12 +100,14 @@ export async function GET(request: NextRequest) {
           closedAt: s.closedAt?.toISOString() || null,
           status: s.status,
           orderCount: s.orders.filter((o) => o.status !== "CANCELLED").length,
-          // Net of cashier-applied discounts. The "Recently paid" total
-          // and the dashboard summaries should match the actual amount
-          // collected, not the gross before-discount figure.
+          // Net of cashier-applied discounts + service charge. The
+          // "Recently paid" total and dashboard summaries should match
+          // the actual amount collected: gross − discount + service
+          // charge. (Tip is collected too but accounted separately
+          // for accounting clarity.)
           orderTotal: s.orders
             .filter((o) => o.status !== "CANCELLED")
-            .reduce((sum, o) => sum + toNum(o.total) - toNum(o.discount ?? 0), 0),
+            .reduce((sum, o) => sum + toNum(o.total) - toNum(o.discount ?? 0) + toNum(o.serviceCharge ?? 0), 0),
           unpaidTotal: s.orders
             .filter((o) => o.status !== "CANCELLED" && o.paidAt == null)
             .reduce((sum, o) => sum + toNum(o.total), 0),
@@ -115,11 +117,12 @@ export async function GET(request: NextRequest) {
           // paymentMethod stamp, AND pending pay-requests where the
           // guest had selected "CASH" but the cashier hadn't yet
           // confirmed — both inflated the cashier's collected total.
-          // Discount also subtracted so cash drawer reconciliation
-          // matches what was physically taken.
+          // Discount subtracted, service charge added — matches the
+          // physical cash the cashier holds (sumCashSince uses the
+          // same math).
           cashTotal: s.orders
             .filter((o) => o.paymentMethod === "CASH" && o.status !== "CANCELLED" && o.paidAt != null)
-            .reduce((sum, o) => sum + toNum(o.total) - toNum(o.discount ?? 0), 0),
+            .reduce((sum, o) => sum + toNum(o.total) - toNum(o.discount ?? 0) + toNum(o.serviceCharge ?? 0), 0),
           paymentReceived:
             s.orders.length > 0 &&
             s.orders.every((o) => o.status === "CANCELLED" || o.paidAt != null),
