@@ -1,0 +1,954 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Neom Resort Platform — Expansion Plan</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #f7f5f1;
+    --bg-soft: #fbfaf6;
+    --card: #ffffff;
+    --ink: #1a1f2c;
+    --ink-soft: #4a5160;
+    --ink-mute: #8a91a0;
+    --line: #e8e3d9;
+    --line-strong: #d6cfbf;
+    --ocean: #2a6f97;
+    --ocean-soft: #e6f0f7;
+    --sand: #c5a572;
+    --sand-soft: #f5e6c8;
+    --good: #2f855a;
+    --good-soft: #e7f5ee;
+    --warn: #b45309;
+    --warn-soft: #fdf2dc;
+    --bad: #c1432d;
+    --bad-soft: #fce8e3;
+    --premium: #8b5cf6;
+    --premium-soft: #f3edff;
+    --shadow: 0 1px 2px rgba(20,30,55,.04), 0 8px 24px rgba(20,30,55,.05);
+    --shadow-lift: 0 2px 4px rgba(20,30,55,.06), 0 16px 40px rgba(20,30,55,.08);
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    font-family: "Inter", system-ui, -apple-system, "Segoe UI", "Helvetica Neue", sans-serif;
+    font-size: 15.5px;
+    line-height: 1.65;
+    color: var(--ink);
+    background: var(--bg);
+    padding: 0 0 120px;
+  }
+  .wrap { max-width: 880px; margin: 0 auto; padding: 0 24px; }
+  code, .mono { font-family: "JetBrains Mono", ui-monospace, monospace; font-size: 0.9em; }
+  code { background: var(--ocean-soft); color: var(--ocean); padding: 1px 6px; border-radius: 4px; font-weight: 500; }
+
+  /* Hero */
+  header.hero {
+    padding: 80px 24px 48px;
+    background: linear-gradient(180deg, #1a1f2c 0%, #2a3548 100%);
+    color: #f0e9d9;
+    margin-bottom: 48px;
+  }
+  header.hero .wrap { padding: 0; }
+  header.hero .badge {
+    display: inline-block;
+    padding: 6px 14px;
+    background: rgba(240, 168, 104, 0.18);
+    color: #f0a868;
+    border-radius: 6px;
+    font-size: 11px; font-weight: 800;
+    text-transform: uppercase; letter-spacing: 0.12em;
+    margin-bottom: 18px;
+  }
+  header.hero h1 {
+    font-size: 44px; font-weight: 900; letter-spacing: -0.02em;
+    margin: 0 0 16px;
+    line-height: 1.1;
+    color: white;
+  }
+  header.hero p.thesis {
+    color: #d8d2c2;
+    font-size: 18px;
+    line-height: 1.55;
+    max-width: 700px;
+    margin: 0;
+  }
+
+  /* Section */
+  section { margin-bottom: 56px; }
+  section.intro { margin-bottom: 40px; }
+  h2 {
+    font-size: 28px; font-weight: 800; letter-spacing: -0.01em;
+    margin: 0 0 8px;
+    line-height: 1.25;
+  }
+  h2 .num {
+    display: inline-block;
+    color: var(--ocean);
+    font-weight: 700;
+    margin-right: 12px;
+    font-variant-numeric: tabular-nums;
+  }
+  h2 + p.section-lead {
+    color: var(--ink-soft);
+    margin: 0 0 24px;
+    font-size: 16px;
+    line-height: 1.55;
+  }
+  h3 {
+    font-size: 17px; font-weight: 700;
+    margin: 22px 0 8px;
+    color: var(--ink);
+  }
+
+  /* Reusable cards */
+  .card {
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    padding: 22px 26px;
+    box-shadow: var(--shadow);
+    margin-bottom: 14px;
+  }
+  .card.premium { background: var(--premium-soft); border-color: #d4c4f5; }
+
+  /* Why-this-works pillars */
+  .pillars {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 14px;
+  }
+  @media (max-width: 720px) {
+    .pillars { grid-template-columns: 1fr; }
+  }
+  .pillar-card {
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    padding: 20px;
+    box-shadow: var(--shadow);
+  }
+  .pillar-card .pn {
+    display: inline-block;
+    width: 28px; height: 28px;
+    background: var(--ocean); color: white;
+    border-radius: 7px;
+    font-size: 13px; font-weight: 900;
+    text-align: center; line-height: 28px;
+    margin-bottom: 10px;
+  }
+  .pillar-card h4 {
+    font-size: 15px; font-weight: 800;
+    margin: 0 0 6px;
+  }
+  .pillar-card p {
+    margin: 0; color: var(--ink-soft);
+    font-size: 14px; line-height: 1.55;
+  }
+
+  /* Domain model — code block */
+  .domain-block {
+    background: #1a1f2c;
+    color: #d8d2c2;
+    border-radius: 12px;
+    padding: 22px 26px;
+    overflow-x: auto;
+    font-family: "JetBrains Mono", monospace;
+    font-size: 13px;
+    line-height: 1.6;
+    white-space: pre;
+    margin: 16px 0;
+  }
+  .domain-block .ent { color: #f0a868; font-weight: 700; }
+  .domain-block .lk  { color: #5ba3c9; }
+  .domain-block .cmt { color: #6b7280; font-style: italic; }
+
+  /* Mapping table */
+  table.mapping {
+    width: 100%; border-collapse: collapse;
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    overflow: hidden;
+    box-shadow: var(--shadow);
+    font-size: 14px;
+  }
+  table.mapping th, table.mapping td {
+    padding: 12px 16px; text-align: left;
+    border-bottom: 1px solid var(--line);
+    vertical-align: top;
+  }
+  table.mapping thead th {
+    background: var(--bg-soft); font-weight: 800;
+    color: var(--ink); font-size: 12px;
+    text-transform: uppercase; letter-spacing: 0.04em;
+  }
+  table.mapping tr:last-child td { border-bottom: none; }
+  table.mapping td.before { color: var(--ink-soft); font-family: "JetBrains Mono", monospace; font-size: 13px; }
+  table.mapping td.after  { color: var(--good); font-weight: 600; }
+
+  /* 12 surfaces */
+  .surfaces {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 14px;
+  }
+  @media (max-width: 720px) {
+    .surfaces { grid-template-columns: 1fr; }
+  }
+  .surface {
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    padding: 18px 22px;
+    box-shadow: var(--shadow);
+  }
+  .surface .head {
+    display: flex; align-items: baseline; gap: 10px;
+    margin-bottom: 6px;
+  }
+  .surface .pn {
+    font-size: 11px; font-weight: 800; color: var(--ocean);
+    background: var(--ocean-soft);
+    padding: 3px 7px; border-radius: 5px;
+    font-variant-numeric: tabular-nums;
+  }
+  .surface h4 { font-size: 15px; font-weight: 800; margin: 0; }
+  .surface p { margin: 0; color: var(--ink-soft); font-size: 13.5px; line-height: 1.55; }
+
+  /* Revenue levers */
+  .levers {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 14px;
+  }
+  @media (max-width: 720px) {
+    .levers { grid-template-columns: 1fr; }
+  }
+  .lever {
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-left: 4px solid var(--good);
+    border-radius: 12px;
+    padding: 18px 22px;
+    box-shadow: var(--shadow);
+  }
+  .lever .label { font-size: 13px; color: var(--ink-soft); font-weight: 700; margin-bottom: 4px; }
+  .lever h4 { font-size: 15px; font-weight: 800; margin: 0 0 8px; }
+  .lever .figure {
+    font-size: 22px; font-weight: 900; color: var(--good);
+    line-height: 1.1;
+    font-variant-numeric: tabular-nums;
+    margin-bottom: 8px;
+  }
+  .lever .figure .unit { font-size: 13px; color: var(--ink-soft); font-weight: 700; margin-left: 4px; }
+  .lever p { margin: 0; color: var(--ink-soft); font-size: 13.5px; line-height: 1.55; }
+
+  .grand-total {
+    margin-top: 16px;
+    background: linear-gradient(135deg, var(--good) 0%, #1f6447 100%);
+    color: white;
+    border-radius: 14px;
+    padding: 24px 28px;
+    box-shadow: var(--shadow-lift);
+  }
+  .grand-total .label {
+    font-size: 12px; font-weight: 700;
+    text-transform: uppercase; letter-spacing: 0.08em;
+    color: rgba(255,255,255,0.7);
+    margin-bottom: 8px;
+  }
+  .grand-total .figure {
+    font-size: 38px; font-weight: 900;
+    line-height: 1.1;
+    font-variant-numeric: tabular-nums;
+    margin-bottom: 6px;
+  }
+  .grand-total .sub {
+    font-size: 14px; color: rgba(255,255,255,0.85);
+  }
+
+  /* Phases */
+  .phase {
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    padding: 22px 26px;
+    margin-bottom: 12px;
+    box-shadow: var(--shadow);
+    position: relative;
+  }
+  .phase .meta {
+    display: flex; align-items: baseline; justify-content: space-between;
+    gap: 10px; margin-bottom: 12px; flex-wrap: wrap;
+  }
+  .phase .stage {
+    font-size: 11px; font-weight: 800;
+    text-transform: uppercase; letter-spacing: 0.08em;
+    color: var(--ocean);
+    background: var(--ocean-soft);
+    padding: 4px 10px; border-radius: 6px;
+  }
+  .phase h3 { font-size: 19px; font-weight: 800; margin: 0; }
+  .phase .timeline {
+    font-size: 13px; color: var(--ink-mute);
+    font-weight: 600;
+  }
+  .phase ul { margin: 0; padding-left: 22px; color: var(--ink-soft); }
+  .phase li { margin-bottom: 6px; }
+  .phase.shipped { background: var(--good-soft); border-color: #c2e2ce; }
+  .phase.shipped .stage { background: var(--good); color: white; }
+
+  /* Day-in-the-life scenes */
+  .scene {
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-right: 4px solid var(--sand);
+    border-radius: 12px;
+    padding: 18px 24px;
+    margin-bottom: 12px;
+    box-shadow: var(--shadow);
+  }
+  .scene .head {
+    display: flex; align-items: baseline; gap: 12px;
+    margin-bottom: 8px;
+  }
+  .scene .num {
+    font-size: 11px; font-weight: 900;
+    color: var(--sand);
+    text-transform: uppercase; letter-spacing: 0.08em;
+  }
+  .scene h4 { font-size: 16px; font-weight: 800; margin: 0; }
+  .scene .when {
+    font-style: italic; color: var(--ink-mute);
+    font-size: 13px; margin: 0 0 10px;
+  }
+  .scene ul { margin: 0; padding-left: 22px; color: var(--ink-soft); font-size: 14px; }
+  .scene li { margin-bottom: 4px; }
+
+  /* Differentiators table */
+  table.diff {
+    width: 100%; border-collapse: collapse;
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    overflow: hidden;
+    box-shadow: var(--shadow);
+    font-size: 13px;
+  }
+  table.diff th, table.diff td {
+    padding: 12px; text-align: center;
+    border-bottom: 1px solid var(--line);
+    vertical-align: middle;
+  }
+  table.diff th { background: var(--bg-soft); font-weight: 800; font-size: 12px; }
+  table.diff th.us { background: linear-gradient(180deg, var(--ocean) 0%, #1f5170 100%); color: white; }
+  table.diff td:first-child { text-align: left; font-weight: 600; color: var(--ink); }
+  table.diff td.us { background: var(--ocean-soft); color: var(--ocean); font-weight: 800; }
+  table.diff td.yes { color: var(--good); font-weight: 800; }
+  table.diff td.no { color: var(--ink-mute); }
+  table.diff tr:last-child td { border-bottom: none; }
+
+  /* Pricing options */
+  .options {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 14px;
+  }
+  @media (max-width: 720px) {
+    .options { grid-template-columns: 1fr; }
+  }
+  .opt {
+    background: var(--card);
+    border: 2px solid var(--line);
+    border-radius: 14px;
+    padding: 22px 24px;
+    box-shadow: var(--shadow);
+  }
+  .opt.featured {
+    border-color: var(--ocean);
+    background: linear-gradient(180deg, var(--ocean-soft) 0%, white 40%);
+  }
+  .opt h3 { margin: 0 0 6px; font-size: 17px; }
+  .opt .tag {
+    font-size: 11px; color: var(--ocean); font-weight: 800;
+    text-transform: uppercase; letter-spacing: 0.06em;
+    margin-bottom: 10px;
+  }
+  .opt p { margin: 0; color: var(--ink-soft); font-size: 14px; line-height: 1.55; }
+
+  /* Closing */
+  .closing {
+    background: linear-gradient(135deg, #1a1f2c 0%, #2a3548 100%);
+    color: #f0e9d9;
+    border-radius: 18px;
+    padding: 40px 36px;
+    margin-top: 24px;
+    box-shadow: var(--shadow-lift);
+  }
+  .closing h2 { color: white; border: none; margin-top: 0; }
+  .closing h2 .num { color: #f0a868; }
+  .closing p {
+    color: #d8d2c2; font-size: 16px; line-height: 1.75;
+    margin: 0 0 16px;
+  }
+  .closing p:last-child { margin-bottom: 0; }
+  .closing strong { color: white; }
+
+  footer {
+    margin-top: 48px;
+    padding-top: 20px;
+    border-top: 1px solid var(--line);
+    color: var(--ink-mute);
+    font-size: 13px;
+    text-align: center;
+  }
+
+  @media print {
+    body { background: white; padding: 0; font-size: 12px; }
+    header.hero { background: white; color: var(--ink); padding: 24px; }
+    header.hero h1 { color: var(--ink); }
+    header.hero p.thesis { color: var(--ink-soft); }
+    .closing { background: white; color: var(--ink); border: 2px solid var(--ink); }
+    .closing h2 { color: var(--ink); }
+    .closing p { color: var(--ink-soft); }
+    .closing strong { color: var(--ink); }
+    .grand-total { background: white; color: var(--ink); border: 2px solid var(--good); }
+    .grand-total .label, .grand-total .sub { color: var(--ink-soft); }
+    .grand-total .figure { color: var(--good); }
+    section { page-break-inside: avoid; margin-bottom: 24px; }
+    .domain-block { background: white; color: var(--ink); border: 1px solid var(--line); }
+    .domain-block .cmt { color: var(--ink-mute); }
+    .domain-block .ent { color: var(--ocean); }
+  }
+</style>
+</head>
+<body>
+
+<header class="hero">
+  <div class="wrap">
+    <div class="badge">Neom Resort Platform · Expansion Plan</div>
+    <h1>From a single-venue café to a multi-venue resort operating system</h1>
+    <p class="thesis">
+      One connected platform where every staff member, every guest, every venue, every minute lives on the same surface — built specifically for Red Sea resorts, not retrofitted from a generic PMS.
+    </p>
+  </div>
+</header>
+
+<main class="wrap">
+
+<!-- 0. Why this works -->
+<section class="intro">
+  <h2><span class="num">0.</span>Why this expansion makes sense</h2>
+  <p class="section-lead">
+    The café app already proved the pattern. A resort is the same primitives applied at higher resolution — and the hardest 70% of the work is already shipped.
+  </p>
+  <div class="pillars">
+    <div class="pillar-card">
+      <div class="pn">1</div>
+      <h4>The hard part is shipped</h4>
+      <p>Real-time order routing, role-gated screens, push, multi-round payments, smart upsell, audit + reconciliation — running in production. A resort isn't 10× the complexity; it's the same primitives applied to more contexts.</p>
+    </div>
+    <div class="pillar-card">
+      <div class="pn">2</div>
+      <h4>One software, every department</h4>
+      <p>Resorts run a PMS plus 5 disconnected systems for F&amp;B / spa / housekeeping / activities / loyalty. Most operational pain comes from the <em>gaps between</em> them — a guest's allergy entered at check-in invisible to the chef, the spa, the kids club. Unified means it just isn't.</p>
+    </div>
+    <div class="pillar-card">
+      <div class="pn">3</div>
+      <h4>Mobile-first guest model</h4>
+      <p>PMSes treat guest's phone as a stretch goal. Mine treats it as the primary remote. Pre-arrival, in-stay, post-departure — one continuous thread, no app install required, just a QR scan.</p>
+    </div>
+  </div>
+</section>
+
+<!-- 1. Domain model -->
+<section>
+  <h2><span class="num">1.</span>Domain model</h2>
+  <p class="section-lead">Everything below extends the existing café schema; nothing breaks. The current <code>Restaurant</code> becomes a special case of <code>Venue</code> under a single <code>Property</code>.</p>
+
+  <div class="domain-block"><span class="ent">Resort</span>                         <span class="cmt">— multi-property umbrella (chains)</span>
+└── <span class="ent">Property</span>                     <span class="cmt">— the physical hotel</span>
+    │
+    ├── <span class="ent">Room</span>                     <span class="cmt">— the physical guestroom</span>
+    │   ├── RoomType            <span class="cmt">— Standard / Deluxe / Suite / Villa</span>
+    │   ├── HousekeepingStatus  <span class="cmt">— clean / dirty / inspected / OOO / DND</span>
+    │   ├── KeyAssignments      <span class="cmt">— active room keys / BLE tokens</span>
+    │   └── Minibar par/actual
+    │
+    ├── <span class="ent">Venue</span>                    <span class="cmt">— restaurants, bars, pool, spa, gym, etc.</span>
+    │   ├── Tables / Spaces     <span class="cmt">— current "Table" model already supports this</span>
+    │   ├── Menu                <span class="cmt">— per-venue (already supported)</span>
+    │   ├── Hours / Coverage    <span class="cmt">— via Staff.shift</span>
+    │   └── Station rules       <span class="cmt">— KITCHEN / BAR / ACTIVITY / SPA / etc.</span>
+    │
+    └── <span class="ent">Resource</span>                 <span class="cmt">— bookable, capacity-constrained</span>
+        ├── SpaRoom             <span class="cmt">— 1 therapist at a time</span>
+        ├── Cabana              <span class="cmt">— by-the-day rental</span>
+        ├── DiveBoat            <span class="cmt">— fixed slot capacity</span>
+        └── KidsClubSlot        <span class="cmt">— half-day pickups</span>
+
+<span class="ent">Booking</span>                        <span class="cmt">— the reservation, made before arrival</span>
+├── BookingChannel             <span class="cmt">— direct, OTA, agent, group</span>
+├── Plan                       <span class="cmt">— RO / BB / HB / FB / AI</span>
+├── PrimaryGuest + accompanying
+├── ArrivalDate / Departure / Nights
+└── VipFlags                   <span class="cmt">— repeat, comped, owner, suite-class</span>
+
+<span class="ent">Stay</span>                           <span class="cmt">— in-progress booking, check-in to check-out</span>
+├── <span class="ent">Folio</span>                        <span class="cmt">— the running tab; one per stay</span>
+│   ├── Charge                 <span class="cmt">— food / drink / spa / activity / room / minibar</span>
+│   └── Settlement             <span class="cmt">— at check-out, optionally split</span>
+├── Session                    <span class="cmt">— current cafe Session = "guest at venue now"</span>
+└── ExperienceLog              <span class="cmt">— every touch: arrived / breakfast / spa / dinner</span>
+
+<span class="ent">Guest</span>                          <span class="cmt">— persistent identity across stays</span>
+├── Profile                    <span class="cmt">— preferences, allergies, dietary, language</span>
+├── Anniversary                <span class="cmt">— birthday, anniversary, special dates</span>
+├── LifetimeValue              <span class="cmt">— stays count, revenue, ALOS</span>
+└── VipTier                    <span class="cmt">— Gold / Platinum / Owner-comp / Press</span>
+
+<span class="ent">Appointment</span> · <span class="ent">Request</span> · <span class="ent">Inventory</span>     <span class="cmt">— calendared bookings, concierge inbox, minibar</span></div>
+
+  <h3>What's already in the codebase that scales (no rewrite)</h3>
+  <table class="mapping">
+    <thead>
+      <tr><th>Today (café)</th><th>Tomorrow (resort)</th></tr>
+    </thead>
+    <tbody>
+      <tr><td class="before">Restaurant.id</td><td class="after">→ Venue.id, add Venue.propertyId</td></tr>
+      <tr><td class="before">Table</td><td class="after">unchanged; pool loungers, cabanas modeled as Tables</td></tr>
+      <tr><td class="before">TableSession</td><td class="after">→ Session, optionally tied to a Stay</td></tr>
+      <tr><td class="before">Order.discount + audit</td><td class="after">unchanged — applies across all venues</td></tr>
+      <tr><td class="before">Order.station: KITCHEN/BAR/ACTIVITY</td><td class="after">extends to SPA / DIVE / ROOMSERVICE</td></tr>
+      <tr><td class="before">MenuItem.pricePerHour + hour picker</td><td class="after">already powers spa, dive, cabana</td></tr>
+      <tr><td class="before">JoinRequest (multi-guest)</td><td class="after">template for accompanying guests on a stay</td></tr>
+      <tr><td class="before">Smart upsell engine</td><td class="after">re-applies per venue + cross-venue context</td></tr>
+      <tr><td class="before">Push, role-aware delivery</td><td class="after">unchanged — adds new roles</td></tr>
+      <tr><td class="before">Cash drawer reconciliation</td><td class="after">unchanged — applies across venues</td></tr>
+      <tr><td class="before">VipGuest (existing)</td><td class="after">seed of the full Guest profile</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<!-- 2. The 12 surfaces -->
+<section>
+  <h2><span class="num">2.</span>The 12 role-specific surfaces</h2>
+  <p class="section-lead">Each role gets a screen designed for what they actually do all day. A screen is good when the user can complete their most common task in one tap, the second most common in two.</p>
+  <div class="surfaces">
+
+    <div class="surface">
+      <div class="head"><span class="pn">01</span><h4>Guest phone — universal remote</h4></div>
+      <p>Lands by QR scan or pre-arrival deep link. Stay summary, current bill, room key, resort map, every venue's menu, every resource bookable, concierge chat. 4+ languages.</p>
+    </div>
+
+    <div class="surface">
+      <div class="head"><span class="pn">02</span><h4>Front desk</h4></div>
+      <p>Today's arrivals + departures + in-house. VIP flags, allergies, anniversaries, room ready / not ready. One-tap check-in. Profile in 1 tap — last 5 stays, comp history, preferences.</p>
+    </div>
+
+    <div class="surface">
+      <div class="head"><span class="pn">03</span><h4>Concierge inbox</h4></div>
+      <p>Single feed of every request from every channel (in-app, room phone, walk-up, WhatsApp). Status, assignee, snooze. Auto-routes by type. VIPs jump the queue.</p>
+    </div>
+
+    <div class="surface">
+      <div class="head"><span class="pn">04</span><h4>Housekeeping board</h4></div>
+      <p>Every room as a tile. Color = status. Real-time sync with front desk. DND-too-long alert to GM. Maintenance tickets raised inline.</p>
+    </div>
+
+    <div class="surface">
+      <div class="head"><span class="pn">05</span><h4>Engineering</h4></div>
+      <p>Ticket queue with photo, location, severity, blocked rooms. Closes the loop on housekeeping flags automatically.</p>
+    </div>
+
+    <div class="surface">
+      <div class="head"><span class="pn">06</span><h4>F&amp;B floor (per venue)</h4></div>
+      <p>Already shipped. Now scoped per venue — pool deck has one floor manager, fine dining another, lobby bar a third. Owner sees them aggregated.</p>
+    </div>
+
+    <div class="surface">
+      <div class="head"><span class="pn">07</span><h4>Stations: kitchen / bar / spa / dive</h4></div>
+      <p>Each station's prep/queue board. Already shipped for KITCHEN / BAR; same model extends to SPA (therapist's appointment list), DIVE (today's groups), ACTIVITY hand-back queue.</p>
+    </div>
+
+    <div class="surface">
+      <div class="head"><span class="pn">08</span><h4>Cashier / Folio settlement</h4></div>
+      <p>Walk-in: existing café cashier. In-house: folio view across the stay, allows split (room to corporate card, F&amp;B to personal), receipt per chosen split.</p>
+    </div>
+
+    <div class="surface">
+      <div class="head"><span class="pn">09</span><h4>Manager-on-Duty (MOD)</h4></div>
+      <p>The "everything" view. VIPs in-house. Active alerts. Any guest issue in last 24h. RevPAR vs forecast. Override authority for comps and discounts.</p>
+    </div>
+
+    <div class="surface">
+      <div class="head"><span class="pn">10</span><h4>Owner / GM dashboard</h4></div>
+      <p>Today: occupancy, ADR, RevPAR, F&amp;B PoR, forward bookings, on-shift staff, top-VIP-in-house. Drill-down: any number → its source events. Live anomaly alerts.</p>
+    </div>
+
+    <div class="surface">
+      <div class="head"><span class="pn">11</span><h4>Pre-arrival channel</h4></div>
+      <p>7 days out: WhatsApp / email / SMS in guest's language with personalised offers — room upgrade bid, pre-book activities, anniversary surprise. 24h: digital check-in. Day-of: ETA.</p>
+    </div>
+
+    <div class="surface">
+      <div class="head"><span class="pn">12</span><h4>Group / event manager</h4></div>
+      <p>Block bookings (weddings, conferences, retreats). Shared billing (master account + folio splits). Group schedule. Roomming list import from spreadsheet.</p>
+    </div>
+  </div>
+</section>
+
+<!-- 3. Revenue & cost levers -->
+<section>
+  <h2><span class="num">3.</span>Eight revenue &amp; cost levers</h2>
+  <p class="section-lead">Each is a published industry benchmark for unified operating platforms — applied to a 100-room Red Sea resort doing roughly 50M EGP/year today.</p>
+  <div class="levers">
+
+    <div class="lever">
+      <div class="label">3.1 — Pre-arrival</div>
+      <h4>Room upgrade bidding</h4>
+      <div class="figure">+12M <span class="unit">EGP / yr</span></div>
+      <p>"Bid for an upgrade to a Suite." Industry: 8–12% of bookings. ~75K EGP/night in pure upgrade revenue from rooms otherwise sitting empty.</p>
+    </div>
+
+    <div class="lever">
+      <div class="label">3.2 — In-stay</div>
+      <h4>F&amp;B per occupied room</h4>
+      <div class="figure">+5M <span class="unit">EGP / yr</span></div>
+      <p>Industry baseline 600–900 EGP PoR; best-in-class 1,400+. Lift from in-room dining + cross-venue suggestions + resort-wide loyalty. Realistic +200 EGP × 70 rooms × 30 days.</p>
+    </div>
+
+    <div class="lever">
+      <div class="label">3.3 — Capture</div>
+      <h4>Activities (currently lost cash)</h4>
+      <div class="figure">+3M <span class="unit">EGP / yr</span></div>
+      <p>Resorts lose 30–60% of activity revenue to informal cash. Dive masters, spa walk-ins, kayak rentals on the beach. Captured into folios = real revenue.</p>
+    </div>
+
+    <div class="lever">
+      <div class="label">3.4 — Highest-margin venue</div>
+      <h4>Spa utilization</h4>
+      <div class="figure">+3M <span class="unit">EGP / yr</span></div>
+      <p>Spa is 60–80% gross. Bottleneck is empty slots, not demand. Real-time visibility + in-app booking + flash-deal push lifts utilization 15–25%.</p>
+    </div>
+
+    <div class="lever">
+      <div class="label">3.5 — Loss prevention</div>
+      <h4>Comp shrinkage retained</h4>
+      <div class="figure">+1M <span class="unit">EGP / yr</span></div>
+      <p>Industry shrinkage: 1.5–3% of revenue on comps and unjustified discounts. Audit trail + variance flags in real time = closed.</p>
+    </div>
+
+    <div class="lever">
+      <div class="label">3.6 — Cost</div>
+      <h4>Labor productivity</h4>
+      <div class="figure">+3.5M <span class="unit">EGP saved / yr</span></div>
+      <p>F&amp;B captain covers 2× tables. Concierge handles 4× tickets. Housekeeping shaves 8 min/room. 15–20% labor cost reduction on a 60-staff op.</p>
+    </div>
+
+    <div class="lever">
+      <div class="label">3.7 — Repeat</div>
+      <h4>Loyalty repeat-rate</h4>
+      <div class="figure">+0.5M <span class="unit">EGP / yr</span></div>
+      <p>Persistent profile + post-stay offer = +5–8 percentage points repeat-rate. Repeat guests are 3–5× cheaper to acquire than new ones.</p>
+    </div>
+
+    <div class="lever">
+      <div class="label">3.8 — Reputation</div>
+      <h4>Review-driven ADR uplift</h4>
+      <div class="figure">+1.5M <span class="unit">EGP / yr</span></div>
+      <p>Real-time bad-experience signals → MOD intervention before checkout. Pre-emptive recovery turns 2-stars into 4-stars 70% of the time. 2–5% ADR uplift next quarter.</p>
+    </div>
+  </div>
+
+  <div class="grand-total">
+    <div class="label">Year-1 estimate, 100-room resort</div>
+    <div class="figure">~ 30 M EGP / year</div>
+    <div class="sub">In incremental revenue + cost savings, conservatively. Numbers from published Cloudbeds / Mews / SiteMinder case studies — applied to a Red Sea property doing ~50M EGP/year today.</div>
+  </div>
+</section>
+
+<!-- 4. Phases -->
+<section>
+  <h2><span class="num">4.</span>Implementation phases</h2>
+  <p class="section-lead">Each phase ships independently and adds revenue / ops value before the next one starts. There is never a "big bang" go-live waiting on every feature.</p>
+
+  <div class="phase shipped">
+    <div class="meta">
+      <div><span class="stage">Shipped · in production</span></div>
+      <div class="timeline">today</div>
+    </div>
+    <h3>Phase 0 — Café-as-Venue</h3>
+    <ul>
+      <li>Single-venue F&amp;B + activities + cashier + smart upsell.</li>
+      <li>This <em>is</em> the foundation. A resort is N of these, plus rooms, plus the cross-venue glue.</li>
+    </ul>
+  </div>
+
+  <div class="phase">
+    <div class="meta">
+      <div><span class="stage">Phase 1 · Resort core</span></div>
+      <div class="timeline">4 – 6 weeks</div>
+    </div>
+    <h3>Minimum viable resort</h3>
+    <ul>
+      <li>New schema: Property, Room, Booking, Stay, Folio, Charge, Guest (promoted from VipGuest), Plan.</li>
+      <li>Front desk (check-in / check-out, room assignment).</li>
+      <li>Folio (per stay, charge-to-room from any venue).</li>
+      <li>Owner dashboard with rooms occupancy / RevPAR / ADR.</li>
+      <li>Pre-arrival WhatsApp / email channel (basic).</li>
+      <li>Owner can start replacing their PMS on day 1 of phase 1.</li>
+    </ul>
+  </div>
+
+  <div class="phase">
+    <div class="meta">
+      <div><span class="stage">Phase 2 · Venue network</span></div>
+      <div class="timeline">3 – 4 weeks</div>
+    </div>
+    <h3>Multi-venue inside one property</h3>
+    <ul>
+      <li>Lobby bar, pool café, fine dining, room service all distinct Venues.</li>
+      <li>Cross-venue cart: order breakfast at the pool while dinner reservation at the restaurant is upcoming.</li>
+      <li>Per-venue floor managers, aggregated under a single property MOD.</li>
+      <li>Loyalty: charges across venues count toward one tier.</li>
+    </ul>
+  </div>
+
+  <div class="phase">
+    <div class="meta">
+      <div><span class="stage">Phase 3 · Experience layer</span></div>
+      <div class="timeline">6 – 8 weeks</div>
+    </div>
+    <h3>Concierge, housekeeping, spa, inventory</h3>
+    <ul>
+      <li>Concierge inbox with multi-channel ingest.</li>
+      <li>Housekeeping board with real-time room status.</li>
+      <li>Engineering tickets with photo + closure loop.</li>
+      <li>Appointment / Resource booking (spa, dive, cabana, dinner reservation) with slot calendars.</li>
+      <li>Inventory: minibar par + restock workflow.</li>
+      <li>VIP profile depth: anniversaries, allergies surface across venues, persistent across stays.</li>
+    </ul>
+  </div>
+
+  <div class="phase">
+    <div class="meta">
+      <div><span class="stage">Phase 4 · Intelligence layer</span></div>
+      <div class="timeline">ongoing</div>
+    </div>
+    <h3>AI butler, PMS sync, predictive ops</h3>
+    <ul>
+      <li><strong>AI butler</strong>: guest texts in natural language, system understands intent (book / order / request / question), answers in their language, escalates to human when unsure.</li>
+      <li><strong>PMS integration</strong>: Booking.com / Expedia / direct site sync.</li>
+      <li><strong>Pre-arrival upsell evolved</strong>: dynamic upgrade pricing based on current occupancy, weather-aware push.</li>
+      <li><strong>Predictive ops</strong>: forecast tomorrow's covers per venue from arrivals + check-out + day-pass sales.</li>
+      <li><strong>Voice-of-guest analytics</strong>: NLP over reviews + concierge messages surfacing systematic issues weeks before they hit TripAdvisor.</li>
+    </ul>
+  </div>
+</section>
+
+<!-- 5. Day in the life -->
+<section>
+  <h2><span class="num">5.</span>Day-in-the-life: an anniversary stay</h2>
+  <p class="section-lead">These are the moments that sell the platform when a resort owner sees them. Sara &amp; Adam, a 5-year anniversary suite booking from Booking.com.</p>
+
+  <div class="scene">
+    <div class="head"><span class="num">Scene 1</span><h4>Pre-arrival, 7 days out</h4></div>
+    <p class="when">Booking lands. Special request: "anniversary".</p>
+    <ul>
+      <li>WhatsApp in Sara's Arabic: "Habibi, your suite is ready Tuesday. Want a candlelit dinner on the beach? Pre-book and save 15%." Tap yes.</li>
+      <li>3 days out: weather forecast says clear skies → auto-push sunset kayak deal, "perfect for your anniversary day". Adam books.</li>
+      <li>24h out: digital check-in form. ID uploaded. ETA 14:00.</li>
+    </ul>
+  </div>
+
+  <div class="scene">
+    <div class="head"><span class="num">Scene 2</span><h4>Check-in, day of arrival</h4></div>
+    <p class="when">Front desk, 14:08.</p>
+    <ul>
+      <li>App already has Sara's photo, allergies (shellfish), language (Arabic), kayak booking, dinner reservation.</li>
+      <li>One-tap check-in. Key issued. Housekeeping pinged to confirm 412 inspected.</li>
+      <li>Anniversary turndown plan loaded — rose petals + champagne for 20:30.</li>
+    </ul>
+  </div>
+
+  <div class="scene">
+    <div class="head"><span class="num">Scene 3</span><h4>Day 2, breakfast at the pool</h4></div>
+    <p class="when">Adam scans the QR on the pool table.</p>
+    <ul>
+      <li>Cart auto-tags "Sara &amp; Adam, Room 412, Suite class".</li>
+      <li>Smart upsell: "You tried Neom Breakfast yesterday — try the hummus trio with it today, 30% off." Adam adds.</li>
+      <li>Charge → folio. 280 EGP added to room 412. No card needed.</li>
+      <li>Allergy alert at the kitchen: "shellfish allergy" flag on the ticket. If Sara had ordered prawn salad, hard block + alert to floor manager.</li>
+    </ul>
+  </div>
+
+  <div class="scene">
+    <div class="head"><span class="num">Scene 4</span><h4>Day 2, spa appointment</h4></div>
+    <p class="when">16:00, 60-min massage.</p>
+    <ul>
+      <li>Therapist's app: "Sara, allergic to shellfish, prefers Arabic, prior massage at another property: medium-hard pressure."</li>
+      <li>She gets exactly the experience she had elsewhere. Five-star review writes itself.</li>
+    </ul>
+  </div>
+
+  <div class="scene">
+    <div class="head"><span class="num">Scene 5</span><h4>Anniversary dinner, beach cabana</h4></div>
+    <p class="when">19:30.</p>
+    <ul>
+      <li>Cabana set: rose petals, candles, chilled champagne (per pre-arrival flag).</li>
+      <li>Chef knows: shellfish allergy, anniversary, suite guests → comped dessert pre-approved by MOD this morning.</li>
+      <li>Sign for dinner → folio. Comp recorded with reason "anniversary, MOD-approved". Audit trail for monthly review.</li>
+    </ul>
+  </div>
+
+  <div class="scene">
+    <div class="head"><span class="num">Scene 6</span><h4>Check-out, day 4</h4></div>
+    <p class="when">10:00.</p>
+    <ul>
+      <li>Adam taps "ready to check out". Folio: 22,650 EGP. Comp dessert zeroed.</li>
+      <li>Optional split: room → company card, F&amp;B + spa + activities → personal card. One tap each.</li>
+      <li>Receipt emailed AR + EN. Sara now Gold tier (3 stays, 60K lifetime). Future-stay 10% offer included.</li>
+      <li>30 minutes later: TripAdvisor / Google review prompt via WhatsApp. Five stars.</li>
+    </ul>
+  </div>
+
+  <div class="scene">
+    <div class="head"><span class="num">Scene 7</span><h4>Same day, owner in Cairo, 14:00</h4></div>
+    <p class="when">Owner opens the dashboard.</p>
+    <ul>
+      <li>73% occupancy, ADR 4,200 EGP, RevPAR 3,066 EGP. F&amp;B PoR 850 EGP (+12% vs forecast).</li>
+      <li>Cash drawer at lobby bar opened with -380 variance — auto-flagged. MOD acknowledged.</li>
+      <li>Engineering ticket open on Room 215 (AC) for 3 hours — escalated to chief engineer.</li>
+      <li>VIPs in-house: 3 platinum, 1 owner-comp, 2 anniversary. Forward: 65 arrivals tomorrow (4 VIP).</li>
+      <li>Linen low. Restock auto-suggested. Owner taps approve.</li>
+    </ul>
+  </div>
+</section>
+
+<!-- 6. Differentiators -->
+<section>
+  <h2><span class="num">6.</span>Differentiators vs the incumbents</h2>
+  <p class="section-lead">Each incumbent is mature and broad. What they're <em>not</em> is built around the day-to-day reality of a small-to-mid Red Sea resort — multi-language guests, intermittent connectivity, cash-heavy activities, walk-up day-pass culture.</p>
+  <table class="diff">
+    <thead>
+      <tr>
+        <th>&nbsp;</th>
+        <th>Opera</th>
+        <th>Cloudbeds</th>
+        <th>Mews</th>
+        <th class="us">Neom Resort</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>Built for Red Sea / Egypt context</td>
+        <td class="no">✗</td><td class="no">✗</td><td class="no">✗</td>
+        <td class="us">✓</td>
+      </tr>
+      <tr>
+        <td>Bilingual Arabic-first UX</td>
+        <td class="no">✗</td><td class="no">partial</td><td class="no">partial</td>
+        <td class="us">✓</td>
+      </tr>
+      <tr>
+        <td>Guest phone primary remote (no app install)</td>
+        <td class="no">✗</td><td class="no">weak</td><td class="no">partial</td>
+        <td class="us">✓</td>
+      </tr>
+      <tr>
+        <td>Real-time multi-venue F&amp;B</td>
+        <td class="no">external</td><td class="no">external</td><td class="no">external</td>
+        <td class="us">native</td>
+      </tr>
+      <tr>
+        <td>Activity &amp; spa as first-class venues</td>
+        <td class="no">✗</td><td class="no">✗</td><td class="no">partial</td>
+        <td class="us">native</td>
+      </tr>
+      <tr>
+        <td>Live floor manager view</td>
+        <td class="no">✗</td><td class="no">✗</td><td class="no">✗</td>
+        <td class="us">✓</td>
+      </tr>
+      <tr>
+        <td>Smart upsell engine across venues</td>
+        <td class="no">✗</td><td class="no">✗</td><td class="no">partial</td>
+        <td class="us">✓</td>
+      </tr>
+      <tr>
+        <td>Cash drawer reconciliation built-in</td>
+        <td class="no">external</td><td class="no">external</td><td class="no">external</td>
+        <td class="us">✓</td>
+      </tr>
+      <tr>
+        <td>Time to implement (full resort)</td>
+        <td class="no">6–18 months</td><td class="no">2–4 weeks</td><td class="no">1–2 months</td>
+        <td class="us">4–6 weeks</td>
+      </tr>
+      <tr>
+        <td>Owner direct line to dev team</td>
+        <td class="no">✗</td><td class="no">✗</td><td class="no">✗</td>
+        <td class="us">✓</td>
+      </tr>
+    </tbody>
+  </table>
+</section>
+
+<!-- 7. Pricing -->
+<section>
+  <h2><span class="num">7.</span>Engagement model</h2>
+  <p class="section-lead">Not selling SaaS seats. The economics here are too good and the moat too thin for that. Three options to discuss with a serious resort partner:</p>
+  <div class="options">
+
+    <div class="opt">
+      <div class="tag">Option A</div>
+      <h3>Strategic build</h3>
+      <p>Lump-sum implementation fee for resort core + venue network + experience layer. Year-1 ops cost capped. Year-2+ flat platform fee. Source code escrow available.</p>
+    </div>
+
+    <div class="opt featured">
+      <div class="tag">Option B · most aligned</div>
+      <h3>Revenue share</h3>
+      <p>No upfront fee. I deliver the platform. I take a single-digit % of <em>incremental</em> revenue the platform demonstrably moves vs a 60-day baseline. Caps after 24 months. I only earn if the uplift is real.</p>
+    </div>
+
+    <div class="opt">
+      <div class="tag">Option C</div>
+      <h3>Equity stake</h3>
+      <p>For an investor-owner who sees this as a category. I contribute the platform + ongoing development as founding tech equity. We jointly take it to other resorts in the region.</p>
+    </div>
+  </div>
+</section>
+
+<!-- Closing -->
+<section>
+  <div class="closing">
+    <h2><span class="num">8.</span>The pitch — first meeting, one paragraph</h2>
+    <p>
+      Today your resort runs on five disconnected systems and a lot of WhatsApp. The PMS at the front desk doesn't talk to the F&amp;B register, which doesn't talk to the spa book, which doesn't talk to housekeeping. <strong>Every gap between those systems is where revenue leaks and guest experience fragments.</strong>
+    </p>
+    <p>
+      I've already built a unified platform that's running live in a Dahab café — every staff member, every guest, every venue on one screen, in real time, in Arabic and English. The same primitives scale to your resort: multi-day stays, charge-to-room folios, multi-venue F&amp;B, spa appointments, housekeeping, concierge inbox, smart pre-arrival upsell.
+    </p>
+    <p>
+      On a 100-room resort, conservatively, this lifts gross revenue <strong>~30M EGP/year</strong> while saving <strong>~15% labor cost</strong>. Not a 12-month implementation — phase 1 ships in 4–6 weeks, you replace one system at a time, and at no point is your resort offline.
+    </p>
+    <p>
+      Worst case: you have a better F&amp;B system inside two weeks. Best case: in six months you have <strong>the most modern resort operations stack on the Red Sea</strong>, built for you, not retrofitted from a generic product.
+    </p>
+  </div>
+</section>
+
+<footer>
+  Companion document: <code>docs/RESORT-EXPANSION.md</code> (full strategic frame). Technical appendix (DB migrations, API surface, role permissions, sprint plan) available on request.
+</footer>
+
+</main>
+</body>
+</html>
