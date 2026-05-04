@@ -1,16 +1,18 @@
 import { nowInRestaurantTz } from "./restaurant-config";
 
 // Role-specific shift schedules (restaurant local time)
-// WAITER : 3 shifts × 8h — 00-08, 08-16, 16-00
-// BAR    : 3 shifts × 8h — 00-08, 08-16, 16-00 (same as waiter)
-// KITCHEN: 2 shifts × 8h — 08-16, 16-00 (no overnight shift)
-// CASHIER: 2 shifts × 12h — 00-12, 12-00
+// WAITER       : 3 shifts × 8h  — 00-08, 08-16, 16-00
+// BAR          : 3 shifts × 8h  — 00-08, 08-16, 16-00 (same as waiter)
+// KITCHEN      : 2 shifts × 8h  — 08-16, 16-00 (no overnight shift)
+// CASHIER      : 2 shifts × 12h — 00-12, 12-00
+// FLOOR_MANAGER: 1 shift  × 12h — 08-20 (one daytime shift)
 
 // How many shift slots a given role has.
 export function getShiftCount(role?: string): number {
   if (role === "CASHIER") return 2;
   if (role === "DELIVERY") return 2;
-  return 3; // WAITER, BAR, KITCHEN, OWNER, FLOOR_MANAGER
+  if (role === "FLOOR_MANAGER") return 1;
+  return 3; // WAITER, BAR, KITCHEN, OWNER
 }
 
 // Get shift boundaries in minutes-of-day for a given role + shift number.
@@ -20,6 +22,12 @@ export function getShiftBounds(shift: number, role?: string): { start: number; e
   }
   if (role === "DELIVERY") {
     return { start: (shift - 1) * 720, end: shift * 720 };
+  }
+  // Floor manager runs a single daytime shift, 08:00-20:00 (12h).
+  // Coalesce any historical shift > 0 to the one slot so older Staff rows
+  // with shift=2 or shift=3 don't fall into "Unassigned" overnight.
+  if (role === "FLOOR_MANAGER") {
+    return { start: 480, end: 1200 };
   }
   if (role === "KITCHEN") {
     return { start: (shift - 1) * 480, end: shift * 480 };
@@ -48,6 +56,9 @@ export function getShiftLabel(shift: number, role?: string): string {
       default: return "Unassigned";
     }
   }
+  if (role === "FLOOR_MANAGER") {
+    return shift > 0 ? "Day Shift (8AM - 8PM)" : "Unassigned";
+  }
   if (role === "KITCHEN") {
     switch (shift) {
       case 1: return "Shift 1 (12AM - 8AM)";
@@ -72,6 +83,9 @@ export function getShiftTimeRange(shift: number, role?: string): { start: string
       case 2: return { start: "12:00", end: "00:00" };
       default: return { start: "--", end: "--" };
     }
+  }
+  if (role === "FLOOR_MANAGER") {
+    return shift > 0 ? { start: "08:00", end: "20:00" } : { start: "--", end: "--" };
   }
   if (role === "KITCHEN") {
     switch (shift) {
