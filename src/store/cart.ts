@@ -33,7 +33,7 @@ type CartStore = {
   setVipGuest: (id: string, name: string) => void;
   setDeliveryInfo: (address: string, notes: string, lat: number | null, lng: number | null) => void;
   setPaymentMethod: (method: string | null) => void;
-  addItem: (menuItem: MenuItem, addOns?: AddOn[], wasUpsell?: boolean) => void;
+  addItem: (menuItem: MenuItem, addOns?: AddOn[], wasUpsell?: boolean, quantity?: number) => void;
   removeItem: (menuItemId: string) => void;
   updateQuantity: (menuItemId: string, quantity: number) => void;
   updateNotes: (menuItemId: string, notes: string) => void;
@@ -145,9 +145,17 @@ export const useCart = create<CartStore>((set, get) => ({
     set({ deliveryAddress, deliveryNotes, deliveryLat, deliveryLng }),
   setPaymentMethod: (paymentMethod) => set({ paymentMethod }),
 
-  addItem: (menuItem, addOns = [], wasUpsell = false) => {
+  addItem: (menuItem, addOns = [], wasUpsell = false, quantity = 1) => {
     const items = get().items;
     const existing = items.find((i) => i.menuItem.id === menuItem.id);
+    // Hourly activities (kayak / board / massage) use the hour picker
+    // on the menu sheet; the picked count comes through here as
+    // `quantity`. For non-hourly items the caller passes 1 (the
+    // default). Either way, an existing line REPLACES its quantity
+    // when an explicit count is supplied — that matches the UX of
+    // re-opening the picker and choosing a new value, rather than
+    // stacking on top.
+    const qty = Math.max(1, Math.floor(quantity));
 
     // Haptic feedback
     if (typeof navigator !== "undefined" && "vibrate" in navigator) {
@@ -158,7 +166,7 @@ export const useCart = create<CartStore>((set, get) => ({
       set({
         items: items.map((i) =>
           i.menuItem.id === menuItem.id
-            ? { ...i, quantity: i.quantity + 1 }
+            ? { ...i, quantity: qty > 1 ? qty : i.quantity + 1 }
             : i
         ),
       });
@@ -166,7 +174,7 @@ export const useCart = create<CartStore>((set, get) => ({
       set({
         items: [
           ...items,
-          { menuItem, quantity: 1, selectedAddOns: addOns, wasUpsell },
+          { menuItem, quantity: qty, selectedAddOns: addOns, wasUpsell },
         ],
       });
     }

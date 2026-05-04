@@ -243,22 +243,17 @@ export class OrderUseCases {
     });
     if (!order || order.station !== "ACTIVITY") return;
 
+    // We used to start a running timer here for hourly items. The
+    // billing model has since switched to pre-purchased hours: the
+    // guest picks 1/2/3 hours in the menu, the cart sets quantity to
+    // that value, and OrderItem.price × quantity is already correct
+    // (the menu sets price = pricePerHour for these items). No timer
+    // is started — the bill is final at order placement. We just mark
+    // the order SERVED so it skips kitchen/bar prep.
     const now = new Date();
-    const timerItemIds = order.items
-      .filter((it) => it.menuItem?.pricePerHour != null && Number(it.menuItem.pricePerHour) > 0)
-      .map((it) => it.id);
-
-    await db.$transaction(async (tx) => {
-      await tx.order.update({
-        where: { id: orderId },
-        data: { status: "SERVED", servedAt: now, readyAt: now },
-      });
-      if (timerItemIds.length > 0) {
-        await tx.orderItem.updateMany({
-          where: { id: { in: timerItemIds } },
-          data: { activityStartedAt: now },
-        });
-      }
+    await db.order.update({
+      where: { id: orderId },
+      data: { status: "SERVED", servedAt: now, readyAt: now },
     });
   }
 

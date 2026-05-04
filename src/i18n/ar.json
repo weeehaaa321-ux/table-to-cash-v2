@@ -1104,6 +1104,8 @@
   "dashboard.menu.calories": "السعرات",
   "dashboard.menu.prepTime": "وقت التحضير (دقيقة)",
   "dashboard.menu.hours": "الساعات",
+  "dashboard.menu.pricePerHour": "جنيه / ساعة",
+  "dashboard.menu.pricePerHourPlaceholder": "اتركه فارغاً للسعر الثابت",
   "dashboard.menu.fromExample": "من (مثلاً 8)",
   "dashboard.menu.toExample": "إلى (مثلاً 13)",
   "dashboard.menu.available": "متاح",

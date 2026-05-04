@@ -1104,6 +1104,8 @@
   "dashboard.menu.calories": "Calories",
   "dashboard.menu.prepTime": "Prep time (min)",
   "dashboard.menu.hours": "Hours",
+  "dashboard.menu.pricePerHour": "EGP / hour",
+  "dashboard.menu.pricePerHourPlaceholder": "Leave blank for flat price",
   "dashboard.menu.fromExample": "From (e.g. 8)",
   "dashboard.menu.toExample": "To (e.g. 13)",
   "dashboard.menu.available": "Available",

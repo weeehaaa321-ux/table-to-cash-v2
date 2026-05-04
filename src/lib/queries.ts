@@ -183,13 +183,20 @@ export async function createOrder(data: {
   // see a single unified order on /track — the split is staff-only.
   const menuItems = await db.menuItem.findMany({
     where: { id: { in: data.items.map((i) => i.menuItemId) } },
-    select: { id: true, price: true, category: { select: { station: true } } },
+    select: { id: true, price: true, pricePerHour: true, category: { select: { station: true } } },
   });
   const stationById = new Map<string, "KITCHEN" | "BAR" | "ACTIVITY">();
   const priceById = new Map<string, number>();
   for (const m of menuItems) {
     stationById.set(m.id, m.category.station);
-    priceById.set(m.id, toNum(m.price));
+    // For time-billed activities the unit price IS the per-hour rate
+    // and the cart line's quantity carries the picked hours (1/2/3).
+    // OrderItem.total = price × quantity then bills hours × rate
+    // automatically. Storing pricePerHour separately on the menu means
+    // the owner can keep `price` as a reference / fallback figure
+    // without breaking the math at order creation.
+    const pph = m.pricePerHour == null ? null : toNum(m.pricePerHour);
+    priceById.set(m.id, pph != null && pph > 0 ? pph : toNum(m.price));
   }
   const resolveStation = (id: string): "KITCHEN" | "BAR" | "ACTIVITY" =>
     stationById.get(id) ?? "KITCHEN";

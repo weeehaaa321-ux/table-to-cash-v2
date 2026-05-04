@@ -95,6 +95,9 @@ export async function GET(request: NextRequest) {
             let activity: InvoiceItem["activity"] | undefined;
             let unitPrice = it.comped ? 0 : toNum(it.price);
             if (pricePerHour > 0 && startedAt) {
+              // Legacy timer-running activity item: duration was the
+              // billed time. Kept for any historical orders that still
+              // carry activityStartedAt.
               const end = stoppedAt ?? new Date();
               const minutes = Math.max(1, Math.ceil((end.getTime() - startedAt.getTime()) / 60000));
               activity = {
@@ -103,6 +106,16 @@ export async function GET(request: NextRequest) {
                 running: !stoppedAt,
               };
               unitPrice = it.comped ? 0 : Math.ceil((minutes / 60) * pricePerHour);
+            } else if (pricePerHour > 0 && it.quantity > 0) {
+              // Pre-purchased hours: the cart's hour picker stored the
+              // count as quantity. Render it as a duration so the
+              // receipt reads "Kayak (2 hrs) @ 500/hr" instead of
+              // "2x Kayak".
+              activity = {
+                minutes: it.quantity * 60,
+                pricePerHour,
+                running: false,
+              };
             }
             items.push({
               name: it.menuItem?.name ?? "Deleted item",

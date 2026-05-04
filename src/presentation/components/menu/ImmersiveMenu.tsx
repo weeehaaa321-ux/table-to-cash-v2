@@ -28,12 +28,20 @@ function ItemDetailSheet({
   lang = "en",
 }: {
   item: MenuItem;
-  onAdd: (item: MenuItem) => void;
+  onAdd: (item: MenuItem, quantity: number) => void;
   onClose: () => void;
   lang?: string;
 }) {
   const orderCounts = useAction((s) => s.orderCounts);
   const count = orderCounts.get(item.id) || 0;
+  // Hours picker for time-billed activities (kayak / board / massage).
+  // pricePerHour > 0 → show 1/2/3 hour buttons; default to 1 so a
+  // single-tap "Add to Order" without picking still works. Items with
+  // pricePerHour null (regular menu items + flat-priced activities like
+  // a pool ticket) keep the legacy single-click add.
+  const isHourly = !!(item.pricePerHour && item.pricePerHour > 0);
+  const [hours, setHours] = useState(1);
+  const hourlyTotal = isHourly ? (item.pricePerHour || 0) * hours : item.price;
 
   return (
     <motion.div
@@ -141,14 +149,52 @@ function ItemDetailSheet({
             </div>
           )}
 
+          {/* Hour picker — only for time-billed activities. The guest
+              picks 1, 2, or 3 hours up front; the bill is hours ×
+              pricePerHour, no timer involved. Pool ticket and similar
+              flat-priced items skip this entirely. */}
+          {isHourly && (
+            <div className="mb-4">
+              <p className="text-[11px] font-bold text-text-muted uppercase tracking-widest mb-2">
+                {lang === "ar" ? "عدد الساعات" : "How many hours?"}
+              </p>
+              <div className="grid grid-cols-3 gap-2">
+                {[1, 2, 3].map((h) => {
+                  const active = hours === h;
+                  return (
+                    <button
+                      key={h}
+                      onClick={() => setHours(h)}
+                      className={`py-3 rounded-xl border-2 text-sm font-bold transition active:scale-95 ${
+                        active
+                          ? "bg-sand-900 border-sand-900 text-white shadow-md"
+                          : "bg-white border-sand-200 text-text-secondary hover:border-sand-400"
+                      }`}
+                    >
+                      <div className="text-base">{h} {h === 1 ? (lang === "ar" ? "ساعة" : "hr") : (lang === "ar" ? "ساعات" : "hrs")}</div>
+                      <div className={`text-[10px] mt-0.5 tabular-nums ${active ? "text-white/70" : "text-text-muted"}`}>
+                        {(item.pricePerHour || 0) * h} {lang === "ar" ? "ج.م" : "EGP"}
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
           {/* Price + Add button */}
           <div className="flex items-center gap-4 pt-2 pb-2">
             <div>
-              <span className="text-2xl font-semibold text-text-primary">{item.price}</span>
+              <span className="text-2xl font-semibold text-text-primary tabular-nums">{hourlyTotal}</span>
               <span className="text-sm text-text-muted ml-1">{lang === "ar" ? "ج.م" : "EGP"}</span>
+              {isHourly && (
+                <span className="block text-[10px] text-text-muted">
+                  {hours} × {item.pricePerHour}/{lang === "ar" ? "ساعة" : "hr"}
+                </span>
+              )}
             </div>
             <motion.button
-              onClick={() => { onAdd(item); onClose(); }}
+              onClick={() => { onAdd(item, isHourly ? hours : 1); onClose(); }}
               className="flex-1 py-3.5 rounded-2xl bg-sand-900 text-white font-bold text-[15px] shadow-lg"
               whileTap={{ scale: 0.97 }}
             >
@@ -584,10 +630,13 @@ export function ImmersiveMenu({ tableNumber, restaurantSlug, sessionId }: { tabl
     }
   }, []);
 
-  // Add item
+  // Add item. The optional `quantity` arg is set by the
+  // ItemDetailSheet's hour picker for time-billed activities — for
+  // ordinary items the picker doesn't render and quantity falls
+  // through to 1.
   const handleAdd = useCallback(
-    (item: MenuItem, addOns: AddOn[] = []) => {
-      addItem(item, addOns);
+    (item: MenuItem, addOns: AddOn[] = [], quantity = 1) => {
+      addItem(item, addOns, false, quantity);
       setJustAdded(true);
       setShowAddOns(null);
       if (typeof navigator !== "undefined" && "vibrate" in navigator) {
@@ -598,10 +647,20 @@ export function ImmersiveMenu({ tableNumber, restaurantSlug, sessionId }: { tabl
     [addItem]
   );
 
+  // Quick-add tap from a card. For time-billed activity items we
+  // intentionally route through the detail sheet so the guest sees
+  // the hour picker — a one-tap quick-add could silently book 1 hour
+  // when they wanted 3.
   const handleAddTap = useCallback(
     (item: MenuItem) => {
-      if (item.addOns.length > 0) {
+      if (item.addOns.length > 0 || (item.pricePerHour && item.pricePerHour > 0)) {
         setShowAddOns(item);
+        // Hourly items use the detail sheet (not the addon sheet) so
+        // re-route via setSelectedItem instead.
+        if (item.pricePerHour && item.pricePerHour > 0) {
+          setShowAddOns(null);
+          setSelectedItem(item);
+        }
       } else {
         handleAdd(item);
       }
@@ -960,7 +1019,19 @@ export function ImmersiveMenu({ tableNumber, restaurantSlug, sessionId }: { tabl
         {selectedItem && (
           <ItemDetailSheet
             item={selectedItem}
-            onAdd={handleAddTap}
+            onAdd={(item, quantity) => {
+              // For hourly items the quantity carries the picked hours
+              // and we go straight to handleAdd (skip the addon sheet —
+              // activities don't have addons in practice). For ordinary
+              // items the quantity is 1 and the legacy flow runs.
+              if (item.pricePerHour && item.pricePerHour > 0) {
+                handleAdd(item, [], quantity);
+              } else if (item.addOns.length > 0) {
+                setShowAddOns(item);
+              } else {
+                handleAdd(item, [], quantity);
+              }
+            }}
             onClose={() => setSelectedItem(null)}
             lang={lang}
           />

@@ -22,7 +22,9 @@ export async function POST(request: NextRequest) {
   const {
     categoryId,
     name,
+    nameAr,
     price,
+    pricePerHour,
     description,
     image,
     available = true,
@@ -45,7 +47,13 @@ export async function POST(request: NextRequest) {
     const item = await useCases.menuAdmin.createItem({
       categoryId,
       name,
+      nameAr: typeof nameAr === "string" && nameAr.trim().length > 0 ? nameAr.trim() : null,
       price,
+      // pricePerHour drives time-billed activity items (kayak, board,
+      // massage). Null for ordinary food/drinks AND for flat-priced
+      // activities (e.g. pool ticket — single fee, no hours). The
+      // guest-facing menu shows an hour picker when this is set.
+      pricePerHour: typeof pricePerHour === "number" && pricePerHour > 0 ? pricePerHour : null,
       description: description || null,
       image: image || null,
       available,
@@ -73,7 +81,9 @@ export async function PATCH(request: NextRequest) {
 
   const allowed = [
     "name",
+    "nameAr",
     "price",
+    "pricePerHour",
     "description",
     "image",
     "available",

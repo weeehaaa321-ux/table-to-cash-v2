@@ -2869,6 +2869,9 @@ type AdminMenuItem = {
   categoryId: string;
   availableFromHour: number | null;
   availableToHour: number | null;
+  // EGP/hour rate for time-billed activity items (kayak, board,
+  // massage). Null for ordinary items and flat-priced activities.
+  pricePerHour: number | null;
 };
 
 type AdminCategory = {
@@ -2886,6 +2889,10 @@ type AdminCategory = {
 type MenuDraft = {
   name: string;
   price: string;
+  // EGP/hour for time-billed activities. Empty string in the form
+  // means "flat-priced" (no timer billing). Stored as string in the
+  // draft so the input can hold partial values mid-typing.
+  pricePerHour: string;
   description: string;
   image: string;
   available: boolean;
@@ -2902,6 +2909,7 @@ function emptyDraft(categoryId: string): MenuDraft {
   return {
     name: "",
     price: "",
+    pricePerHour: "",
     description: "",
     image: "",
     available: true,
@@ -2919,6 +2927,7 @@ function draftFromItem(item: AdminMenuItem): MenuDraft {
   return {
     name: item.name,
     price: String(item.price),
+    pricePerHour: item.pricePerHour != null ? String(item.pricePerHour) : "",
     description: item.description || "",
     image: item.image || "",
     available: item.available,
@@ -2989,6 +2998,12 @@ function MenuPanel({ restaurantId, ownerId }: { restaurantId: string; ownerId: s
           categoryId,
           name: newDraft.name.trim(),
           price,
+          // Empty / 0 → undefined so the server stores null (flat
+          // pricing). Anything > 0 turns the item into a time-billed
+          // activity that shows the hour picker on /menu.
+          pricePerHour: newDraft.pricePerHour && parseFloat(newDraft.pricePerHour) > 0
+            ? parseFloat(newDraft.pricePerHour)
+            : undefined,
           description: newDraft.description.trim() || undefined,
           image: newDraft.image.trim() || undefined,
           available: newDraft.available,
@@ -3031,6 +3046,12 @@ function MenuPanel({ restaurantId, ownerId }: { restaurantId: string; ownerId: s
           id: editingId,
           name: editDraft.name.trim(),
           price,
+          // Empty input → null (flat-priced); >0 → time-billed.
+          // Saving an item with pricePerHour=null clears any prior
+          // hourly setup, returning it to a normal menu line.
+          pricePerHour: editDraft.pricePerHour && parseFloat(editDraft.pricePerHour) > 0
+            ? parseFloat(editDraft.pricePerHour)
+            : null,
           description: editDraft.description.trim() || null,
           image: editDraft.image.trim() || null,
           available: editDraft.available,
@@ -3469,6 +3490,25 @@ function MenuItemForm({ draft, setDraft }: { draft: MenuDraft; setDraft: (d: Men
           placeholder={t("dashboard.menu.prepTime")}
           value={draft.prepTime}
           onChange={(e) => setDraft({ ...draft, prepTime: e.target.value })}
+          className="px-2.5 py-1.5 rounded-lg border border-sand-200 text-xs focus:border-ocean-400 focus:outline-none"
+        />
+      </div>
+      {/* Time-billed activity rate. Filling this turns the item into a
+          per-hour activity (kayak / board / massage style) — the guest
+          menu shows a 1/2/3 hour picker and the bill is hours × this
+          rate. Leave blank for ordinary items and flat-priced
+          activities (e.g. pool ticket). */}
+      <div className="grid grid-cols-[auto_1fr] gap-2 items-center">
+        <span className="text-[10px] font-bold text-text-muted uppercase tracking-wider">
+          {t("dashboard.menu.pricePerHour")}
+        </span>
+        <input
+          type="number"
+          min={0}
+          step="1"
+          placeholder={t("dashboard.menu.pricePerHourPlaceholder")}
+          value={draft.pricePerHour}
+          onChange={(e) => setDraft({ ...draft, pricePerHour: e.target.value })}
           className="px-2.5 py-1.5 rounded-lg border border-sand-200 text-xs focus:border-ocean-400 focus:outline-none"
         />
       </div>
