@@ -100,15 +100,22 @@ export async function PATCH(
           // (/runner) shows the shared queue.
           const cfg = await readServiceModel(restaurantId).catch(() => null);
           if (cfg?.serviceModel === "RUNNER") {
-            orderPushes.push(sendPushToRole("WAITER", restaurantId, {
-              title: { en: "Pickup ready", ar: "طبق جاهز للتقديم" },
+            // Push to both WAITER and RUNNER cohorts. WAITER is here
+            // for legacy staff records that were created before the
+            // RUNNER role existed and are now redirected to /runner.
+            // RUNNER catches anyone hired specifically as a runner.
+            // Both land at /runner; the shared queue dedupes.
+            const pushBody = {
+              title: { en: "Pickup ready", ar: "طبق جاهز للتقديم" } as const,
               body: {
                 en: `${tableEn} — order #${fullOrder.orderNumber}`,
                 ar: `${tableAr} — طلب رقم ${fullOrder.orderNumber}`,
-              },
+              } as const,
               tag: `order-ready-${orderId}`,
               url: "/runner",
-            }).catch(() => {}));
+            };
+            orderPushes.push(sendPushToRole("WAITER", restaurantId, pushBody).catch(() => {}));
+            orderPushes.push(sendPushToRole("RUNNER", restaurantId, pushBody).catch(() => {}));
           } else if (fullOrder.session?.waiterId) {
             orderPushes.push(sendPushToStaff(fullOrder.session.waiterId, {
               title: { en: "Order Ready", ar: "الطلب جاهز" },

@@ -423,6 +423,14 @@ enum StaffRole {
   OWNER
   FLOOR_MANAGER
   WAITER
+  // First-class role for the runner-queue model. Logs in to /runner,
+  // sees the shared READY queue, taps "I've got it" to deliver. In
+  // WAITER mode (Restaurant.serviceModel=WAITER) a RUNNER role still
+  // works — they just see an empty queue because the kitchen pings
+  // specific waiters. Coexists with WAITER staff: when the floor
+  // hires runners going forward, they get this role; legacy WAITER
+  // staff get redirected based on Restaurant.serviceModel.
+  RUNNER
   KITCHEN
   BAR
   CASHIER

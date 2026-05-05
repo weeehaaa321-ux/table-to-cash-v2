@@ -1677,7 +1677,7 @@ function StaffPanel({ staff, onRefresh, restaurantId, restaurantSlug, ownerId }:
   const [creating, setCreating] = useState(false);
   const [name, setName] = useState("");
   const [pin, setPin] = useState("");
-  const [role, setRole] = useState<"WAITER" | "KITCHEN" | "BAR" | "CASHIER" | "FLOOR_MANAGER" | "DELIVERY">("WAITER");
+  const [role, setRole] = useState<"WAITER" | "RUNNER" | "KITCHEN" | "BAR" | "CASHIER" | "FLOOR_MANAGER" | "DELIVERY">("WAITER");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const [endingShift, setEndingShift] = useState<string | null>(null);
@@ -1823,6 +1823,7 @@ function StaffPanel({ staff, onRefresh, restaurantId, restaurantSlug, ownerId }:
     OWNER: { bg: "bg-sunset-400/10", border: "border-sunset-400/30", text: "text-sunset-500" },
     FLOOR_MANAGER: { bg: "bg-ocean-50", border: "border-ocean-200", text: "text-ocean-600" },
     WAITER: { bg: "bg-ocean-50", border: "border-ocean-200", text: "text-ocean-600" },
+    RUNNER: { bg: "bg-status-good-50", border: "border-status-good-200", text: "text-status-good-700" },
     KITCHEN: { bg: "bg-success/5", border: "border-success/20", text: "text-success" },
     BAR: { bg: "bg-status-wait-50", border: "border-status-wait-200", text: "text-status-wait-600" },
     CASHIER: { bg: "bg-status-warn-50", border: "border-status-warn-200", text: "text-status-warn-600" },
@@ -1860,10 +1861,16 @@ function StaffPanel({ staff, onRefresh, restaurantId, restaurantSlug, ownerId }:
                 </div>
                 <div>
                   <label className="text-[10px] text-text-muted font-semibold uppercase tracking-wider block mb-1.5">{t("dashboard.role")}</label>
-                  <div className="flex gap-2">
-                    {(["WAITER", "KITCHEN", "BAR", "CASHIER", "FLOOR_MANAGER", "DELIVERY"] as const).map((r) => (
-                      <button key={r} onClick={() => setRole(r)} className={`flex-1 py-2.5 rounded-xl text-[11px] font-bold transition-all border ${role === r ? `${roleColors[r]?.bg || "bg-ocean-50"} ${roleColors[r]?.border || "border-ocean-200"} ${roleColors[r]?.text || "text-ocean-700"}` : "bg-white border-sand-200 text-text-muted"}`}>
-                        {r === "WAITER" ? t("dashboard.role.waiter") : r === "KITCHEN" ? t("dashboard.role.kitchen") : r === "BAR" ? t("dashboard.role.bar") : r === "CASHIER" ? t("dashboard.role.cashier") : r === "FLOOR_MANAGER" ? t("dashboard.role.floorMgr") : t("dashboard.role.driver")}
+                  <div className="flex gap-2 flex-wrap">
+                    {(["WAITER", "RUNNER", "KITCHEN", "BAR", "CASHIER", "FLOOR_MANAGER", "DELIVERY"] as const).map((r) => (
+                      <button key={r} onClick={() => setRole(r)} className={`flex-1 min-w-[80px] py-2.5 rounded-xl text-[11px] font-bold transition-all border ${role === r ? `${roleColors[r]?.bg || "bg-ocean-50"} ${roleColors[r]?.border || "border-ocean-200"} ${roleColors[r]?.text || "text-ocean-700"}` : "bg-white border-sand-200 text-text-muted"}`}>
+                        {r === "WAITER" ? t("dashboard.role.waiter")
+                          : r === "RUNNER" ? t("dashboard.role.runner")
+                          : r === "KITCHEN" ? t("dashboard.role.kitchen")
+                          : r === "BAR" ? t("dashboard.role.bar")
+                          : r === "CASHIER" ? t("dashboard.role.cashier")
+                          : r === "FLOOR_MANAGER" ? t("dashboard.role.floorMgr")
+                          : t("dashboard.role.driver")}
                       </button>
                     ))}
                   </div>
@@ -1960,6 +1967,7 @@ function StaffPanel({ staff, onRefresh, restaurantId, restaurantSlug, ownerId }:
       {(() => {
         const groups: { role: string; labelKey: string }[] = [
           { role: "WAITER", labelKey: "dashboard.staffGroups.waiters" },
+          { role: "RUNNER", labelKey: "dashboard.staffGroups.runners" },
           { role: "FLOOR_MANAGER", labelKey: "dashboard.staffGroups.floorManagers" },
           { role: "KITCHEN", labelKey: "dashboard.staffGroups.kitchen" },
           { role: "BAR", labelKey: "dashboard.staffGroups.bar" },
@@ -2194,6 +2202,7 @@ function ShiftOverview({ staff, restaurantSlug: _restaurantSlug }: { staff: Staf
 
   const roleBadge: Record<string, { color: string; label: string }> = {
     WAITER: { color: "text-ocean-600", label: t("dashboard.role.waiter") },
+    RUNNER: { color: "text-status-good-700", label: t("dashboard.role.runner") },
     BAR: { color: "text-status-wait-600", label: t("dashboard.role.bar") },
     KITCHEN: { color: "text-success", label: t("dashboard.role.kitchen") },
     CASHIER: { color: "text-status-warn-600", label: t("dashboard.role.cashier") },
@@ -4710,7 +4719,7 @@ function SchedulePanel({ staff, restaurantSlug, onRefresh, ownerId }: { staff: S
   const prevMonth = () => setMonth((p) => p.month === 0 ? { year: p.year - 1, month: 11 } : { year: p.year, month: p.month - 1 });
   const nextMonth = () => setMonth((p) => p.month === 11 ? { year: p.year + 1, month: 0 } : { year: p.year, month: p.month + 1 });
 
-  const roles = ["ALL", "WAITER", "KITCHEN", "BAR", "CASHIER", "FLOOR_MANAGER"];
+  const roles = ["ALL", "WAITER", "RUNNER", "KITCHEN", "BAR", "CASHIER", "FLOOR_MANAGER"];
 
   return (
     <div className="space-y-4">

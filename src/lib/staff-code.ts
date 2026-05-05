@@ -4,6 +4,7 @@ import type { StaffRole } from "@/generated/prisma/client";
 // OWNER is intentionally not listed — owners don't get codes.
 const ROLE_PREFIX: Record<Exclude<StaffRole, "OWNER">, string> = {
   WAITER: "WAI",
+  RUNNER: "RUN",
   CASHIER: "CSH",
   KITCHEN: "KIT",
   BAR: "BAR",

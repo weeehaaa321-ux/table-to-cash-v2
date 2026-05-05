@@ -2102,10 +2102,15 @@ function StaffLoginScreen({ onLogin }: { onLogin: (staff: LoggedInStaff) => void
         return;
       }
       const staff = await res.json();
-      // RUNNER mode: WAITER staff jump to the runner queue instead.
-      // The waiter app stays mounted at /waiter for instant rollback;
-      // the only thing changing is which screen this login lands on.
-      // Captains stay on /waiter even in RUNNER mode (hybrid case).
+      // Routing rules (in this priority order):
+      //   1. RUNNER role → always /runner (regardless of restaurant mode).
+      //   2. WAITER role + restaurant mode = RUNNER + not a captain →
+      //      /runner (legacy waiter staff redirected on the fly).
+      //   3. Otherwise → /waiter (the legacy table-owner app).
+      if (staff.role === "RUNNER") {
+        window.location.href = "/runner";
+        return;
+      }
       if (staff.serviceModel === "RUNNER" && staff.role === "WAITER" && !staff.isCaptain) {
         window.location.href = "/runner";
         return;
