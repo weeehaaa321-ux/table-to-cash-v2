@@ -8,7 +8,7 @@ import { OrderTimeline } from "./OrderTimeline";
 import type { TableState, LiveOrder, SessionInfo, StaffInfo } from "./types";
 
 export function TableActionSheet({
-  table, orders, session, sessions, staff, allTables,
+  table, orders, session, sessions, staff, allTables, waiterAppEnabled = true,
   onClose, onReassign, onSendWaiter, onPrioritize, onEndSession,
   onCancelItem, onChangeTable, onMoveGuest, onMergeTables,
   onIncrementGuests, onAdvanceStatus,
@@ -19,6 +19,9 @@ export function TableActionSheet({
   sessions: SessionInfo[];
   staff: StaffInfo[];
   allTables: TableState[];
+  /** When false, hides the Reassign button — there's no waiter to
+   * assign to. Default true preserves the legacy table-side flow. */
+  waiterAppEnabled?: boolean;
   onClose: () => void;
   onReassign: (sessionId: string, waiterId: string) => Promise<{ ok: boolean; message?: string }> | void;
   onSendWaiter: (tableId: number) => void;
@@ -169,10 +172,12 @@ export function TableActionSheet({
             className="p-3 rounded-xl bg-status-info-50 border border-status-info-200 text-status-info-700 text-xs font-bold active:scale-95 transition">
             {t("floor.sendWaiter")}
           </button>
-          <button onClick={() => { setShowReassign(!showReassign); setShowMoveTable(false); }}
-            className="p-3 rounded-xl bg-ocean-50 border border-ocean-200 text-ocean-700 text-xs font-bold active:scale-95 transition">
-            {t("floor.reassign")}
-          </button>
+          {waiterAppEnabled && (
+            <button onClick={() => { setShowReassign(!showReassign); setShowMoveTable(false); }}
+              className="p-3 rounded-xl bg-ocean-50 border border-ocean-200 text-ocean-700 text-xs font-bold active:scale-95 transition">
+              {t("floor.reassign")}
+            </button>
+          )}
           {session && (
             <button onClick={() => { if (confirm(`${t("floor.endSession")} - ${t("common.table")} ${table.id}?`)) { onEndSession(session.id); onClose(); } }}
               className="p-3 rounded-xl bg-status-bad-50 border border-status-bad-200 text-status-bad-700 text-xs font-bold active:scale-95 transition">

@@ -311,6 +311,7 @@ export function FloorManagerView({ staff }: { staff: LoggedInStaff }) {
             sessions={d.sessions}
             staff={d.allStaff}
             allTables={d.tables}
+            waiterAppEnabled={d.waiterAppEnabled}
             onClose={() => setSelectedTable(null)}
             onReassign={d.handleReassign}
             onSendWaiter={d.handleSendWaiter}

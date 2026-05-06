@@ -2223,22 +2223,46 @@ export default function WaiterPage() {
   const [hydrated, setHydrated] = useState(false);
 
   // Restore session after hydration to avoid SSR mismatch / double login flash
-  // Session persists for 16 hours to survive mid-shift phone sleep/lock
+  // Session persists for 16 hours to survive mid-shift phone sleep/lock.
+  //
+  // Mid-shift kill switch: re-fetch the restaurant config on hydration
+  // and clear the cached session if the owner has flipped
+  // waiterAppEnabled to false since this device last logged in.
+  // Without this check a waiter with a fresh-enough localStorage
+  // would render their full app (StaffSystem) without going through
+  // the gated login screen.
   useEffect(() => {
-    try {
-      const saved = localStorage.getItem("waiter_staff");
-      if (saved) {
+    let cancelled = false;
+    async function restore() {
+      try {
+        const saved = localStorage.getItem("waiter_staff");
+        if (!saved) return;
         const parsed = JSON.parse(saved);
         const loginAt = parsed.loginAt || 0;
         const SESSION_DURATION = 16 * 60 * 60 * 1000; // 16 hours
-        if (Date.now() - loginAt < SESSION_DURATION) {
-          setLoggedInStaff(parsed);
-        } else {
+        if (Date.now() - loginAt >= SESSION_DURATION) {
           localStorage.removeItem("waiter_staff");
+          return;
         }
-      }
-    } catch { /* silent */ }
-    setHydrated(true);
+        // Cheap config check before restoring. SWR-cached on the
+        // server so this is effectively free after the first call
+        // for a given device.
+        try {
+          const restaurantSlug = process.env.NEXT_PUBLIC_RESTAURANT_SLUG || "neom-dahab";
+          const res = await fetch(`/api/restaurant?slug=${restaurantSlug}`, { cache: "no-store" });
+          if (res.ok) {
+            const cfg = await res.json();
+            if (cfg.waiterAppEnabled === false) {
+              localStorage.removeItem("waiter_staff");
+              return;
+            }
+          }
+        } catch { /* offline / network blip — fall through and restore */ }
+        if (!cancelled) setLoggedInStaff(parsed);
+      } catch { /* silent */ }
+    }
+    restore().finally(() => { if (!cancelled) setHydrated(true); });
+    return () => { cancelled = true; };
   }, []);
 
   // Keep screen awake during shift (prevents tab kill on mobile)

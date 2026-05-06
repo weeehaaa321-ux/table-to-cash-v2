@@ -52,6 +52,11 @@ export function useFloorData(loggedInStaff: LoggedInStaff) {
     guestCount: number;
   }[]>([]);
   const [dismissedAlerts, setDismissedAlerts] = useState<Set<string>>(new Set());
+  // Restaurant-wide waiter-app flag. Drives whether the floor view
+  // shows the Reassign action and any other waiter-only affordances.
+  // Fetched once on mount; re-fetched on visibility change so a
+  // toggle in the dashboard reaches the floor view within seconds.
+  const [waiterAppEnabled, setWaiterAppEnabled] = useState<boolean>(true);
   const [now, setNow] = useState(Date.now());
   const [commsText, setCommsText] = useState("");
   const [commsTarget, setCommsTarget] = useState<string>("all");
@@ -64,6 +69,25 @@ export function useFloorData(loggedInStaff: LoggedInStaff) {
   useEffect(() => {
     const t = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(t);
+  }, []);
+
+  // Read the restaurant flag once on mount + on visibility flip back
+  // to the tab. Cheap (SWR-cached server-side); good enough for an
+  // owner-toggle propagation delay measured in seconds.
+  useEffect(() => {
+    let cancelled = false;
+    async function fetchFlag() {
+      try {
+        const res = await fetch(`/api/restaurant?slug=${RESTAURANT_SLUG}`, { cache: "no-store" });
+        if (!res.ok || cancelled) return;
+        const data = await res.json();
+        if (typeof data.waiterAppEnabled === "boolean") setWaiterAppEnabled(data.waiterAppEnabled);
+      } catch { /* keep the previous value on network blip */ }
+    }
+    fetchFlag();
+    const onVisible = () => { if (document.visibilityState === "visible") fetchFlag(); };
+    document.addEventListener("visibilitychange", onVisible);
+    return () => { cancelled = true; document.removeEventListener("visibilitychange", onVisible); };
   }, []);
 
   // ─── Polls ─────────────────────────────────────────
@@ -627,6 +651,7 @@ export function useFloorData(loggedInStaff: LoggedInStaff) {
     // Raw data
     sessions, allStaff, deliveries, recentMessages, now,
     pendingJoinRequests,
+    waiterAppEnabled,
     shiftInfo,
     // Comms state (hoisted so footer bar + broadcast handler share it)
     commsText, setCommsText, commsTarget, setCommsTarget,
