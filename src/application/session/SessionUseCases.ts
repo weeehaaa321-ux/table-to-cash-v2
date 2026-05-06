@@ -85,33 +85,30 @@ const ordersOpenInclude = {
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 } as any;
 
-// Cache of (restaurantId → serviceModel + chargePercent). The flag
-// is read on nearly every session-mutating request, so we keep a
-// 30-second in-memory cache to avoid hammering the DB. Owner toggles
-// from the dashboard call invalidateServiceModelCache() so the change
-// propagates within ~30s in the worst case (instantly when the cache
-// is colder than that).
-type ServiceModelCfg = { serviceModel: "WAITER" | "RUNNER"; serviceChargePercent: number };
-const serviceModelCache = new Map<string, { value: ServiceModelCfg; ts: number }>();
-const SERVICE_MODEL_TTL_MS = 30_000;
+// Cache of (restaurantId → waiterAppEnabled). Read on every session-
+// mutating request that branches on the flag (auto-assign, reassign,
+// READY push, /waiter route). 30-second in-memory cache so we don't
+// hammer the DB; owner toggles call invalidateWaiterAppEnabledCache()
+// on save so the new value is visible in milliseconds, not 30s.
+const waiterAppEnabledCache = new Map<string, { value: boolean; ts: number }>();
+const WAITER_APP_TTL_MS = 30_000;
 
-export function invalidateServiceModelCache(restaurantId?: string) {
-  if (restaurantId) serviceModelCache.delete(restaurantId);
-  else serviceModelCache.clear();
+export function invalidateWaiterAppEnabledCache(restaurantId?: string) {
+  if (restaurantId) waiterAppEnabledCache.delete(restaurantId);
+  else waiterAppEnabledCache.clear();
 }
 
-export async function readServiceModel(restaurantId: string): Promise<ServiceModelCfg> {
-  const hit = serviceModelCache.get(restaurantId);
-  if (hit && Date.now() - hit.ts < SERVICE_MODEL_TTL_MS) return hit.value;
+export async function readWaiterAppEnabled(restaurantId: string): Promise<boolean> {
+  const hit = waiterAppEnabledCache.get(restaurantId);
+  if (hit && Date.now() - hit.ts < WAITER_APP_TTL_MS) return hit.value;
   const r = await db.restaurant.findUnique({
     where: { id: restaurantId },
-    select: { serviceModel: true, serviceChargePercent: true },
+    select: { waiterAppEnabled: true },
   });
-  const value: ServiceModelCfg = {
-    serviceModel: (r?.serviceModel as "WAITER" | "RUNNER") || "WAITER",
-    serviceChargePercent: r?.serviceChargePercent ? Number(r.serviceChargePercent) : 0,
-  };
-  serviceModelCache.set(restaurantId, { value, ts: Date.now() });
+  // Default true preserves legacy behaviour for any restaurant that
+  // hasn't explicitly opted out (or for older rows pre-migration).
+  const value = r?.waiterAppEnabled ?? true;
+  waiterAppEnabledCache.set(restaurantId, { value, ts: Date.now() });
   return value;
 }
 
@@ -227,7 +224,7 @@ export class SessionUseCases {
         vipGuest: { select: { name: true } },
         orders: {
           select: {
-            id: true, orderNumber: true, total: true, status: true, paymentMethod: true, paidAt: true, tip: true, discount: true, serviceCharge: true, guestNumber: true, guestName: true,
+            id: true, orderNumber: true, total: true, status: true, paymentMethod: true, paidAt: true, tip: true, discount: true, guestNumber: true, guestName: true,
             items: {
               where: { cancelled: false },
               select: {
@@ -1265,8 +1262,8 @@ export class SessionUseCases {
     tipAmount: number;
     discountAmount?: number;
   }): Promise<
-    | { noop: true; orders: never[]; confirmedTotal: 0; discount: 0; serviceCharge: 0 }
-    | { noop: false; orders: Array<{ id: string; status: string; total: unknown }>; confirmedTotal: number; discount: number; serviceCharge: number; method: string }
+    | { noop: true; orders: never[]; confirmedTotal: 0; discount: 0 }
+    | { noop: false; orders: Array<{ id: string; status: string; total: unknown }>; confirmedTotal: number; discount: number; method: string }
   > {
     const { sessionId, paymentMethod, tipAmount, discountAmount } = input;
     return db.$transaction(async (tx) => {
@@ -1298,28 +1295,8 @@ export class SessionUseCases {
         });
       }
       if (orders.length === 0) {
-        return { noop: true, orders: [] as never[], confirmedTotal: 0, discount: 0, serviceCharge: 0 } as const;
+        return { noop: true, orders: [] as never[], confirmedTotal: 0, discount: 0 } as const;
       }
-
-      // Service charge: in RUNNER mode at percent>0, auto-add a
-      // mandatory % of the round's gross subtotal. Lives on Order.
-      // serviceCharge alongside `tip` (which stays optional and zero
-      // in RUNNER mode unless someone explicitly types it). Cashier
-      // confirm modal previews this; receipt prints it as a line.
-      const sessionRow = await tx.tableSession.findUnique({
-        where: { id: sessionId },
-        select: { restaurantId: true },
-      });
-      const restaurantCfg = sessionRow
-        ? await tx.restaurant.findUnique({
-            where: { id: sessionRow.restaurantId },
-            select: { serviceModel: true, serviceChargePercent: true },
-          })
-        : null;
-      const isRunnerMode = restaurantCfg?.serviceModel === "RUNNER";
-      const chargePct = restaurantCfg?.serviceChargePercent
-        ? Number(restaurantCfg.serviceChargePercent)
-        : 0;
 
       const now = new Date();
       const method = (paymentMethod || "CASH") as "CASH" | "CARD" | "INSTAPAY" | "APPLE_PAY" | "GOOGLE_PAY";
@@ -1396,16 +1373,10 @@ export class SessionUseCases {
         });
       }
 
-      // Round subtotal first — needed to cap the discount + compute
-      // the service charge.
+      // Round subtotal first — needed to cap the discount.
       const grossTotal = orders.reduce((sum, o) => sum + Number(o.total ?? 0), 0);
       const cleanDiscount = typeof discountAmount === "number" && discountAmount > 0 && isFinite(discountAmount)
         ? Math.min(Math.round(discountAmount), Math.round(grossTotal))
-        : 0;
-      // Service charge resolves from the discounted subtotal, not the
-      // gross — guest pays % on what they're actually being charged.
-      const serviceCharge = isRunnerMode && chargePct > 0
-        ? Math.round((grossTotal - cleanDiscount) * (chargePct / 100))
         : 0;
 
       // SET tip (not increment) — the cashier's input is the
@@ -1424,7 +1395,6 @@ export class SessionUseCases {
               paidAt: now,
               ...(isTipTarget ? { tip: Math.max(0, Math.round(tipAmount)) } : { tip: 0 }),
               ...(isTipTarget ? { discount: cleanDiscount } : { discount: 0 }),
-              ...(isTipTarget ? { serviceCharge } : { serviceCharge: 0 }),
             },
           });
         } else {
@@ -1435,18 +1405,13 @@ export class SessionUseCases {
               paidAt: now,
               ...(isTipTarget ? { tip: Math.max(0, Math.round(tipAmount)) } : { tip: 0 }),
               ...(isTipTarget ? { discount: cleanDiscount } : { discount: 0 }),
-              ...(isTipTarget ? { serviceCharge } : { serviceCharge: 0 }),
             },
           });
         }
       }
 
-      // confirmedTotal is what the cashier physically collects:
-      // gross − discount + service charge. (Tip stays separate; it's
-      // collected in the same transaction but accounted on a
-      // different line on the receipt.)
-      const confirmedTotal = grossTotal - cleanDiscount + serviceCharge;
-      return { noop: false, orders, confirmedTotal, discount: cleanDiscount, serviceCharge, method } as const;
+      const confirmedTotal = grossTotal - cleanDiscount;
+      return { noop: false, orders, confirmedTotal, discount: cleanDiscount, method } as const;
     });
   }
 

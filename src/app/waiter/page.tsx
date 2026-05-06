@@ -2102,17 +2102,13 @@ function StaffLoginScreen({ onLogin }: { onLogin: (staff: LoggedInStaff) => void
         return;
       }
       const staff = await res.json();
-      // Routing rules (in this priority order):
-      //   1. RUNNER role → always /runner (regardless of restaurant mode).
-      //   2. WAITER role + restaurant mode = RUNNER + not a captain →
-      //      /runner (legacy waiter staff redirected on the fly).
-      //   3. Otherwise → /waiter (the legacy table-owner app).
-      if (staff.role === "RUNNER") {
-        window.location.href = "/runner";
-        return;
-      }
-      if (staff.serviceModel === "RUNNER" && staff.role === "WAITER" && !staff.isCaptain) {
-        window.location.href = "/runner";
+      // Owner has turned the waiter app off for this restaurant.
+      // Refuse the login with a clear message so the staff knows it's
+      // intentional, not a system bug. Toggling back on at /dashboard
+      // re-enables the login on the next attempt.
+      if (staff.waiterAppEnabled === false) {
+        setError(t("waiter.appDisabled"));
+        setLoading(false);
         return;
       }
       onLogin(staff);

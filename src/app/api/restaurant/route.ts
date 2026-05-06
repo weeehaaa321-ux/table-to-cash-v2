@@ -3,7 +3,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { useCases } from "@/infrastructure/composition";
 import { db } from "@/lib/db";
-import { invalidateServiceModelCache } from "@/application/session/SessionUseCases";
+import { invalidateWaiterAppEnabledCache } from "@/application/session/SessionUseCases";
 
 // Restaurant config rarely changes — name, logo, currency, capacity.
 // Letting the browser/CDN serve it for 60s with SWR cuts thousands of
@@ -21,12 +21,13 @@ export async function GET(request: NextRequest) {
     if (!restaurant) {
       return NextResponse.json({ error: "Restaurant not found" }, { status: 404 });
     }
-    // Service model lives on a Prisma row that the use-case wrapper
-    // doesn't expose; read it directly. Drives the dashboard toggle
-    // and informs role-page redirects (WAITER/RUNNER).
+    // Read the waiter-app flag directly — it lives on Restaurant but
+    // isn't exposed by the legacy use-case wrapper. Drives the
+    // dashboard toggle on the Controls tab and short-circuits
+    // /waiter login when off.
     const cfg = await db.restaurant.findUnique({
       where: { id: restaurant.id },
-      select: { serviceModel: true, serviceChargePercent: true },
+      select: { waiterAppEnabled: true },
     });
     return NextResponse.json(
       {
@@ -40,8 +41,7 @@ export async function GET(request: NextRequest) {
         kitchenConfig: restaurant.kitchenConfig,
         instapayHandle: restaurant.instapayHandle ?? null,
         instapayPhone: restaurant.instapayPhone ?? null,
-        serviceModel: cfg?.serviceModel ?? "WAITER",
-        serviceChargePercent: cfg?.serviceChargePercent ? Number(cfg.serviceChargePercent) : 0,
+        waiterAppEnabled: cfg?.waiterAppEnabled ?? true,
         createdAt: restaurant.createdAt,
       },
       { headers: SWR_CONFIG },
@@ -55,7 +55,7 @@ export async function GET(request: NextRequest) {
 export async function PATCH(request: NextRequest) {
   try {
     const body = await request.json();
-    const { slug, waiterCapacity, instapayHandle, instapayPhone, serviceModel, serviceChargePercent } = body;
+    const { slug, waiterCapacity, instapayHandle, instapayPhone, waiterAppEnabled } = body;
     if (!slug) return NextResponse.json({ error: "slug required" }, { status: 400 });
     if (waiterCapacity !== undefined) {
       await useCases.updateRestaurantConfig.setWaiterCapacity(Number(waiterCapacity));
@@ -74,24 +74,19 @@ export async function PATCH(request: NextRequest) {
         phone: normalize(instapayPhone),
       });
     }
-    // Service-model + service-charge toggle. The user-facing knob the
-    // owner taps to switch between waiter and runner flows. Cache is
-    // invalidated immediately so the next request reads the new value
-    // instead of waiting for the 30-second TTL.
-    if (serviceModel !== undefined || serviceChargePercent !== undefined) {
+    // Waiter-app toggle. When false the floor runs without phones —
+    // /waiter is unreachable, sessions don't auto-assign, the kitchen
+    // marks SERVED at handoff. Reverse is identical: flip on, the
+    // legacy table-side waiter app resumes. Cache invalidated so the
+    // next read picks up the new value instead of waiting on TTL.
+    if (waiterAppEnabled !== undefined) {
       const r = await db.restaurant.findUnique({ where: { slug }, select: { id: true } });
       if (!r) return NextResponse.json({ error: "Restaurant not found" }, { status: 404 });
-      const data: Record<string, unknown> = {};
-      if (serviceModel === "WAITER" || serviceModel === "RUNNER") {
-        data.serviceModel = serviceModel;
-      }
-      if (typeof serviceChargePercent === "number" && serviceChargePercent >= 0 && serviceChargePercent <= 100) {
-        data.serviceChargePercent = serviceChargePercent;
-      }
-      if (Object.keys(data).length > 0) {
-        await db.restaurant.update({ where: { id: r.id }, data });
-        invalidateServiceModelCache(r.id);
-      }
+      await db.restaurant.update({
+        where: { id: r.id },
+        data: { waiterAppEnabled: !!waiterAppEnabled },
+      });
+      invalidateWaiterAppEnabledCache(r.id);
     }
     return NextResponse.json({ ok: true });
   } catch (err) {

@@ -206,7 +206,7 @@ function OrderCard({
   );
 }
 
-function ReadyFeed({ orders, now }: { orders: LiveOrder[]; now: number }) {
+function ReadyFeed({ orders, now, onAdvance }: { orders: LiveOrder[]; now: number; onAdvance: (id: string) => void }) {
   const ready = orders
     .filter((o) => o.status === "ready")
     .sort((a, b) => (b.readyAt || b.createdAt) - (a.readyAt || a.createdAt))
@@ -228,6 +228,16 @@ function ReadyFeed({ orders, now }: { orders: LiveOrder[]; now: number }) {
             <span className="text-xs text-text-secondary">{getOrderTag(order)}</span>
             <span className="flex-1" />
             <span className="text-[10px] font-semibold text-text-muted tabular-nums">{fmtWait(waitedMs)}</span>
+            {/* Bar marks the drink "out" when handing it through the
+                pickup window — same role as the kitchen mirror of this
+                control. Required when the waiter app is off; harmless
+                when it's on (waiters can still mark served themselves). */}
+            <button
+              onClick={() => onAdvance(order.id)}
+              className="px-3 py-1 rounded-lg bg-status-good-600 hover:bg-status-good-700 active:scale-95 text-white text-[11px] font-extrabold uppercase tracking-wider transition"
+            >
+              {t("bar.markOut")}
+            </button>
           </div>
         );
       })}
@@ -711,7 +721,7 @@ function BarSystem({ staff }: { staff: StaffInfo }) {
               <h3 className="text-[10px] font-bold uppercase tracking-wider text-text-muted mb-2">
                 {t("bar.readyForPickup")}
               </h3>
-              <ReadyFeed orders={orders} now={now} />
+              <ReadyFeed orders={orders} now={now} onAdvance={advanceOrder} />
             </div>
 
             <div className="bg-white rounded-xl border border-sand-200 p-4 shadow-sm">

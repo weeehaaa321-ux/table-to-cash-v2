@@ -383,7 +383,7 @@ function LoadBar({ load }: { load: StationLoad }) {
 
 // ─── READY FEED ──────────────────────────────────────
 
-function ReadyFeed({ orders, now }: { orders: LiveOrder[]; now: number }) {
+function ReadyFeed({ orders, now, onAdvance }: { orders: LiveOrder[]; now: number; onAdvance: (id: string) => void }) {
   const { t } = useLanguage();
   const ready = orders
     .filter((o) => o.status === "ready")
@@ -402,7 +402,15 @@ function ReadyFeed({ orders, now }: { orders: LiveOrder[]; now: number }) {
           <span className="text-sm font-bold text-text-secondary tabular-nums">#{order.orderNumber}</span>
           <span className="text-xs text-text-secondary">{getOrderTag(order)}</span>
           <span className="flex-1" />
-          <span className="text-xs font-bold text-status-good-600 uppercase">{t("kitchen.pickUp")}</span>
+          {/* "Out" tap = the dish has left the pickup window. Flips
+              the order to SERVED. Used when the floor is running
+              without phones — kitchen owns the SERVED transition. */}
+          <button
+            onClick={() => onAdvance(order.id)}
+            className="px-3 py-1 rounded-lg bg-status-good-600 hover:bg-status-good-700 active:scale-95 text-white text-[11px] font-extrabold uppercase tracking-wider transition"
+          >
+            {t("kitchen.markOut")}
+          </button>
         </div>
       ))}
     </div>
@@ -1072,7 +1080,7 @@ function KitchenSystem({ staff }: { staff: StaffInfo }) {
               <h3 className="text-[10px] font-bold uppercase tracking-wider text-text-muted mb-2">
                 {t("kitchen.readyForPickup")}
               </h3>
-              <ReadyFeed orders={orders} now={now} />
+              <ReadyFeed orders={orders} now={now} onAdvance={advanceOrder} />
             </div>
 
             {/* Quick stats */}

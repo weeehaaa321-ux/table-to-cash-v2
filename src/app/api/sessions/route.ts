@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { useCases } from "@/infrastructure/composition";
 import { db } from "@/lib/db";
-import { readServiceModel } from "@/application/session/SessionUseCases";
+import { readWaiterAppEnabled } from "@/application/session/SessionUseCases";
 
 // Resolve the caller's role for the PATCH actions that need it. Returns
 // either a role string (when a staff member is signed in via x-staff-id)
@@ -33,12 +33,12 @@ async function autoAssignWaiter(restaurantId: string): Promise<string | null> {
   const realId = await useCases.sessions.resolveRestaurantId(restaurantId);
   if (!realId) return null;
 
-  // RUNNER mode: nobody owns the table. Sessions open with waiterId
-  // = null and the floor runs off the shared READY queue at /runner.
-  // Switching back to WAITER mode is a single column update — this
-  // gate flips automatically.
-  const cfg = await readServiceModel(realId);
-  if (cfg.serviceModel === "RUNNER") return null;
+  // Waiter app disabled: nobody owns the table — the kitchen rings
+  // a physical bell, a free waiter walks over and takes the dish.
+  // Sessions open with waiterId = null. Toggling waiterAppEnabled
+  // back to true makes the next session auto-assign normally.
+  const waiterAppOn = await readWaiterAppEnabled(realId);
+  if (!waiterAppOn) return null;
 
   const currentShift = useCases.sessions.currentShift();
 
@@ -226,16 +226,16 @@ export async function PATCH(request: NextRequest) {
     }
 
     if (action === "assign_waiter" && body.waiterId) {
-      // Block manual assignment in RUNNER mode — there's no concept
-      // of "this table belongs to that waiter." Floor manager's UI
-      // hides the button when the flag is RUNNER, so this is the
-      // belt-and-braces server check.
+      // Block manual assignment when the waiter app is disabled —
+      // there's no concept of "this table belongs to that waiter"
+      // and no app for them to receive routing. UI hides the button;
+      // this is the belt-and-braces server check.
       const meta = await useCases.sessions.getMeta(sessionId);
       if (meta) {
-        const cfg = await readServiceModel(meta.restaurantId);
-        if (cfg.serviceModel === "RUNNER") {
+        const waiterAppOn = await readWaiterAppEnabled(meta.restaurantId);
+        if (!waiterAppOn) {
           return NextResponse.json(
-            { error: "ASSIGN_DISABLED", message: "This restaurant runs in runner mode — tables are not assigned to specific staff." },
+            { error: "ASSIGN_DISABLED", message: "Waiter app is disabled for this restaurant." },
             { status: 409 },
           );
         }

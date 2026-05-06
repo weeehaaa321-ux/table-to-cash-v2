@@ -2,9 +2,8 @@ import type { StaffRole } from "@/generated/prisma/client";
 
 // Per-role prefix for staff codes. Short so it fits on a staff card badge.
 // OWNER is intentionally not listed — owners don't get codes.
-const ROLE_PREFIX: Record<Exclude<StaffRole, "OWNER">, string> = {
+const ROLE_PREFIX: Record<Exclude<StaffRole, "OWNER" | "RUNNER">, string> = {
   WAITER: "WAI",
-  RUNNER: "RUN",
   CASHIER: "CSH",
   KITCHEN: "KIT",
   BAR: "BAR",
@@ -18,7 +17,11 @@ export function generateStaffCode(role: StaffRole): string {
   if (role === "OWNER") {
     throw new Error("Owners do not get staff codes");
   }
-  const prefix = ROLE_PREFIX[role as Exclude<StaffRole, "OWNER">];
+  // RUNNER is a dead enum value left over from a reverted feature.
+  // Treat it as WAITER for code-prefix purposes if it ever lands here
+  // (no code path creates RUNNER staff today).
+  const safe = role === "RUNNER" ? "WAITER" : role;
+  const prefix = ROLE_PREFIX[safe as Exclude<StaffRole, "OWNER" | "RUNNER">];
   const suffix = String(Math.floor(100 + Math.random() * 900));
   return `${prefix}-${suffix}`;
 }

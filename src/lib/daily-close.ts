@@ -105,15 +105,13 @@ export async function computeDailyTotals(
   >();
 
   for (const o of inDay) {
-    // Net of discount + service charge: revenue and per-method totals
-    // reflect what was actually collected, not the gross before-
-    // discount figure. Both columns default 0 on historical rows so
-    // pre-feature days reconcile unchanged.
+    // Net of cashier-applied discount: revenue and per-method totals
+    // should reflect what was actually collected, not the gross
+    // before-discount figure. Stored discount column is 0 for older
+    // rows so historical days reconcile unchanged.
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const oDiscount = toNum((o as any).discount ?? 0);
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const oServiceCharge = toNum((o as any).serviceCharge ?? 0);
-    const oTotal = toNum(o.total) - oDiscount + oServiceCharge;
+    const oTotal = toNum(o.total) - oDiscount;
     revenue += oTotal;
     const m = (o.paymentMethod || "OTHER").toUpperCase();
     if (m === "CASH") cash += oTotal;

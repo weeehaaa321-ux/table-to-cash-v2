@@ -57,10 +57,6 @@ export async function GET(request: NextRequest) {
       // EGP discount applied to this round (cashier-entered at confirm
       // time). 0 when none. Always whole-EGP, capped at subtotal.
       discount: number;
-      // Mandatory service charge (RUNNER mode). 0 in WAITER mode.
-      // Receipt renders it as a separate line so the guest sees what
-      // the auto-add was.
-      serviceCharge: number;
       guestNumber: number | null;
       guestName: string | null;
     };
@@ -78,18 +74,14 @@ export async function GET(request: NextRequest) {
         const items: InvoiceItem[] = [];
         let subtotal = 0;
         let discount = 0;
-        let serviceCharge = 0;
         for (const o of group) {
           subtotal += toNum(o.total);
-          // Discount + serviceCharge columns added 2026-05-04. Older
-          // paid orders never have them set; coalesce keeps historical
-          // totals intact (sum stays at gross when both are 0/null).
+          // Discount column was added 2026-05-04. Older paid orders
+          // never have it set, so the coalesce keeps historical totals
+          // intact (sum stays at gross when discount is 0/null).
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           const oDisc = (o as any).discount as Prisma.Decimal | number | null | undefined;
           discount += toNum(oDisc ?? 0);
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          const oSc = (o as any).serviceCharge as Prisma.Decimal | number | null | undefined;
-          serviceCharge += toNum(oSc ?? 0);
           for (const it of o.items) {
             // Skip cancelled rows entirely — guest never owed for them.
             if (it.cancelled) continue;
@@ -157,7 +149,6 @@ export async function GET(request: NextRequest) {
           items,
           subtotal: Math.round(subtotal),
           discount: Math.round(discount),
-          serviceCharge: Math.round(serviceCharge),
           guestNumber,
           guestName,
         };
@@ -169,7 +160,6 @@ export async function GET(request: NextRequest) {
     const allItems: InvoiceItem[] = rounds.flatMap((r) => r.items);
     const subtotal = rounds.reduce((s, r) => s + r.subtotal, 0);
     const totalDiscount = rounds.reduce((s, r) => s + r.discount, 0);
-    const totalServiceCharge = rounds.reduce((s, r) => s + r.serviceCharge, 0);
     const lastRound = rounds[rounds.length - 1];
 
     return NextResponse.json({
@@ -184,8 +174,7 @@ export async function GET(request: NextRequest) {
       items: allItems,
       subtotal,
       discount: totalDiscount,
-      serviceCharge: totalServiceCharge,
-      total: subtotal - totalDiscount + totalServiceCharge,
+      total: subtotal - totalDiscount,
       orderCount: session.orders.length,
       sessionId: session.id,
       rounds,

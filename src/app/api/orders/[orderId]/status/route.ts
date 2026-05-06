@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { useCases } from "@/infrastructure/composition";
 import { closeSessionForOrder, StaleStatusTransitionError } from "@/lib/queries";
 import { sendPushToStaff, sendPushToRole } from "@/lib/web-push";
-import { readServiceModel } from "@/application/session/SessionUseCases";
+import { readWaiterAppEnabled } from "@/application/session/SessionUseCases";
 import { getShiftTimer } from "@/lib/shifts";
 import { requireStaffAuth } from "@/lib/api-auth";
 
@@ -91,32 +91,14 @@ export async function PATCH(
         // sends get dropped or stalled. Capped at 3s so a
         // weird endpoint can't stall the route response.
         const orderPushes: Promise<unknown>[] = [];
-        if (status === "READY" && !isDelivery && restaurantId) {
-          // Routing depends on the restaurant's service model.
-          // WAITER mode: ping the assigned waiter on /waiter (the
-          // legacy 1:1 route).
-          // RUNNER mode: ping every WAITER-role staff (they're all
-          // runners now) so anyone free grabs it; their app
-          // (/runner) shows the shared queue.
-          const cfg = await readServiceModel(restaurantId).catch(() => null);
-          if (cfg?.serviceModel === "RUNNER") {
-            // Push to both WAITER and RUNNER cohorts. WAITER is here
-            // for legacy staff records that were created before the
-            // RUNNER role existed and are now redirected to /runner.
-            // RUNNER catches anyone hired specifically as a runner.
-            // Both land at /runner; the shared queue dedupes.
-            const pushBody = {
-              title: { en: "Pickup ready", ar: "طبق جاهز للتقديم" } as const,
-              body: {
-                en: `${tableEn} — order #${fullOrder.orderNumber}`,
-                ar: `${tableAr} — طلب رقم ${fullOrder.orderNumber}`,
-              } as const,
-              tag: `order-ready-${orderId}`,
-              url: "/runner",
-            };
-            orderPushes.push(sendPushToRole("WAITER", restaurantId, pushBody).catch(() => {}));
-            orderPushes.push(sendPushToRole("RUNNER", restaurantId, pushBody).catch(() => {}));
-          } else if (fullOrder.session?.waiterId) {
+        if (status === "READY" && fullOrder.session?.waiterId && !isDelivery && restaurantId) {
+          // Skip the per-waiter push when the restaurant has the
+          // waiter app turned off — a physical bell at the kitchen
+          // pass already signals the floor, and there's no app for
+          // the waiter to receive the push in. Saves a WebPush call
+          // per dish.
+          const waiterAppOn = await readWaiterAppEnabled(restaurantId).catch(() => true);
+          if (waiterAppOn) {
             orderPushes.push(sendPushToStaff(fullOrder.session.waiterId, {
               title: { en: "Order Ready", ar: "الطلب جاهز" },
               body: {

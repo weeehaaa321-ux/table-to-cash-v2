@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { useCases } from "@/infrastructure/composition";
-import { readServiceModel } from "@/application/session/SessionUseCases";
+import { readWaiterAppEnabled } from "@/application/session/SessionUseCases";
 
 // ─── In-memory rate limit ──────────────────────────────────────
 //
@@ -104,16 +104,12 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: result.reason }, { status: result.status });
     }
     recordSuccess(ip);
-    // Surface the restaurant's service model alongside the staff
-    // profile so the login page can route WAITER staff to /runner
-    // when the restaurant is in RUNNER mode. Switching modes is one
-    // column update; this reads through the cache so it picks up the
-    // change within seconds.
-    const cfg = await readServiceModel(realId);
+    // Surface the waiter-app flag so the role pages can short-circuit
+    // login when their app is disabled for this restaurant.
+    const waiterAppEnabled = await readWaiterAppEnabled(realId);
     return NextResponse.json({
       ...result.staff,
-      serviceModel: cfg.serviceModel,
-      serviceChargePercent: cfg.serviceChargePercent,
+      waiterAppEnabled,
     });
   } catch (err) {
     console.error("Staff login failed:", err);

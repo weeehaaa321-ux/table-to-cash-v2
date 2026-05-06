@@ -170,7 +170,7 @@ export async function PATCH(request: NextRequest) {
     });
 
     if (result.noop) {
-      return NextResponse.json({ success: true, paidOrders: 0, sessionClosed: false, confirmedTotal: 0, discount: 0, serviceCharge: 0 });
+      return NextResponse.json({ success: true, paidOrders: 0, sessionClosed: false, confirmedTotal: 0, discount: 0 });
     }
 
     await maybeCloseSession(sessionId);
@@ -183,7 +183,6 @@ export async function PATCH(request: NextRequest) {
       sessionClosed: anyUnpaid === 0,
       confirmedTotal: result.confirmedTotal,
       discount: result.discount,
-      serviceCharge: result.serviceCharge,
       tableNumber: sessionInfo?.table?.number ?? null,
     });
   } catch (err) {
