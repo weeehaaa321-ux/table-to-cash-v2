@@ -34,6 +34,7 @@ export async function POST(request: NextRequest) {
     prepTime,
     availableFromHour,
     availableToHour,
+    complimentaryForHotelGuests = false,
   } = body;
 
   if (!categoryId || !name || typeof price !== "number") {
@@ -63,6 +64,7 @@ export async function POST(request: NextRequest) {
       prepTime: typeof prepTime === "number" ? prepTime : null,
       availableFromHour: typeof availableFromHour === "number" ? availableFromHour : null,
       availableToHour: typeof availableToHour === "number" ? availableToHour : null,
+      complimentaryForHotelGuests: !!complimentaryForHotelGuests,
     });
     return NextResponse.json(item, { status: 201 });
   } catch (err) {
@@ -94,6 +96,10 @@ export async function PATCH(request: NextRequest) {
     "categoryId",
     "availableFromHour",
     "availableToHour",
+    // Hotel inclusion flag — true means the cafe Charge-to-Room flow
+    // auto-comps this item for guests with an active reservation.
+    // Used for the pool ticket at Neom (rate-included).
+    "complimentaryForHotelGuests",
   ] as const;
 
   const data: Record<string, unknown> = {};

@@ -2975,6 +2975,10 @@ type AdminMenuItem = {
   // EGP/hour rate for time-billed activity items (kayak, board,
   // massage). Null for ordinary items and flat-priced activities.
   pricePerHour: number | null;
+  // When true and the cafe table session is linked to an active
+  // hotel reservation, the cashier's Charge-to-Room flow auto-comps
+  // this item ("Hotel inclusion"). Used for pool-as-included.
+  complimentaryForHotelGuests: boolean;
 };
 
 type AdminCategory = {
@@ -3006,6 +3010,8 @@ type MenuDraft = {
   categoryId: string;
   availableFromHour: string;
   availableToHour: string;
+  // Comp this item for checked-in hotel guests at Charge-to-Room time.
+  complimentaryForHotelGuests: boolean;
 };
 
 function emptyDraft(categoryId: string): MenuDraft {
@@ -3023,6 +3029,7 @@ function emptyDraft(categoryId: string): MenuDraft {
     categoryId,
     availableFromHour: "",
     availableToHour: "",
+    complimentaryForHotelGuests: false,
   };
 }
 
@@ -3041,6 +3048,7 @@ function draftFromItem(item: AdminMenuItem): MenuDraft {
     categoryId: item.categoryId,
     availableFromHour: item.availableFromHour != null ? String(item.availableFromHour) : "",
     availableToHour: item.availableToHour != null ? String(item.availableToHour) : "",
+    complimentaryForHotelGuests: item.complimentaryForHotelGuests,
   };
 }
 
@@ -3116,6 +3124,7 @@ function MenuPanel({ restaurantId, ownerId }: { restaurantId: string; ownerId: s
           prepTime: newDraft.prepTime ? parseInt(newDraft.prepTime, 10) : undefined,
           availableFromHour: newDraft.availableFromHour ? parseInt(newDraft.availableFromHour, 10) : undefined,
           availableToHour: newDraft.availableToHour ? parseInt(newDraft.availableToHour, 10) : undefined,
+          complimentaryForHotelGuests: newDraft.complimentaryForHotelGuests,
         }),
       });
       if (!res.ok) {
@@ -3164,6 +3173,7 @@ function MenuPanel({ restaurantId, ownerId }: { restaurantId: string; ownerId: s
           prepTime: editDraft.prepTime ? parseInt(editDraft.prepTime, 10) : null,
           availableFromHour: editDraft.availableFromHour ? parseInt(editDraft.availableFromHour, 10) : null,
           availableToHour: editDraft.availableToHour ? parseInt(editDraft.availableToHour, 10) : null,
+          complimentaryForHotelGuests: editDraft.complimentaryForHotelGuests,
         }),
       });
       if (!res.ok) {
@@ -3660,6 +3670,14 @@ function MenuItemForm({ draft, setDraft }: { draft: MenuDraft; setDraft: (d: Men
             onChange={(e) => setDraft({ ...draft, highMargin: e.target.checked })}
           />
           {t("dashboard.menu.highMargin")}
+        </label>
+        <label className="flex items-center gap-1 cursor-pointer" title="Auto-comp this item for hotel guests at Charge-to-Room">
+          <input
+            type="checkbox"
+            checked={draft.complimentaryForHotelGuests}
+            onChange={(e) => setDraft({ ...draft, complimentaryForHotelGuests: e.target.checked })}
+          />
+          🛏️ Hotel comp
         </label>
       </div>
     </div>

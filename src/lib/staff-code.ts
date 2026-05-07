@@ -9,6 +9,7 @@ const ROLE_PREFIX: Record<Exclude<StaffRole, "OWNER" | "RUNNER">, string> = {
   BAR: "BAR",
   FLOOR_MANAGER: "FLR",
   DELIVERY: "DEL",
+  FRONT_DESK: "FDK",
 };
 
 // Generate a candidate code like "WAI-482". Caller must check uniqueness

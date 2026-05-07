@@ -8,27 +8,27 @@ datasource db {
 }
 
 model Restaurant {
-  id        String   @id @default(cuid())
-  name      String
-  slug      String   @unique
-  logo      String?
-  currency  String   @default("EGP")
-  timezone  String   @default("Africa/Cairo")
-  tables    Table[]
-  categories Category[]
-  orders    Order[]
-  promos    Promo[]
-  staff     Staff[]
-  sessions  TableSession[]
-  messages  Message[]
-  pushSubs  PushSubscription[]
-  settlements CashSettlement[]
-  drawers    CashDrawer[]
-  ratings   Rating[]
-  vipGuests VipGuest[]
-  schedules ShiftSchedule[]
+  id               String             @id @default(cuid())
+  name             String
+  slug             String             @unique
+  logo             String?
+  currency         String             @default("EGP")
+  timezone         String             @default("Africa/Cairo")
+  tables           Table[]
+  categories       Category[]
+  orders           Order[]
+  promos           Promo[]
+  staff            Staff[]
+  sessions         TableSession[]
+  messages         Message[]
+  pushSubs         PushSubscription[]
+  settlements      CashSettlement[]
+  drawers          CashDrawer[]
+  ratings          Rating[]
+  vipGuests        VipGuest[]
+  schedules        ShiftSchedule[]
   kitchenConfig    Json?
-  waiterCapacity   Int      @default(15)
+  waiterCapacity   Int                @default(15)
   instapayHandle   String?
   instapayPhone    String?
   // Per-restaurant gate on the waiter app. true (default) preserves
@@ -39,16 +39,22 @@ model Restaurant {
   // marks SERVED itself when handing the dish through the pickup
   // window. Switching either direction is one column update; the
   // waiter code stays in the repo so any future customer flips it on.
-  waiterAppEnabled Boolean  @default(true)
-  createdAt        DateTime @default(now())
+  waiterAppEnabled Boolean            @default(true)
+  // Optional hotel module attached to this property. Present only for
+  // restaurants that double as a beachfront hotel (Neom). When the
+  // relation row exists, the dashboard surfaces hotel routes and the
+  // cafe payment flow exposes "Charge to Room" for sessions linked
+  // to an active reservation.
+  hotel            Hotel?
+  createdAt        DateTime           @default(now())
 }
 
 model Table {
-  id           String     @id @default(cuid())
+  id           String         @id @default(cuid())
   number       Int
   label        String?
   qrCode       String?
-  restaurant   Restaurant @relation(fields: [restaurantId], references: [id])
+  restaurant   Restaurant     @relation(fields: [restaurantId], references: [id])
   restaurantId String
   orders       Order[]
   sessions     TableSession[]
@@ -57,14 +63,14 @@ model Table {
 }
 
 model Category {
-  id           String     @id @default(cuid())
-  name         String
-  nameAr       String?
-  nameRu       String?
-  slug         String
-  sortOrder    Int        @default(0)
-  icon         String?
-  station      Station    @default(KITCHEN)
+  id                String     @id @default(cuid())
+  name              String
+  nameAr            String?
+  nameRu            String?
+  slug              String
+  sortOrder         Int        @default(0)
+  icon              String?
+  station           Station    @default(KITCHEN)
   // Category-wide time-of-day availability (Cairo local hours, 0-23).
   // When null, items in this category are always available unless they
   // set their own hours. When set, items inherit these hours unless
@@ -72,48 +78,54 @@ model Category {
   // across many menu items without touching each row.
   availableFromHour Int?
   availableToHour   Int?
-  restaurant   Restaurant @relation(fields: [restaurantId], references: [id])
-  restaurantId String
-  items        MenuItem[]
+  restaurant        Restaurant @relation(fields: [restaurantId], references: [id])
+  restaurantId      String
+  items             MenuItem[]
 
   @@unique([restaurantId, slug])
 }
 
 model MenuItem {
-  id          String   @id @default(cuid())
-  name        String
-  nameAr      String?
-  nameRu      String?
-  description String?
-  descAr      String?
-  descRu      String?
-  price       Decimal  @db.Decimal(10, 2)
+  id                          String      @id @default(cuid())
+  name                        String
+  nameAr                      String?
+  nameRu                      String?
+  description                 String?
+  descAr                      String?
+  descRu                      String?
+  price                       Decimal     @db.Decimal(10, 2)
   // EGP/hour for time-billed activity items (kayak, board, massage).
   // When non-null, ordering this item starts a timer on the OrderItem
   // (activityStartedAt) and the bill prorates by elapsed minutes.
   // Null for ordinary food/drinks AND for flat-priced activity items
   // (e.g. pool ticket — single fixed fee, no timer).
-  pricePerHour Decimal? @db.Decimal(10, 2)
-  image       String?
-  available   Boolean  @default(true)
-  bestSeller  Boolean  @default(false)
-  highMargin  Boolean  @default(false)
-  calories    Int?
-  prepTime    Int?
-  sortOrder   Int      @default(0)
+  pricePerHour                Decimal?    @db.Decimal(10, 2)
+  image                       String?
+  available                   Boolean     @default(true)
+  bestSeller                  Boolean     @default(false)
+  highMargin                  Boolean     @default(false)
+  calories                    Int?
+  prepTime                    Int?
+  sortOrder                   Int         @default(0)
   // Time-of-day availability (Cairo local hours, 0-23). When both are
   // null the item is always available. When set, the item is hidden
   // from the guest menu outside [from, to). Used for breakfast etc.
-  availableFromHour Int?
-  availableToHour   Int?
-  category    Category @relation(fields: [categoryId], references: [id])
-  categoryId  String
-  addOns      AddOn[]
-  pairsWith   String[] // IDs of items that pair well (upsell)
-  tags        String[] // e.g. ["spicy", "vegan", "gluten-free"]
-  orderItems  OrderItem[]
-  views       Int      @default(0)
-  createdAt   DateTime @default(now())
+  availableFromHour           Int?
+  availableToHour             Int?
+  // When true and the table session is linked to an active hotel
+  // Reservation, this item is auto-comped (compReason set to
+  // "Hotel inclusion") at the moment the cashier picks
+  // Charge-to-Room. Used for inclusions like the pool ticket in a
+  // resort rate. Defaults false — kayak/board/massage stay charged.
+  complimentaryForHotelGuests Boolean     @default(false)
+  category                    Category    @relation(fields: [categoryId], references: [id])
+  categoryId                  String
+  addOns                      AddOn[]
+  pairsWith                   String[] // IDs of items that pair well (upsell)
+  tags                        String[] // e.g. ["spicy", "vegan", "gluten-free"]
+  orderItems                  OrderItem[]
+  views                       Int         @default(0)
+  createdAt                   DateTime    @default(now())
 
   @@index([categoryId])
 }
@@ -129,20 +141,20 @@ model AddOn {
 }
 
 model Order {
-  id           String      @id @default(cuid())
-  orderNumber  Int
-  status       OrderStatus @default(PENDING)
-  table        Table?      @relation(fields: [tableId], references: [id])
-  tableId      String?
-  restaurant   Restaurant  @relation(fields: [restaurantId], references: [id])
-  restaurantId String
-  session      TableSession? @relation(fields: [sessionId], references: [id])
-  sessionId    String?
-  items        OrderItem[]
-  subtotal     Decimal     @db.Decimal(10, 2)
-  tax          Decimal     @default(0) @db.Decimal(10, 2)
-  total        Decimal     @db.Decimal(10, 2)
-  tip          Decimal     @default(0) @db.Decimal(10, 2)
+  id               String          @id @default(cuid())
+  orderNumber      Int
+  status           OrderStatus     @default(PENDING)
+  table            Table?          @relation(fields: [tableId], references: [id])
+  tableId          String?
+  restaurant       Restaurant      @relation(fields: [restaurantId], references: [id])
+  restaurantId     String
+  session          TableSession?   @relation(fields: [sessionId], references: [id])
+  sessionId        String?
+  items            OrderItem[]
+  subtotal         Decimal         @db.Decimal(10, 2)
+  tax              Decimal         @default(0) @db.Decimal(10, 2)
+  total            Decimal         @db.Decimal(10, 2)
+  tip              Decimal         @default(0) @db.Decimal(10, 2)
   // Cashier-applied discount on this order, in EGP. Stored as the
   // resolved EGP amount (not %), so revenue rollups can subtract it
   // without having to re-evaluate "was this 10% of what?". Settles
@@ -150,37 +162,37 @@ model Order {
   // (what the guest consumed), and the cashier collects total - discount.
   // 0 by default; set on the first order of a round at confirmPayRound
   // time.
-  discount     Decimal     @default(0) @db.Decimal(10, 2)
+  discount         Decimal         @default(0) @db.Decimal(10, 2)
   // Flat delivery fee bundled into `total`. Stored separately so the
   // receipt / driver UI / cashier ledger can show the breakdown
   // without each surface re-deriving it from the orderType + a magic
   // constant. 0 for non-delivery orders.
-  deliveryFee  Decimal     @default(0) @db.Decimal(10, 2)
-  paymentMethod PaymentMethod?
-  paidAt       DateTime?
-  readyAt      DateTime?
-  servedAt     DateTime?
-  notes        String?
-  guestNumber  Int?
-  guestName    String?
-  language     String      @default("en")
-  station      Station     @default(KITCHEN)
-  groupId      String?
-  clientRequestId String?  @unique
-  orderType    OrderType   @default(TABLE)
-  vipGuest     VipGuest?   @relation(fields: [vipGuestId], references: [id])
-  vipGuestId   String?
-  deliveryAddress String?
-  deliveryLat    Float?
-  deliveryLng    Float?
-  deliveryNotes  String?
-  deliveryStatus DeliveryStatus?
-  deliveryDriver Staff?    @relation("DeliveryDriver", fields: [deliveryDriverId], references: [id])
+  deliveryFee      Decimal         @default(0) @db.Decimal(10, 2)
+  paymentMethod    PaymentMethod?
+  paidAt           DateTime?
+  readyAt          DateTime?
+  servedAt         DateTime?
+  notes            String?
+  guestNumber      Int?
+  guestName        String?
+  language         String          @default("en")
+  station          Station         @default(KITCHEN)
+  groupId          String?
+  clientRequestId  String?         @unique
+  orderType        OrderType       @default(TABLE)
+  vipGuest         VipGuest?       @relation(fields: [vipGuestId], references: [id])
+  vipGuestId       String?
+  deliveryAddress  String?
+  deliveryLat      Float?
+  deliveryLng      Float?
+  deliveryNotes    String?
+  deliveryStatus   DeliveryStatus?
+  deliveryDriver   Staff?          @relation("DeliveryDriver", fields: [deliveryDriverId], references: [id])
   deliveryDriverId String?
-  pickedUpAt   DateTime?
-  deliveredAt  DateTime?
-  createdAt    DateTime    @default(now())
-  updatedAt    DateTime    @updatedAt
+  pickedUpAt       DateTime?
+  deliveredAt      DateTime?
+  createdAt        DateTime        @default(now())
+  updatedAt        DateTime        @updatedAt
 
   // Split-pay support. When a guest taps "Pay X EGP" with only some
   // items selected, splitOrderForPayment moves those items into a new
@@ -193,6 +205,12 @@ model Order {
   parentOrderId String?
   splits        Order[] @relation("OrderSplits")
 
+  // When the cashier picks "Charge to Room", paymentMethod=ROOM_CHARGE
+  // and a FolioCharge row is created against the matching reservation.
+  // The link is 1:1 — an Order maps to at most one folio line, so the
+  // reverse relation lives on the Order side as a nullable singleton.
+  folioCharge FolioCharge?
+
   @@index([groupId])
   @@index([restaurantId, status])
   @@index([restaurantId, createdAt])
@@ -204,23 +222,23 @@ model Order {
 }
 
 model OrderItem {
-  id           String   @id @default(cuid())
-  quantity     Int      @default(1)
-  price        Decimal  @db.Decimal(10, 2)
-  addOns       String[]
-  notes        String?
-  menuItem     MenuItem? @relation(fields: [menuItemId], references: [id], onDelete: SetNull)
-  menuItemId   String?
-  order        Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
-  orderId      String
-  wasUpsell    Boolean  @default(false)
-  cancelled    Boolean  @default(false)
-  cancelReason String?
-  cancelledAt  DateTime?
-  comped       Boolean  @default(false)
-  compReason   String?
-  compedBy     String?   // Staff.id of whoever authorised the comp
-  compedAt     DateTime?
+  id                String    @id @default(cuid())
+  quantity          Int       @default(1)
+  price             Decimal   @db.Decimal(10, 2)
+  addOns            String[]
+  notes             String?
+  menuItem          MenuItem? @relation(fields: [menuItemId], references: [id], onDelete: SetNull)
+  menuItemId        String?
+  order             Order     @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  orderId           String
+  wasUpsell         Boolean   @default(false)
+  cancelled         Boolean   @default(false)
+  cancelReason      String?
+  cancelledAt       DateTime?
+  comped            Boolean   @default(false)
+  compReason        String?
+  compedBy          String? // Staff.id of whoever authorised the comp
+  compedAt          DateTime?
   // Time-billed activity tracking. Set on creation when the item's
   // MenuItem has pricePerHour. activityStoppedAt is null while the
   // timer is still running; the cashier or floor manager taps "Stop"
@@ -252,24 +270,24 @@ model Promo {
 }
 
 model Staff {
-  id              String     @id @default(cuid())
-  name            String
-  code            String?    // Short unique per-restaurant code (e.g. WAI-482) to disambiguate duplicate names. Null for OWNER rows.
-  pin             String
-  role            StaffRole  @default(WAITER)
-  active          Boolean    @default(true)
-  shift           Int        @default(0) // 0=unassigned, 1=00:00-08:00, 2=08:00-16:00, 3=16:00-00:00 Cairo time
-  deliveryOnline  Boolean    @default(false) // Delivery drivers: true = accepting orders
-  restaurant      Restaurant @relation(fields: [restaurantId], references: [id])
-  restaurantId    String
-  sessions        TableSession[]
-  pushSubs        PushSubscription[]
-  settlementsAsWaiter  CashSettlement[] @relation("SettlementWaiter")
-  settlementsAsCashier CashSettlement[] @relation("SettlementCashier")
+  id                   String             @id @default(cuid())
+  name                 String
+  code                 String? // Short unique per-restaurant code (e.g. WAI-482) to disambiguate duplicate names. Null for OWNER rows.
+  pin                  String
+  role                 StaffRole          @default(WAITER)
+  active               Boolean            @default(true)
+  shift                Int                @default(0) // 0=unassigned, 1=00:00-08:00, 2=08:00-16:00, 3=16:00-00:00 Cairo time
+  deliveryOnline       Boolean            @default(false) // Delivery drivers: true = accepting orders
+  restaurant           Restaurant         @relation(fields: [restaurantId], references: [id])
+  restaurantId         String
+  sessions             TableSession[]
+  pushSubs             PushSubscription[]
+  settlementsAsWaiter  CashSettlement[]   @relation("SettlementWaiter")
+  settlementsAsCashier CashSettlement[]   @relation("SettlementCashier")
   drawers              CashDrawer[]
-  deliveries      Order[]    @relation("DeliveryDriver")
-  schedules       ShiftSchedule[]
-  createdAt       DateTime   @default(now())
+  deliveries           Order[]            @relation("DeliveryDriver")
+  schedules            ShiftSchedule[]
+  createdAt            DateTime           @default(now())
 
   @@unique([restaurantId, code])
   @@index([restaurantId])
@@ -290,31 +308,38 @@ model ShiftSchedule {
 }
 
 model TableSession {
-  id           String        @id @default(cuid())
-  table        Table?        @relation(fields: [tableId], references: [id])
-  tableId      String?
-  restaurant   Restaurant    @relation(fields: [restaurantId], references: [id])
-  restaurantId String
-  status       SessionStatus @default(OPEN)
-  guestType    String        @default("walkin")
-  roomNumber   String?
-  guestCount   Int           @default(1)
-  waiter       Staff?        @relation(fields: [waiterId], references: [id], onDelete: SetNull)
-  waiterId     String?
-  orders       Order[]
-  rating       Rating?
-  joinRequests JoinRequest[]
-  orderType    OrderType     @default(TABLE)
-  vipGuest     VipGuest?     @relation(fields: [vipGuestId], references: [id])
-  vipGuestId   String?
-  openedAt     DateTime      @default(now())
-  menuOpenedAt DateTime?
-  closedAt     DateTime?
+  id            String        @id @default(cuid())
+  table         Table?        @relation(fields: [tableId], references: [id])
+  tableId       String?
+  restaurant    Restaurant    @relation(fields: [restaurantId], references: [id])
+  restaurantId  String
+  status        SessionStatus @default(OPEN)
+  guestType     String        @default("walkin")
+  roomNumber    String?
+  guestCount    Int           @default(1)
+  waiter        Staff?        @relation(fields: [waiterId], references: [id], onDelete: SetNull)
+  waiterId      String?
+  orders        Order[]
+  rating        Rating?
+  joinRequests  JoinRequest[]
+  orderType     OrderType     @default(TABLE)
+  vipGuest      VipGuest?     @relation(fields: [vipGuestId], references: [id])
+  vipGuestId    String?
+  // When this session belongs to a guest staying at the attached
+  // hotel, the cashier links the active Reservation here. Drives the
+  // "Charge to Room" payment option at settle time and lets the cafe
+  // see (in the floor view) which tables are hotel guests.
+  reservation   Reservation?  @relation(fields: [reservationId], references: [id], onDelete: SetNull)
+  reservationId String?
+  openedAt      DateTime      @default(now())
+  menuOpenedAt  DateTime?
+  closedAt      DateTime?
 
   @@index([restaurantId, status])
   @@index([tableId, status])
   @@index([waiterId])
   @@index([vipGuestId])
+  @@index([reservationId])
 }
 
 model Rating {
@@ -351,6 +376,11 @@ enum PaymentMethod {
   INSTAPAY
   APPLE_PAY
   GOOGLE_PAY
+  // Hotel guest charges the bill to their room folio. The Order is
+  // stamped paidAt at this moment (so cafe revenue rolls up correctly)
+  // but no cash is collected here — the matching FolioCharge sits on
+  // the folio until the front desk settles the stay at checkout.
+  ROOM_CHARGE
 }
 
 enum PromoType {
@@ -362,14 +392,14 @@ enum PromoType {
 
 model Message {
   id           String     @id @default(cuid())
-  type         String     // "alert" | "voice" | "command"
-  from         String     // "owner" or staff id
-  to           String     // "all" | "kitchen" | staff id
+  type         String // "alert" | "voice" | "command"
+  from         String // "owner" or staff id
+  to           String // "all" | "kitchen" | staff id
   text         String?
-  audio        String?    // base64 encoded audio data URL
+  audio        String? // base64 encoded audio data URL
   tableId      Int?
   orderId      String?
-  command      String?    // "send_waiter" | "prioritize" | "push_menu"
+  command      String? // "send_waiter" | "prioritize" | "push_menu"
   restaurant   Restaurant @relation(fields: [restaurantId], references: [id])
   restaurantId String
   createdAt    DateTime   @default(now())
@@ -414,6 +444,12 @@ enum StaffRole {
   BAR
   CASHIER
   DELIVERY
+  // Hotel module role. FRONT_DESK takes bookings, checks guests in
+  // and out, and settles folios. Can coexist with cafe roles on the
+  // same Staff row in small properties (one person doubles as cashier
+  // and front desk). Phase 1 doesn't enforce role-routing yet, just
+  // records the intended responsibility.
+  FRONT_DESK
 }
 
 enum OrderType {
@@ -430,20 +466,20 @@ enum DeliveryStatus {
 }
 
 model VipGuest {
-  id           String     @id @default(cuid())
+  id           String         @id @default(cuid())
   name         String
   phone        String
   address      String?
   addressNotes String?
   locationLat  Float?
   locationLng  Float?
-  linkToken    String     @unique @default(cuid())
-  active       Boolean    @default(true)
-  restaurant   Restaurant @relation(fields: [restaurantId], references: [id])
+  linkToken    String         @unique @default(cuid())
+  active       Boolean        @default(true)
+  restaurant   Restaurant     @relation(fields: [restaurantId], references: [id])
   restaurantId String
   sessions     TableSession[]
   orders       Order[]
-  createdAt    DateTime   @default(now())
+  createdAt    DateTime       @default(now())
 
   @@unique([restaurantId, phone])
 }
@@ -459,17 +495,17 @@ enum Station {
 }
 
 model CashSettlement {
-  id           String     @id @default(cuid())
-  amount       Decimal    @db.Decimal(10, 2)
+  id           String           @id @default(cuid())
+  amount       Decimal          @db.Decimal(10, 2)
   status       SettlementStatus @default(REQUESTED)
-  waiter       Staff      @relation("SettlementWaiter", fields: [waiterId], references: [id])
+  waiter       Staff            @relation("SettlementWaiter", fields: [waiterId], references: [id])
   waiterId     String
-  cashier      Staff      @relation("SettlementCashier", fields: [cashierId], references: [id])
+  cashier      Staff            @relation("SettlementCashier", fields: [cashierId], references: [id])
   cashierName  String?
   cashierId    String
-  restaurant   Restaurant @relation(fields: [restaurantId], references: [id])
+  restaurant   Restaurant       @relation(fields: [restaurantId], references: [id])
   restaurantId String
-  requestedAt  DateTime   @default(now())
+  requestedAt  DateTime         @default(now())
   acceptedAt   DateTime?
   confirmedAt  DateTime?
 
@@ -486,12 +522,12 @@ enum SettlementStatus {
 }
 
 model JoinRequest {
-  id           String       @id @default(cuid())
-  session      TableSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
-  sessionId    String
-  guestId      String
-  status       JoinStatus   @default(PENDING)
-  createdAt    DateTime     @default(now())
+  id        String       @id @default(cuid())
+  session   TableSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  sessionId String
+  guestId   String
+  status    JoinStatus   @default(PENDING)
+  createdAt DateTime     @default(now())
 
   @@index([sessionId, status])
   @@index([sessionId, guestId])
@@ -508,19 +544,19 @@ enum JoinStatus {
 // button on the dashboard. Stores the computed totals as a frozen
 // JSON blob so later DB edits can't silently rewrite history.
 model DailyClose {
-  id            String   @id @default(cuid())
-  restaurantId  String
+  id           String   @id @default(cuid())
+  restaurantId String
   // Business date this close represents (Cairo local day), stored as
   // midnight-local-converted-to-UTC so @db.Date stays unambiguous.
-  date          DateTime @db.Date
-  closedAt      DateTime @default(now())
-  closedById    String?  // Staff.id
-  closedByName  String?
+  date         DateTime @db.Date
+  closedAt     DateTime @default(now())
+  closedById   String? // Staff.id
+  closedByName String?
   // Snapshot of computed totals at close time. Shape:
   //   { revenue, orders, cash, card, instapay, comped, cancelled,
   //     guests, sessions, byWaiter: [...] }
-  totals        Json
-  notes         String?
+  totals       Json
+  notes        String?
 
   @@unique([restaurantId, date])
   @@index([restaurantId, closedAt])
@@ -548,19 +584,249 @@ model StaffShift {
 // sum(cash orders paid between openedAt and closedAt). Variance is
 // closingCount - expectedCash; negative = short, positive = over.
 model CashDrawer {
-  id            String     @id @default(cuid())
-  restaurant    Restaurant @relation(fields: [restaurantId], references: [id])
-  restaurantId  String
-  cashier       Staff      @relation(fields: [cashierId], references: [id])
-  cashierId     String
-  openedAt      DateTime   @default(now())
-  closedAt      DateTime?
-  openingFloat  Decimal    @db.Decimal(10, 2)
-  closingCount  Decimal?   @db.Decimal(10, 2)
-  expectedCash  Decimal?   @db.Decimal(10, 2)
-  variance      Decimal?   @db.Decimal(10, 2)
-  notes         String?
+  id           String     @id @default(cuid())
+  restaurant   Restaurant @relation(fields: [restaurantId], references: [id])
+  restaurantId String
+  cashier      Staff      @relation(fields: [cashierId], references: [id])
+  cashierId    String
+  openedAt     DateTime   @default(now())
+  closedAt     DateTime?
+  openingFloat Decimal    @db.Decimal(10, 2)
+  closingCount Decimal?   @db.Decimal(10, 2)
+  expectedCash Decimal?   @db.Decimal(10, 2)
+  variance     Decimal?   @db.Decimal(10, 2)
+  notes        String?
 
   @@index([restaurantId, openedAt])
   @@index([cashierId, openedAt])
+}
+
+// ─── HOTEL MODULE — Phase 1 ──────────────────────────────────────
+// Optional per-property module. A row here exists only for properties
+// that operate a beachfront hotel alongside the cafe (Neom). One Hotel
+// per Restaurant by design: the cafe and the hotel are the same place
+// physically. Currency, timezone, and slug come from the Restaurant —
+// the Hotel only carries hotel-specific fields.
+
+model Hotel {
+  id           String        @id @default(cuid())
+  restaurant   Restaurant    @relation(fields: [restaurantId], references: [id])
+  restaurantId String        @unique
+  name         String
+  address      String?
+  // Display strings (e.g. "14:00", "12:00"). Front desk uses them to
+  // colour late-arrival / early-departure rows. Not enforced — actual
+  // check-in/out timestamps are written by the staff action.
+  checkInTime  String        @default("14:00")
+  checkOutTime String        @default("12:00")
+  roomTypes    RoomType[]
+  rooms        Room[]
+  reservations Reservation[]
+  guests       Guest[]
+  createdAt    DateTime      @default(now())
+}
+
+// RoomType — Standard / Sea View / Suite. Defines the published
+// nightly rate at booking time; the actual rate stored on each
+// Reservation is a snapshot, so RoomType price changes don't rewrite
+// historical bookings.
+model RoomType {
+  id          String   @id @default(cuid())
+  hotel       Hotel    @relation(fields: [hotelId], references: [id])
+  hotelId     String
+  name        String
+  description String?
+  capacity    Int      @default(2)
+  baseRate    Decimal  @db.Decimal(10, 2)
+  amenities   String[] // ["sea-view", "ac", "balcony", "jacuzzi"]
+  sortOrder   Int      @default(0)
+  rooms       Room[]
+  createdAt   DateTime @default(now())
+
+  @@index([hotelId])
+}
+
+// Room — a physical room. number is what's painted on the door.
+// status drives the front-desk availability board and what walk-ins
+// can be assigned. Phase 2 will add a HousekeepingTask model for
+// per-task tracking; for now the status field is the source of truth.
+model Room {
+  id           String        @id @default(cuid())
+  hotel        Hotel         @relation(fields: [hotelId], references: [id])
+  hotelId      String
+  roomType     RoomType      @relation(fields: [roomTypeId], references: [id])
+  roomTypeId   String
+  number       String // free text — small hotels label inconsistently
+  floor        Int?
+  status       RoomStatus    @default(VACANT_CLEAN)
+  notes        String? // out-of-service reason, etc.
+  reservations Reservation[]
+  createdAt    DateTime      @default(now())
+
+  @@unique([hotelId, number])
+  @@index([hotelId, status])
+}
+
+enum RoomStatus {
+  VACANT_CLEAN
+  VACANT_DIRTY
+  OCCUPIED
+  MAINTENANCE
+}
+
+// Guest — person who stays. One row per real human; if they come
+// back for a second stay we look them up by phone or idNumber and
+// re-link. Neither is mandatory in Phase 1 (walk-ins without ID),
+// so both stay nullable with soft indexes.
+model Guest {
+  id           String        @id @default(cuid())
+  hotel        Hotel         @relation(fields: [hotelId], references: [id])
+  hotelId      String
+  name         String
+  phone        String?
+  email        String?
+  idNumber     String? // passport / national ID
+  nationality  String?
+  address      String?
+  dateOfBirth  DateTime?     @db.Date
+  notes        String? // allergies, preferences, history
+  reservations Reservation[]
+  createdAt    DateTime      @default(now())
+
+  @@index([hotelId])
+  @@index([hotelId, phone])
+  @@index([hotelId, idNumber])
+}
+
+// Reservation — one stay = one reservation. Multi-room bookings are
+// modelled as multiple side-by-side reservations in Phase 1; a
+// bookingGroupId can be added later if the front desk wants to treat
+// them as a single arrival.
+model Reservation {
+  id              String            @id @default(cuid())
+  hotel           Hotel             @relation(fields: [hotelId], references: [id])
+  hotelId         String
+  guest           Guest             @relation(fields: [guestId], references: [id])
+  guestId         String
+  room            Room              @relation(fields: [roomId], references: [id])
+  roomId          String
+  // Booking dates are local hotel-timezone, no time component. Times
+  // are inferred from Hotel.checkInTime / checkOutTime for display.
+  checkInDate     DateTime          @db.Date
+  checkOutDate    DateTime          @db.Date
+  // Actual arrival/departure timestamps. Diverge from booked dates
+  // for late arrivals / early departures.
+  checkedInAt     DateTime?
+  checkedOutAt    DateTime?
+  // Snapshot of the nightly rate at booking time. RoomType.baseRate
+  // can change later without rewriting this booking's totals.
+  nightlyRate     Decimal           @db.Decimal(10, 2)
+  adults          Int               @default(2)
+  children        Int               @default(0)
+  source          ReservationSource @default(DIRECT)
+  status          ReservationStatus @default(BOOKED)
+  specialRequests String?
+  internalNotes   String?
+  folio           Folio?
+  // Cafe sessions where this guest dined during their stay. Set when
+  // the cashier links the table session to a reservation (typically
+  // at the moment Charge-to-Room is picked).
+  sessions        TableSession[]
+  createdById     String? // Staff.id who took the booking
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+  cancelledAt     DateTime?
+  cancelReason    String?
+
+  @@index([hotelId, checkInDate, checkOutDate])
+  @@index([hotelId, status])
+  @@index([guestId])
+  @@index([roomId, checkInDate])
+}
+
+enum ReservationStatus {
+  BOOKED // future reservation
+  CHECKED_IN // guest has arrived
+  CHECKED_OUT // stay completed
+  CANCELLED
+  NO_SHOW
+}
+
+enum ReservationSource {
+  DIRECT // owner / front desk took the booking directly
+  WALK_IN // arrived without prior booking
+  BOOKING_COM
+  AIRBNB
+  OTHER
+}
+
+// Folio — running tab for one stay. Created alongside the reservation
+// (same transaction in practice). Charges accumulate as the guest
+// uses the property. Settled in one transaction at checkout in
+// Phase 1; split settlements are deferred.
+model Folio {
+  id             String         @id @default(cuid())
+  reservation    Reservation    @relation(fields: [reservationId], references: [id])
+  reservationId  String         @unique
+  status         FolioStatus    @default(OPEN)
+  // Optional opening deposit (taken at booking time or check-in).
+  // Reduces the balance owed at checkout but doesn't suppress
+  // individual charges from showing on the receipt.
+  openingDeposit Decimal        @default(0) @db.Decimal(10, 2)
+  // Set when the folio is settled. settledMethod uses the same
+  // PaymentMethod enum as Order so the cashier flow doesn't translate.
+  settledAt      DateTime?
+  settledById    String? // Staff.id of who collected
+  settledMethod  PaymentMethod?
+  settledTotal   Decimal?       @db.Decimal(10, 2)
+  charges        FolioCharge[]
+  createdAt      DateTime       @default(now())
+
+  @@index([status])
+}
+
+enum FolioStatus {
+  OPEN
+  SETTLED
+  VOID // folio cancelled (typically with the reservation)
+}
+
+// FolioCharge — one line on the folio. ROOM_NIGHT charges are auto-
+// posted (initially upfront on check-in for the booked nights, with
+// an end-of-stay reconcile if dates shifted). FOOD and ACTIVITY
+// charges are posted by the cafe payment flow when the cashier picks
+// "Charge to Room". Voids are preserved with voided=true so the
+// audit trail stays intact.
+model FolioCharge {
+  id          String          @id @default(cuid())
+  folio       Folio           @relation(fields: [folioId], references: [id], onDelete: Cascade)
+  folioId     String
+  type        FolioChargeType
+  amount      Decimal         @db.Decimal(10, 2) // positive = charge, negative = credit/adjustment
+  description String
+  // For ROOM_NIGHT: the calendar night this covers (the check-in side
+  // of the night, e.g. 2026-05-10 = the night of May 10→11). Null for
+  // other types.
+  night       DateTime?       @db.Date
+  // For FOOD/ACTIVITY originating from the cafe — link back to the
+  // Order whose paymentMethod is ROOM_CHARGE. 1:1 from the Order side.
+  order       Order?          @relation(fields: [orderId], references: [id], onDelete: SetNull)
+  orderId     String?         @unique
+  chargedAt   DateTime        @default(now())
+  chargedById String? // null for cron-posted ROOM_NIGHT charges
+  voided      Boolean         @default(false)
+  voidReason  String?
+  voidedAt    DateTime?
+  voidedById  String?
+
+  @@index([folioId, chargedAt])
+  @@index([type])
+}
+
+enum FolioChargeType {
+  ROOM_NIGHT
+  FOOD
+  ACTIVITY
+  MINIBAR
+  MISC
 }

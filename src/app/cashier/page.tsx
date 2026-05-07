@@ -13,6 +13,7 @@ import { useCashierReliability } from "@/lib/use-cashier-reliability";
 import { getOrderLabel } from "@/lib/order-label";
 import { staffFetch } from "@/lib/staff-fetch";
 import { DrawerPanel } from "@/presentation/components/cashier/DrawerPanel";
+import { RoomChargeButton } from "@/presentation/components/cashier/RoomChargeButton";
 import { TipsCounter } from "@/presentation/components/ui/TipsCounter";
 
 // ═══════════════════════════════════════════════
@@ -574,13 +575,18 @@ function CashierLogin({ onLogin }: { onLogin: (staff: LoggedInStaff) => void }) 
 
 type PaymentMethodChoice = "CASH" | "CARD" | "INSTAPAY";
 
-function AcceptPaymentPanel({ sessions, onAcceptPayment, onReversePayment, recentlyPaidSessions, busyRef, staffId }: {
+function AcceptPaymentPanel({ sessions, onAcceptPayment, onReversePayment, recentlyPaidSessions, busyRef, staffId, hotelEnabled, onChargedToRoom }: {
   sessions: SessionInfo[];
   onAcceptPayment: (sessionId: string, method: PaymentMethodChoice, tip: number, discount: number) => Promise<{ confirmedTotal: number } | null>;
   onReversePayment: (sessionId: string, reason: string) => Promise<boolean>;
   recentlyPaidSessions: { id: string; tableNumber: number | null; orderType?: string; vipGuestName?: string | null; total: number; roundCount: number }[];
   busyRef: React.MutableRefObject<boolean>;
   staffId?: string;
+  /** When true, render the "Charge to Room" button above the
+   *  cash/card/instapay grid. False for restaurants without the
+   *  hotel module attached. */
+  hotelEnabled?: boolean;
+  onChargedToRoom?: () => void;
 }) {
   const { t } = useLanguage();
   // Tables still needing the cashier to take payment. Gated on
@@ -1503,6 +1509,25 @@ function AcceptPaymentPanel({ sessions, onAcceptPayment, onReversePayment, recen
                     </span>
                   </div>
                 )}
+                {hotelEnabled && staffId && (() => {
+                  // Distinct order IDs in the unpaid (or pending) round.
+                  // The Charge-to-Room flow walks each one and posts a
+                  // FolioCharge per Order; usually that's just one row.
+                  const items = pickerActive
+                    ? (s.unpaidItems || []).filter((it) => effectivePick.has(it.id))
+                    : (s.unpaidItems || []);
+                  const orderIds = Array.from(new Set(items.map((it) => it.orderId)));
+                  if (orderIds.length === 0) return null;
+                  const tableLabel = s.tableNumber != null ? `Table ${s.tableNumber}` : (s.vipGuestName || "Session");
+                  return (
+                    <RoomChargeButton
+                      staffId={staffId}
+                      orderIds={orderIds}
+                      tableLabel={tableLabel}
+                      onSuccess={() => onChargedToRoom?.()}
+                    />
+                  );
+                })()}
                 <div className="grid grid-cols-3 border-t-2 border-sand-200">
                   {([
                     ["CASH", "💵", t("cashier.cash"), "bg-status-good-500 hover:bg-status-good-600"],
@@ -1743,6 +1768,23 @@ function CashierSystem({ staff, onLogout }: { staff: LoggedInStaff; onLogout: ()
   const [sessions, setSessions] = useState<SessionInfo[]>([]);
   const [recentlyPaid, setRecentlyPaid] = useState<{ id: string; tableNumber: number | null; orderType?: string; vipGuestName?: string | null; total: number; roundCount: number }[]>([]);
   const [dayRevenue, setDayRevenue] = useState(0);
+  // Whether this property has the hotel module attached. When true,
+  // the payment panel surfaces "Charge to Room" alongside cash/card/
+  // instapay. Fetched once on mount; the answer doesn't change mid-
+  // shift in practice.
+  const [hotelEnabled, setHotelEnabled] = useState(false);
+  useEffect(() => {
+    let cancelled = false;
+    fetch(`/api/hotel?slug=${restaurantSlug}`, { cache: "no-store" })
+      .then((r) => r.json())
+      .then((data) => {
+        if (!cancelled) setHotelEnabled(!!data.hotel);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [restaurantSlug]);
   const [shiftRevenue, setShiftRevenue] = useState(0);
   const [shiftOrders, setShiftOrders] = useState(0);
   const [cashCollected, setCashCollected] = useState(0);
@@ -2146,6 +2188,8 @@ function CashierSystem({ staff, onLogout }: { staff: LoggedInStaff; onLogout: ()
               recentlyPaidSessions={recentlyPaid}
               busyRef={busyRef}
               staffId={staff.id}
+              hotelEnabled={hotelEnabled}
+              onChargedToRoom={refreshSessions}
             />
           </div>
           {/* Stats column — below the fold on mobile, left on desktop */}
