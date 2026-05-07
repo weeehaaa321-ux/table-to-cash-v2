@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { requireStaffAuth } from "@/lib/api-auth";
+import { cairoMidnightUtc } from "@/lib/hotel";
 
 /**
  * GET /api/hotel/today
@@ -27,8 +28,10 @@ export async function GET(request: NextRequest) {
     });
   }
 
-  const todayStart = new Date();
-  todayStart.setUTCHours(0, 0, 0, 0);
+  // Use Cairo-local "today" so the front desk's morning view doesn't
+  // show yesterday's data between 12am and 2am Cairo (when UTC is
+  // still on yesterday's date).
+  const todayStart = cairoMidnightUtc();
   const tomorrowStart = new Date(todayStart);
   tomorrowStart.setUTCDate(tomorrowStart.getUTCDate() + 1);
 

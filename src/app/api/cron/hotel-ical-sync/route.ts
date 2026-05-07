@@ -14,7 +14,10 @@ import { syncAllForHotel } from "@/lib/hotel-ical-sync";
 export async function GET(request: NextRequest) {
   const cronSecret = process.env.CRON_SECRET;
   const authHeader = request.headers.get("authorization") || "";
-  if (cronSecret && authHeader !== `Bearer ${cronSecret}`) {
+  // Default-deny: refuse if CRON_SECRET isn't configured. Matches the
+  // pattern other crons in this repo use; closes the "anyone with the
+  // URL can trigger" gap that existed when the env var was missing.
+  if (!cronSecret || authHeader !== `Bearer ${cronSecret}`) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 

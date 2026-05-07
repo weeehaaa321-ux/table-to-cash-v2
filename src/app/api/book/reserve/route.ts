@@ -1,15 +1,16 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import {
-  findAvailableRoomTypes,
   countNights,
   computeStayCost,
+  lockTypePool,
 } from "@/lib/hotel";
 import {
   pickFromAddress,
   renderBookingConfirmationEmail,
   sendEmail,
 } from "@/lib/email";
+import { rateLimit } from "@/lib/rate-limit";
 
 /**
  * POST /api/book/reserve
@@ -31,6 +32,23 @@ import {
  * No PIN required — this is the public booking flow.
  */
 export async function POST(request: NextRequest) {
+  // Public endpoint — rate-limit to keep bots from spamming
+  // reservations. 5 successful POSTs per IP per hour is plenty for
+  // a real guest doing a couple bookings on a family trip; well
+  // under a botnet trying to fill our DB.
+  const rl = rateLimit(request, {
+    bucket: "book-reserve",
+    windowMs: 60 * 60 * 1000,
+    max: 5,
+    blockMs: 60 * 60 * 1000,
+  });
+  if (!rl.allowed) {
+    return NextResponse.json(
+      { error: "Too many bookings from this network. Try again later." },
+      { status: 429, headers: { "Retry-After": String(rl.retryAfterSec) } }
+    );
+  }
+
   const body = await request.json();
   const {
     slug,
@@ -120,17 +138,6 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  // Type-level availability: how many of this type are free for the
-  // entire range? Reservations from any source consume the pool.
-  const types = await findAvailableRoomTypes(hotelId, fromDate, toDate);
-  const targetType = types.find((t) => t.id === roomTypeId);
-  if (!targetType || targetType.available <= 0) {
-    return NextResponse.json(
-      { error: "No rooms of that type are available for the requested dates" },
-      { status: 409 }
-    );
-  }
-
   const adultCount = Math.max(1, Math.min(roomType.capacity, Number(adults) || 2));
   const childCount = Math.max(0, Number(children) || 0);
 
@@ -141,9 +148,37 @@ export async function POST(request: NextRequest) {
   const cost = computeStayCost(roomType, fromDate, toDate);
   const avgRate = nights > 0 ? cost.total / nights : Number(roomType.baseRate);
 
-  // Same-transaction guest+reservation+folio create. Direct booking
-  // never auto-checks-in — front desk verifies ID at arrival.
+  // Race-safe booking: take a Postgres advisory lock on the (hotel,
+  // type) pool BEFORE the availability check, then run check + insert
+  // inside the same transaction. The lock holds until commit, so two
+  // simultaneous callers serialise on it and the second sees the first
+  // one's insert when it does its own availability check.
+  let conflict = false;
   const result = await db.$transaction(async (tx) => {
+    await lockTypePool(tx, hotelId, roomTypeId);
+
+    // Re-check availability inside the lock. We can't reuse
+    // findAvailableRoomTypes because Prisma's transactional client
+    // and the helper's `db` are different — inline the count.
+    const inventory = await tx.room.count({
+      where: { hotelId, roomTypeId, status: { not: "MAINTENANCE" } },
+    });
+    const overlapping = await tx.reservation.count({
+      where: {
+        hotelId,
+        roomTypeId,
+        status: { in: ["BOOKED", "CHECKED_IN"] },
+        AND: [
+          { checkInDate: { lt: toDate } },
+          { checkOutDate: { gt: fromDate } },
+        ],
+      },
+    });
+    if (overlapping >= inventory) {
+      conflict = true;
+      return null;
+    }
+
     const newGuest = await tx.guest.create({
       data: {
         hotelId,
@@ -159,10 +194,6 @@ export async function POST(request: NextRequest) {
         hotelId,
         guestId: newGuest.id,
         roomTypeId,
-        // Don't bind to a specific room at booking time — the front
-        // desk picks the actual room at check-in. Lets us pool
-        // inventory across rooms of the same type and avoids
-        // over-promising a specific number to direct bookers.
         roomId: null,
         checkInDate: fromDate,
         checkOutDate: toDate,
@@ -180,6 +211,13 @@ export async function POST(request: NextRequest) {
     });
     return { guest: newGuest, reservation };
   });
+
+  if (conflict || !result) {
+    return NextResponse.json(
+      { error: "No rooms of that type are available for the requested dates" },
+      { status: 409 }
+    );
+  }
 
   // Confirmation email — best-effort, doesn't block the booking on
   // an email failure. If RESEND_API_KEY isn't configured the helper
@@ -207,6 +245,7 @@ export async function POST(request: NextRequest) {
       bcc: hotel.notificationEmail || undefined,
       subject: tpl.subject,
       html: tpl.html,
+      hotelId: hotel.id,
     }).catch(() => {});
   } else if (hotel.notificationEmail) {
     sendEmail({
@@ -214,6 +253,7 @@ export async function POST(request: NextRequest) {
       to: hotel.notificationEmail,
       subject: `New direct booking — ${guest.name}`,
       html: `<p>${guest.name} just booked a ${roomType.name} for ${nights} night(s) (${from} → ${to}).</p>`,
+      hotelId: hotel.id,
     }).catch(() => {});
   }
 

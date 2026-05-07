@@ -1,7 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { requireStaffAuth } from "@/lib/api-auth";
-import { countNights, findAvailableRooms, findAvailableRoomTypes } from "@/lib/hotel";
+import {
+  countNights,
+  findAvailableRooms,
+  computeStayCost,
+  lockTypePool,
+} from "@/lib/hotel";
 
 async function getHotelIdForStaff(restaurantId: string) {
   const hotel = await db.hotel.findUnique({
@@ -95,49 +100,78 @@ export async function POST(request: NextRequest) {
 
   // Front desk can pick a specific room (typical for walk-ins) or
   // pre-assign by type only (typical for direct bookings ahead of
-  // check-in, so we can pool inventory). Both paths must check
-  // type-level availability; the room-specific path additionally
-  // verifies the chosen room isn't already held by a roomId-bound
-  // reservation in the same window.
+  // check-in, so we can pool inventory). Both paths run their
+  // availability check + insert inside an advisory-locked
+  // transaction; concurrent callers serialise on the (hotel, type)
+  // pool so the read→write window can't oversell.
   const room = await db.room.findUnique({
     where: { id: roomId, hotelId },
     include: { roomType: true },
   });
   if (!room) return NextResponse.json({ error: "Room not found" }, { status: 404 });
 
-  const types = await findAvailableRoomTypes(hotelId, checkIn, checkOut);
-  const targetType = types.find((t) => t.id === room.roomTypeId);
-  if (!targetType || targetType.available <= 0) {
-    return NextResponse.json(
-      { error: "All rooms of that type are booked for the requested dates" },
-      { status: 409 }
-    );
-  }
+  // Snapshot stay cost: avg-of-mixed-rates so the snapshot matches
+  // what check-in actually bills (which uses rateForNight per night).
+  const nights = countNights(checkIn, checkOut);
+  const cost = computeStayCost(room.roomType, checkIn, checkOut);
+  const computedAvg =
+    nights > 0 ? cost.total / nights : Number(room.roomType.baseRate);
+  const rate =
+    typeof nightlyRate === "number" && nightlyRate >= 0
+      ? nightlyRate
+      : computedAvg;
 
-  // Walk-in (room-specific) path: also check this exact room isn't
-  // pinned by another booking. The findAvailableRooms predicate is
-  // the right tool for this.
-  if (roomId) {
-    const physicalAvailable = await findAvailableRooms(hotelId, checkIn, checkOut);
-    if (!physicalAvailable.find((r) => r.id === roomId)) {
-      return NextResponse.json(
-        { error: "Room is held by another reservation for those dates" },
-        { status: 409 }
-      );
-    }
-  }
-
-  const rate = typeof nightlyRate === "number" && nightlyRate >= 0
-    ? nightlyRate
-    : Number(room.roomType.baseRate);
-
+  let conflictMessage: string | null = null;
   const reservation = await db.$transaction(async (tx) => {
+    await lockTypePool(tx, hotelId, room.roomTypeId);
+
+    // Type-pool check inside the lock.
+    const inventory = await tx.room.count({
+      where: { hotelId, roomTypeId: room.roomTypeId, status: { not: "MAINTENANCE" } },
+    });
+    const overlapping = await tx.reservation.count({
+      where: {
+        hotelId,
+        roomTypeId: room.roomTypeId,
+        status: { in: ["BOOKED", "CHECKED_IN"] },
+        AND: [
+          { checkInDate: { lt: checkOut } },
+          { checkOutDate: { gt: checkIn } },
+        ],
+      },
+    });
+    if (overlapping >= inventory) {
+      conflictMessage = "All rooms of that type are booked for the requested dates";
+      return null;
+    }
+
+    // Walk-in (room-specific) path: also check this exact room isn't
+    // pinned by another booking. Inside the same lock + transaction.
+    if (roomId) {
+      const conflict = await tx.reservation.findFirst({
+        where: {
+          hotelId,
+          roomId,
+          status: { in: ["BOOKED", "CHECKED_IN"] },
+          AND: [
+            { checkInDate: { lt: checkOut } },
+            { checkOutDate: { gt: checkIn } },
+          ],
+        },
+        select: { id: true },
+      });
+      if (conflict) {
+        conflictMessage = "Room is held by another reservation for those dates";
+        return null;
+      }
+    }
+
     const created = await tx.reservation.create({
       data: {
         hotelId,
         guestId,
         roomTypeId: room.roomTypeId,
-        roomId, // explicit assignment from the admin UI; OK to be set here
+        roomId,
         checkInDate: checkIn,
         checkOutDate: checkOut,
         nightlyRate: rate,
@@ -153,11 +187,19 @@ export async function POST(request: NextRequest) {
     await tx.folio.create({
       data: {
         reservationId: created.id,
-        openingDeposit: typeof openingDeposit === "number" && openingDeposit > 0 ? openingDeposit : 0,
+        openingDeposit:
+          typeof openingDeposit === "number" && openingDeposit > 0 ? openingDeposit : 0,
       },
     });
     return created;
   });
+
+  if (conflictMessage || !reservation) {
+    return NextResponse.json(
+      { error: conflictMessage || "Booking failed" },
+      { status: 409 }
+    );
+  }
 
   const full = await db.reservation.findUnique({
     where: { id: reservation.id },

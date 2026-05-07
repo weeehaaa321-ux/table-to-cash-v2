@@ -78,6 +78,13 @@ export async function syncIcalEntry(
   let cancelled = 0;
   let skipped = 0;
 
+  // Track every UID we see in this run. After processing all events,
+  // any reservation we have for this same iCal feed (matching
+  // icalSourceRoom) whose UID is NOT in this set has been silently
+  // removed by the OTA — auto-cancel it.
+  const sourceRoomKey = `${entry.source}:${entry.roomNumber}`;
+  const seenUids = new Set<string>();
+
   for (const event of events) {
     // Skip events with no real date range. Some OTAs emit zero-length
     // "blocked" markers; ignore them.
@@ -85,6 +92,8 @@ export async function syncIcalEntry(
       skipped++;
       continue;
     }
+
+    seenUids.add(event.uid);
 
     const existing = await db.reservation.findFirst({
       where: { hotelId, externalUid: event.uid },
@@ -134,38 +143,98 @@ export async function syncIcalEntry(
     // something like "CLOSED - Booking.com booking" with no PII).
     const placeholderName = placeholderGuestName(entry.source);
 
+    try {
+      await db.$transaction(async (tx) => {
+        const guest = await tx.guest.create({
+          data: {
+            hotelId,
+            name: placeholderName,
+            isPlaceholder: true,
+            notes: `Imported from ${entry.source}. Replace with real guest details at check-in.`,
+          },
+        });
+        const reservation = await tx.reservation.create({
+          data: {
+            hotelId,
+            guestId: guest.id,
+            roomTypeId: room.roomTypeId,
+            // OTA bookings are bound to the type via the iCal-mapped
+            // room. We DON'T pre-assign the physical room — the front
+            // desk picks at check-in so the type pool stays flexible.
+            roomId: null,
+            checkInDate: event.start,
+            checkOutDate: event.end,
+            nightlyRate: Number(room.roomType.baseRate),
+            adults: 2,
+            source: entry.source,
+            status: "BOOKED",
+            externalUid: event.uid,
+            // Tag this reservation with the iCal feed key so the
+            // silent-removal reconciliation below can scope to a
+            // single feed (without cancelling reservations from
+            // OTHER feeds that happen to share a source).
+            icalSourceRoom: `${entry.source}:${entry.roomNumber}`,
+            internalNotes: event.summary || null,
+          },
+        });
+        await tx.folio.create({
+          data: { reservationId: reservation.id },
+        });
+      });
+      created++;
+    } catch (e) {
+      // P2002 = unique constraint violation. Means another concurrent
+      // sync (cron + manual "Sync now" overlap) already created this
+      // UID. Skip rather than fail the whole sync.
+      if (e instanceof Error && /P2002|Unique constraint/.test(e.message)) {
+        skipped++;
+      } else {
+        throw e;
+      }
+    }
+  }
+
+  // Silent-removal reconciliation: scoped to THIS feed only, not
+  // hotel-wide, so two iCal URLs sharing the same source don't
+  // cancel each other's reservations.
+  //
+  // We only consider BOOKED reservations in the future — once a
+  // guest is CHECKED_IN we don't trust the OTA's iCal to override
+  // the front desk's call. (CHECKED_OUT and CANCELLED are inert.)
+  // Future-only avoids cancelling past stays whose UID may have
+  // aged out of the feed window naturally.
+  const todayUTC = new Date();
+  todayUTC.setUTCHours(0, 0, 0, 0);
+  const ourReservations = await db.reservation.findMany({
+    where: {
+      hotelId,
+      icalSourceRoom: sourceRoomKey,
+      status: "BOOKED",
+      checkOutDate: { gte: todayUTC },
+      externalUid: { not: null },
+    },
+    select: { id: true, externalUid: true, folio: { select: { id: true } } },
+  });
+  for (const r of ourReservations) {
+    if (r.externalUid && seenUids.has(r.externalUid)) continue;
+    // Missing from this feed. Mark cancelled with reason.
     await db.$transaction(async (tx) => {
-      const guest = await tx.guest.create({
+      await tx.reservation.update({
+        where: { id: r.id },
         data: {
-          hotelId,
-          name: placeholderName,
-          notes: `Imported from ${entry.source}. Replace with real guest details at check-in.`,
+          status: "CANCELLED",
+          cancelledAt: new Date(),
+          cancelReason: `Auto-cancelled — removed from ${entry.source} feed`,
         },
       });
-      const reservation = await tx.reservation.create({
-        data: {
-          hotelId,
-          guestId: guest.id,
-          roomTypeId: room.roomTypeId,
-          // OTA bookings are bound to the type via the iCal-mapped
-          // room. We DON'T pre-assign the physical room — the front
-          // desk picks at check-in so the type pool stays flexible.
-          roomId: null,
-          checkInDate: event.start,
-          checkOutDate: event.end,
-          nightlyRate: Number(room.roomType.baseRate),
-          adults: 2,
-          source: entry.source,
-          status: "BOOKED",
-          externalUid: event.uid,
-          internalNotes: event.summary || null,
-        },
-      });
-      await tx.folio.create({
-        data: { reservationId: reservation.id },
-      });
+      if (r.folio?.id) {
+        await tx.folio.update({
+          where: { id: r.folio.id },
+          data: { status: "VOID" },
+        });
+      }
     });
-    created++;
+    cancelled++;
   }
 
   return { created, updated, cancelled, skipped };
@@ -192,6 +261,12 @@ export async function syncAllForHotel(hotelId: string): Promise<{
   if (entries.length === 0) {
     return { totalCreated: 0, totalUpdated: 0, totalCancelled: 0, errors: 0 };
   }
+
+  // Concurrent runs (cron tick + manual "Sync now") can't create
+  // duplicates: Reservation has a @@unique([hotelId, externalUid])
+  // constraint, so the second writer hits a P2002 and gets skipped.
+  // The dedupe check we do beforehand is a perf optimisation, not
+  // a correctness barrier.
 
   let totalCreated = 0;
   let totalUpdated = 0;

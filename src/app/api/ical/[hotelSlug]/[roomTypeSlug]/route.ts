@@ -11,12 +11,15 @@ import { typeOccupancyByNight } from "@/lib/hotel";
  * Airbnb, Expedia, etc. extranets so they stop selling those
  * nights and won't double-book us.
  *
- * Auth: a hotel-wide token in the query string. Owner generates /
- * regenerates it from the admin Setup tab. The token is in the URL
- * (not a header) because OTAs don't let you customize headers when
- * configuring a calendar URL — they just GET it. So the URL itself
- * is the secret. Anyone who has the URL can read which nights
- * we're booked, but no PII is exposed (just dates + summary).
+ * Auth: a PER-ROOM-TYPE token in the query string. The token must
+ * match RoomType.icalExportToken (not Hotel.icalExportToken — that
+ * field exists but is no longer used for export auth). Per-type
+ * tokens mean a leaked URL only exposes one type's calendar, not
+ * every channel for every room. Tokens are generated lazily on
+ * first export request.
+ *
+ * The URL is the secret because OTAs don't let you customise
+ * headers when configuring a calendar URL — they just GET it.
  *
  * Window: 18 months forward — enough for OTAs that look 6-12
  * months out without exporting our entire history.
@@ -31,9 +34,9 @@ export async function GET(
     return new NextResponse("Missing token", { status: 401 });
   }
 
-  // Resolve hotel by restaurant slug + verify token. The token must
-  // match Hotel.icalExportToken — there's only one per hotel and it
-  // unlocks every type.
+  // Resolve hotel by restaurant slug. We pull the room types so we
+  // can match the URL slug; per-type token is checked once we've
+  // identified the type.
   const restaurant = await db.restaurant.findUnique({
     where: { slug: hotelSlug },
     select: {
@@ -41,9 +44,8 @@ export async function GET(
         select: {
           id: true,
           name: true,
-          icalExportToken: true,
           roomTypes: {
-            select: { id: true, name: true },
+            select: { id: true, name: true, icalExportToken: true },
           },
         },
       },
@@ -51,9 +53,6 @@ export async function GET(
   });
   if (!restaurant?.hotel) {
     return new NextResponse("Hotel not found", { status: 404 });
-  }
-  if (!restaurant.hotel.icalExportToken || restaurant.hotel.icalExportToken !== token) {
-    return new NextResponse("Invalid token", { status: 401 });
   }
 
   // Match room type by slug — we don't have a roomTypeSlug column,
@@ -71,6 +70,13 @@ export async function GET(
   );
   if (!matchedType) {
     return new NextResponse("Room type not found", { status: 404 });
+  }
+
+  // Constant-time comparison would be ideal but the token is opaque
+  // entropy; a simple === is fine here. Token MUST be set and match
+  // — we don't fall back to a hotel-wide token any more.
+  if (!matchedType.icalExportToken || matchedType.icalExportToken !== token) {
+    return new NextResponse("Invalid token", { status: 401 });
   }
 
   // 18 months forward window.

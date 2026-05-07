@@ -63,6 +63,11 @@ type Guest = {
   email: string | null;
   idNumber: string | null;
   nationality: string | null;
+  // Set true at iCal pull time for OTA placeholder rows
+  // ("Booking.com guest"). Front desk replaces with real details at
+  // check-in, which clears this flag implicitly via the Guest update
+  // (we read the column directly so display stays in sync).
+  isPlaceholder?: boolean;
 };
 
 type FolioCharge = {
@@ -134,10 +139,12 @@ function SourceBadge({ source }: { source: string }) {
 }
 
 function isPlaceholderGuest(guest: Guest): boolean {
-  // OTA-pulled reservations create placeholder guests with names like
-  // "Booking.com guest" until the front desk replaces them with real
-  // details at check-in. Detect by suffix so we can flag the row.
-  return /\bguest$/.test(guest.name);
+  // Read the explicit column. Falls back to the legacy name-suffix
+  // check for any guest rows that pre-date the migration and didn't
+  // get caught by the backfill (rare; the backfill covered every
+  // "{Source} guest" name we generate).
+  if (typeof guest.isPlaceholder === "boolean") return guest.isPlaceholder;
+  return /\bguest$/i.test(guest.name);
 }
 
 type Today = {
@@ -810,20 +817,25 @@ function CheckInModal({
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
+  // Default: only show CLEAN rooms. Front desk can toggle "show dirty
+  // too" for emergencies (housekeeping is behind, no clean rooms left
+  // — picking a dirty room flags it for an immediate clean turnover).
+  const [includeDirty, setIncludeDirty] = useState(false);
   useEffect(() => {
     if (!needsRoomAssignment) return;
     authedFetch("/api/hotel/rooms", { cache: "no-store" })
       .then((r) => r.json())
       .then((d) => {
-        const eligible = (d.rooms || []).filter(
-          (r: Room) =>
-            r.roomTypeId === reservation.roomType.id &&
-            (r.status === "VACANT_CLEAN" || r.status === "VACANT_DIRTY")
-        );
+        const eligible = (d.rooms || []).filter((r: Room) => {
+          if (r.roomTypeId !== reservation.roomType.id) return false;
+          if (r.status === "VACANT_CLEAN") return true;
+          if (r.status === "VACANT_DIRTY") return includeDirty;
+          return false;
+        });
         setRooms(eligible);
         if (eligible.length === 1) setPickedRoomId(eligible[0].id);
       });
-  }, [needsRoomAssignment, reservation.roomType.id]);
+  }, [needsRoomAssignment, reservation.roomType.id, includeDirty]);
 
   async function submit() {
     if (busy) return;
@@ -962,13 +974,25 @@ function CheckInModal({
 
         {needsRoomAssignment && (
           <div>
-            <div className="text-[11px] font-extrabold uppercase tracking-wider text-ink-mute mb-1">
-              Assign physical room ({reservation.roomType.name})
+            <div className="flex items-center justify-between mb-1">
+              <div className="text-[11px] font-extrabold uppercase tracking-wider text-ink-mute">
+                Assign physical room ({reservation.roomType.name})
+              </div>
+              <label className="flex items-center gap-1 text-[10px] font-bold text-ink-mute cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={includeDirty}
+                  onChange={(e) => setIncludeDirty(e.target.checked)}
+                  className="accent-amber-600"
+                />
+                Show dirty rooms
+              </label>
             </div>
             {rooms.length === 0 ? (
-              <div className="bg-status-bad-50 text-status-bad-700 rounded-lg p-2 text-sm">
-                No clean or dirty rooms of this type available. Mark a room as
-                vacant first.
+              <div className="bg-status-warn-50 text-status-warn-700 rounded-lg p-2 text-sm">
+                No clean rooms of this type available. Tick "show dirty
+                rooms" to assign a room that still needs cleaning, or flip
+                a room's status from the Rooms tab first.
               </div>
             ) : (
               <div className="grid grid-cols-3 gap-2">
@@ -3863,17 +3887,63 @@ function ConfigTab({ staff }: { staff: Staff }) {
  * invalidates every export URL at once — use sparingly.
  */
 function IcalExportSection({ roomTypes }: { roomTypes: RoomType[] }) {
-  const [token, setToken] = useState<string | null>(null);
+  // Per-type tokens — fetched lazily, cached in this section's state.
+  // GET /api/hotel/room-types/{id}/ical-token creates the token on
+  // first call so the URL is usable from the moment a type exists.
+  const [tokens, setTokens] = useState<Record<string, string>>({});
+  const [rotating, setRotating] = useState<string | null>(null);
   const restaurantSlug =
     typeof window !== "undefined"
       ? process.env.NEXT_PUBLIC_RESTAURANT_SLUG || "neom-dahab"
       : "neom-dahab";
 
   useEffect(() => {
-    authedFetch(`/api/hotel?slug=${restaurantSlug}`, { cache: "no-store" })
-      .then((r) => r.json())
-      .then((d) => setToken(d.hotel?.icalExportToken || null));
-  }, [restaurantSlug]);
+    let cancelled = false;
+    (async () => {
+      const next: Record<string, string> = {};
+      for (const rt of roomTypes) {
+        try {
+          const res = await authedFetch(
+            `/api/hotel/room-types/${rt.id}/ical-token`,
+            { cache: "no-store" }
+          );
+          if (!res.ok) continue;
+          const d = await res.json();
+          if (d.token) next[rt.id] = d.token;
+        } catch {
+          // Ignore — section will show "couldn't load" per row.
+        }
+      }
+      if (!cancelled) setTokens(next);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [roomTypes]);
+
+  async function rotate(rtId: string) {
+    if (
+      !confirm(
+        "Rotate this room type's iCal token? Every OTA URL you've already pasted for this type will stop working — you'll need to update them."
+      )
+    )
+      return;
+    setRotating(rtId);
+    try {
+      const res = await authedFetch(
+        `/api/hotel/room-types/${rtId}/ical-token`,
+        { method: "POST" }
+      );
+      const d = await res.json();
+      if (res.ok && d.token) {
+        setTokens((t) => ({ ...t, [rtId]: d.token }));
+      } else {
+        alert(d.error || "Rotate failed");
+      }
+    } finally {
+      setRotating(null);
+    }
+  }
 
   function slugify(s: string) {
     return s
@@ -3893,20 +3963,17 @@ function IcalExportSection({ roomTypes }: { roomTypes: RoomType[] }) {
         Each URL below shows OTAs which nights are already booked (from
         direct, walk-in, or other channels) so they stop selling those
         nights. Paste the matching URL into Booking.com → Sync calendars,
-        Airbnb → Listing → Calendar → Import calendar, etc.
+        Airbnb → Listing → Calendar → Import calendar, etc. Each room
+        type has its own token, so a leaked URL only exposes one type.
       </p>
-      {!token ? (
-        <div className="bg-status-warn-50 border border-status-warn-200 text-status-warn-800 rounded-lg p-3 text-sm">
-          Generate the export token by saving the hotel settings below
-          (any save creates one if missing).
-        </div>
-      ) : roomTypes.length === 0 ? (
+      {roomTypes.length === 0 ? (
         <Empty>Add at least one room type first.</Empty>
       ) : (
         <div className="space-y-2">
           {roomTypes.map((rt) => {
+            const token = tokens[rt.id];
             const url =
-              typeof window !== "undefined"
+              typeof window !== "undefined" && token
                 ? `${window.location.origin}/api/ical/${restaurantSlug}/${slugify(rt.name)}?token=${token}`
                 : "";
             return (
@@ -3914,21 +3981,34 @@ function IcalExportSection({ roomTypes }: { roomTypes: RoomType[] }) {
                 key={rt.id}
                 className="bg-white border border-sand-200 rounded-xl p-3"
               >
-                <div className="text-sm font-extrabold mb-1">{rt.name}</div>
-                <div className="flex items-center gap-2">
-                  <code className="flex-1 bg-sand-50 px-2 py-1 rounded font-mono text-[11px] break-all">
-                    {url}
-                  </code>
+                <div className="flex items-center justify-between mb-1">
+                  <div className="text-sm font-extrabold">{rt.name}</div>
                   <button
-                    onClick={() => {
-                      if (typeof window !== "undefined")
-                        navigator.clipboard.writeText(url);
-                    }}
-                    className="px-3 py-1.5 bg-amber-600 hover:bg-amber-700 text-white font-bold rounded text-xs"
+                    onClick={() => rotate(rt.id)}
+                    disabled={rotating === rt.id}
+                    className="text-[11px] font-bold text-status-bad-700 hover:underline disabled:opacity-50"
                   >
-                    Copy
+                    {rotating === rt.id ? "Rotating…" : "Rotate token"}
                   </button>
                 </div>
+                {!url ? (
+                  <div className="text-xs text-ink-mute">Generating token…</div>
+                ) : (
+                  <div className="flex items-center gap-2">
+                    <code className="flex-1 bg-sand-50 px-2 py-1 rounded font-mono text-[11px] break-all">
+                      {url}
+                    </code>
+                    <button
+                      onClick={() => {
+                        if (typeof window !== "undefined")
+                          navigator.clipboard.writeText(url);
+                      }}
+                      className="px-3 py-1.5 bg-amber-600 hover:bg-amber-700 text-white font-bold rounded text-xs"
+                    >
+                      Copy
+                    </button>
+                  </div>
+                )}
               </div>
             );
           })}
@@ -3973,7 +4053,7 @@ function HotelSettingsSection() {
     load();
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  async function save(rotateIcalToken = false) {
+  async function save() {
     if (busy || !hotel) return;
     setBusy(true);
     setErr(null);
@@ -3993,12 +4073,11 @@ function HotelSettingsSection() {
             hotel.tourismTaxPercent != null
               ? Number(hotel.tourismTaxPercent)
               : null,
-          rotateIcalToken,
         }),
       });
       const d = await res.json();
       if (!res.ok) throw new Error(d.error || "Save failed");
-      setMsg(rotateIcalToken ? "Token rotated. Update OTA URLs!" : "Saved.");
+      setMsg("Saved.");
       await load();
     } catch (e) {
       setErr(e instanceof Error ? e.message : "Save failed");
@@ -4074,28 +4153,17 @@ function HotelSettingsSection() {
         )}
         <div className="flex gap-2 justify-between flex-wrap">
           <button
-            onClick={() => {
-              if (
-                confirm(
-                  "Rotate iCal export token? Every OTA URL you've already pasted will stop working — you'll need to update them."
-                )
-              ) {
-                save(true);
-              }
-            }}
-            disabled={busy}
-            className="px-3 py-1.5 text-xs font-bold text-status-bad-700 hover:bg-status-bad-50 rounded-lg"
-          >
-            Rotate iCal token
-          </button>
-          <button
-            onClick={() => save(false)}
+            onClick={() => save()}
             disabled={busy}
             className="px-4 py-2 bg-amber-600 hover:bg-amber-700 text-white font-extrabold rounded-lg text-sm disabled:opacity-50"
           >
             {busy ? "…" : "Save settings"}
           </button>
         </div>
+        <p className="text-[11px] text-ink-mute">
+          iCal export tokens live per-room-type now. Rotate them
+          individually from the "iCal export" section above.
+        </p>
       </div>
     </section>
   );

@@ -1,4 +1,59 @@
 import { db } from "@/lib/db";
+import type { Prisma } from "@/generated/prisma/client";
+
+/**
+ * Acquire a transaction-scoped Postgres advisory lock for a (hotel,
+ * room type) pair. Pass any tx (a Prisma transactional client) and
+ * call this BEFORE the availability check. The lock auto-releases
+ * when the transaction commits or rolls back; concurrent callers
+ * for the same key serialise on the lock — closing the TOCTOU
+ * window between availability check and reservation insert.
+ *
+ * Two-int form: pg_advisory_xact_lock(int4, int4). We hash the
+ * two ids into 32-bit ints. Low collision probability per hotel
+ * (small N of types) is fine — at worst an unrelated lock waits
+ * a moment.
+ */
+export async function lockTypePool(
+  tx: Prisma.TransactionClient,
+  hotelId: string,
+  roomTypeId: string
+): Promise<void> {
+  // FNV-1a-ish 32-bit hash. Stable, fast, dependency-free.
+  function hash32(s: string): number {
+    let h = 2166136261;
+    for (let i = 0; i < s.length; i++) {
+      h = Math.imul(h ^ s.charCodeAt(i), 16777619);
+    }
+    // Coerce to signed int32 for Postgres int4.
+    return h | 0;
+  }
+  const a = hash32(`hotel:${hotelId}`);
+  const b = hash32(`type:${roomTypeId}`);
+  await tx.$queryRawUnsafe(`SELECT pg_advisory_xact_lock(${a}, ${b})`);
+}
+
+/**
+ * Same shape but locked at the hotel level, used by the iCal sync
+ * mutex so cron + manual "Sync now" can't race for the same hotel.
+ */
+export async function lockHotel(
+  tx: Prisma.TransactionClient,
+  hotelId: string
+): Promise<void> {
+  function hash32(s: string): number {
+    let h = 2166136261;
+    for (let i = 0; i < s.length; i++) {
+      h = Math.imul(h ^ s.charCodeAt(i), 16777619);
+    }
+    return h | 0;
+  }
+  // Use a different first arg from the type-pool lock so the two
+  // never collide. 0x484F5445 = "HOTE" — stable namespace marker.
+  const a = 0x484f5445 | 0;
+  const b = hash32(`hotel:${hotelId}`);
+  await tx.$queryRawUnsafe(`SELECT pg_advisory_xact_lock(${a}, ${b})`);
+}
 
 /**
  * Returns the Hotel row for a given Restaurant slug, or null if no
@@ -40,6 +95,48 @@ export async function isSessionEligibleForRoomCharge(sessionId: string) {
 export function countNights(checkInDate: Date, checkOutDate: Date): number {
   const ms = checkOutDate.getTime() - checkInDate.getTime();
   return Math.max(0, Math.round(ms / (24 * 60 * 60 * 1000)));
+}
+
+/**
+ * Returns the start of "today" in Africa/Cairo as a UTC Date.
+ *
+ * Why this exists: our @db.Date columns and most date math used to
+ * use UTC midnight, which means between 12am and 2am Cairo (UTC+2)
+ * the "today" view was still showing yesterday. This helper computes
+ * the UTC instant that corresponds to local midnight in Cairo.
+ *
+ * Cairo currently doesn't observe DST so the offset is a fixed +2h,
+ * but Egypt has flipped DST policy multiple times historically. We
+ * use Intl to be future-proof.
+ */
+export function cairoMidnightUtc(reference?: Date): Date {
+  const now = reference ?? new Date();
+  // Format in Cairo time and parse back. The trick: we want the UTC
+  // instant that PRINTS as 00:00 local. Intl.DateTimeFormat does the
+  // tz conversion, then we shift by the offset.
+  const fmt = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Africa/Cairo",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  });
+  const localDate = fmt.format(now); // "2026-05-07"
+  // Build a Date at UTC midnight of that local date, then back-shift
+  // by the Cairo offset to get the UTC instant of local midnight.
+  const utcMidOfLocalDate = new Date(`${localDate}T00:00:00Z`);
+  // Compute the offset between Cairo time and UTC at this moment.
+  // Use a sentinel UTC time to read the local equivalent, then diff.
+  const probeUtc = new Date(`${localDate}T12:00:00Z`);
+  const probeLocalParts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Africa/Cairo",
+    hour: "2-digit",
+    hour12: false,
+  }).format(probeUtc);
+  const localHourAtNoonUtc = parseInt(probeLocalParts, 10);
+  // Cairo is UTC+2 currently → at 12:00 UTC, local is 14:00 →
+  // offsetHours = 2. If a future DST shift happens this self-adjusts.
+  const offsetHours = localHourAtNoonUtc - 12;
+  return new Date(utcMidOfLocalDate.getTime() - offsetHours * 60 * 60 * 1000);
 }
 
 type RateRoomType = {

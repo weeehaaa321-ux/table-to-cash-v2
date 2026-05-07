@@ -1,13 +1,28 @@
 import { NextRequest, NextResponse } from "next/server";
-import { randomBytes } from "crypto";
 import { db } from "@/lib/db";
 import { requireStaffAuth } from "@/lib/api-auth";
 
 /**
  * GET /api/hotel?slug=neom-dahab
- * Returns the hotel config for a restaurant, or 404 if no hotel
- * module is configured. Public — used by the cashier UI to decide
- * whether to show Charge-to-Room (no PII leak: just config flags).
+ *
+ * Two response shapes by auth:
+ *
+ *   - Unauthenticated (no x-staff-id, or x-staff-id from a non-
+ *     hotel-staff role at this restaurant): returns ONLY the
+ *     public-safe fields needed by the cashier presence check and
+ *     by anyone deciding whether to render the Charge-to-Room
+ *     button. Specifically: { hotel: { name, address, checkInTime,
+ *     checkOutTime } | null }. Sensitive config (icalExportToken,
+ *     emailFrom, notificationEmail, tourismTaxPercent, icalSyncs)
+ *     is omitted.
+ *
+ *   - Authenticated as OWNER/FRONT_DESK at this restaurant: full
+ *     hotel record so the Setup tab can render and edit settings.
+ *
+ * Why split here instead of adding a separate /api/hotel/admin
+ * endpoint: the public callers already exist and we don't want to
+ * change those URLs. The auth check is a few lines and the diff
+ * is contained.
  */
 export async function GET(request: NextRequest) {
   const slug = new URL(request.url).searchParams.get("slug");
@@ -20,7 +35,40 @@ export async function GET(request: NextRequest) {
   if (!restaurant) return NextResponse.json({ error: "Not found" }, { status: 404 });
   if (!restaurant.hotel) return NextResponse.json({ hotel: null });
 
-  return NextResponse.json({ hotel: restaurant.hotel });
+  // Decide whether the caller is allowed the full record.
+  const staffId = request.headers.get("x-staff-id");
+  let isAuthorizedAdmin = false;
+  if (staffId) {
+    const staff = await db.staff.findUnique({
+      where: { id: staffId },
+      select: { restaurantId: true, role: true, active: true },
+    });
+    if (
+      staff?.active &&
+      staff.restaurantId === restaurant.id &&
+      (staff.role === "OWNER" || staff.role === "FRONT_DESK")
+    ) {
+      isAuthorizedAdmin = true;
+    }
+  }
+
+  if (isAuthorizedAdmin) {
+    return NextResponse.json({ hotel: restaurant.hotel });
+  }
+
+  // Public shape — strip the sensitive config fields. We deliberately
+  // include `name`, `address`, `checkInTime`, `checkOutTime` because
+  // the public-facing /book and the cashier badge legitimately need
+  // them. Everything else is admin-only.
+  const h = restaurant.hotel;
+  return NextResponse.json({
+    hotel: {
+      name: h.name,
+      address: h.address,
+      checkInTime: h.checkInTime,
+      checkOutTime: h.checkOutTime,
+    },
+  });
 }
 
 /**
@@ -40,26 +88,15 @@ export async function POST(request: NextRequest) {
     notificationEmail,
     emailFrom,
     tourismTaxPercent,
-    rotateIcalToken,
   } = body;
   if (typeof name !== "string" || !name.trim()) {
     return NextResponse.json({ error: "name required" }, { status: 400 });
   }
 
-  // Existing hotel (if any) — used to preserve the iCal token unless
-  // the owner explicitly asks to rotate it.
-  const existing = await db.hotel.findUnique({
-    where: { restaurantId: auth.restaurantId },
-    select: { icalExportToken: true },
-  });
-
-  const icalExportToken = rotateIcalToken
-    ? randomBytes(20).toString("base64url")
-    : existing?.icalExportToken ||
-      // First-time-set: generate a token automatically so the export
-      // URL is usable from the moment the hotel exists.
-      randomBytes(20).toString("base64url");
-
+  // iCal export tokens now live per-RoomType
+  // (RoomType.icalExportToken). The legacy Hotel.icalExportToken
+  // column is kept for backwards compatibility but no longer
+  // generated or rotated here.
   const data = {
     name: name.trim(),
     address: address?.trim() || null,
@@ -71,7 +108,6 @@ export async function POST(request: NextRequest) {
       typeof tourismTaxPercent === "number" && tourismTaxPercent >= 0
         ? tourismTaxPercent
         : null,
-    icalExportToken,
   };
 
   const hotel = await db.hotel.upsert({

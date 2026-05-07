@@ -2,21 +2,26 @@
  * Outbound transactional email. Backed by Resend's HTTP API when the
  * RESEND_API_KEY env var is set; otherwise no-ops with a console log
  * so the rest of the app keeps working before the API key is
- * provisioned. Idempotency is the caller's job — this just sends.
+ * provisioned.
+ *
+ * Every attempt is recorded in the MailLog table. If Resend rejects
+ * or throws, the row is marked FAILED and the retry cron picks it
+ * up later (up to 3 attempts before ABANDONED). Each successful
+ * send writes the provider message id back so support tickets can
+ * cross-reference Resend's dashboard.
  *
  * Why Resend (vs SES / SendGrid / Mailgun): the simplest-to-set-up
  * developer-friendly option in 2026, has a free tier that comfortably
  * covers a small hotel's volume, and exposes a plain HTTP API so we
- * don't pull a heavy SDK into our bundle. Swapping to a different
- * provider later is a one-file change.
+ * don't pull a heavy SDK into our bundle.
  *
  * Required env:
  *   RESEND_API_KEY    — get from https://resend.com (free tier OK)
  * Optional env:
  *   EMAIL_FROM_DEFAULT — fallback "From" when Hotel.emailFrom is null
- *                        (Resend gives you "onboarding@resend.dev"
- *                        until you verify your own domain).
  */
+
+import { db } from "@/lib/db";
 
 export type SendEmailInput = {
   from: string;
@@ -26,17 +31,68 @@ export type SendEmailInput = {
   text?: string;
   replyTo?: string;
   bcc?: string | string[];
+  /** Hotel id for indexing / per-hotel reporting. Optional. */
+  hotelId?: string | null;
 };
 
-export async function sendEmail(input: SendEmailInput): Promise<{ ok: boolean; id?: string; error?: string }> {
+/**
+ * Send-and-log. Always creates a MailLog row first (status PENDING),
+ * then attempts Resend, then flips the row to SENT or FAILED based
+ * on outcome. Returning ok=false here is non-fatal for callers —
+ * they can `.catch` and continue, and the retry cron picks it up.
+ */
+export async function sendEmail(
+  input: SendEmailInput
+): Promise<{ ok: boolean; id?: string; error?: string; mailLogId?: string }> {
+  const toAddress = Array.isArray(input.to) ? input.to[0] : input.to;
+  const log = await db.mailLog.create({
+    data: {
+      hotelId: input.hotelId ?? null,
+      toAddress,
+      fromAddress: input.from,
+      subject: input.subject,
+      payload: {
+        html: input.html,
+        text: input.text ?? null,
+        replyTo: input.replyTo ?? null,
+        bcc: input.bcc ?? null,
+        toFull: input.to,
+      },
+    },
+  });
+
+  return await attemptSend(log.id, input);
+}
+
+/**
+ * Try to send a single MailLog row. Pure function in terms of
+ * application state: it reads RESEND_API_KEY, calls Resend, and
+ * updates the MailLog row. The retry cron reuses this directly.
+ */
+export async function attemptSend(
+  mailLogId: string,
+  input: SendEmailInput
+): Promise<{ ok: boolean; id?: string; error?: string; mailLogId: string }> {
   const apiKey = process.env.RESEND_API_KEY;
+  const now = new Date();
+
   if (!apiKey) {
+    // No API key configured. Log a warning and mark the row FAILED;
+    // the cron will keep retrying until the key is added (up to 3
+    // attempts after which the row is ABANDONED).
+    await db.mailLog.update({
+      where: { id: mailLogId },
+      data: {
+        status: "FAILED",
+        attempts: { increment: 1 },
+        lastError: "RESEND_API_KEY not set",
+        lastAttemptAt: now,
+      },
+    });
     console.warn(
-      `[email] RESEND_API_KEY not set; skipping send to ${
-        Array.isArray(input.to) ? input.to.join(", ") : input.to
-      } — "${input.subject}"`
+      `[email] RESEND_API_KEY not set; logged but not sent — "${input.subject}"`
     );
-    return { ok: false, error: "no_api_key" };
+    return { ok: false, error: "no_api_key", mailLogId };
   }
 
   try {
@@ -58,14 +114,45 @@ export async function sendEmail(input: SendEmailInput): Promise<{ ok: boolean; i
     });
     if (!res.ok) {
       const text = await res.text().catch(() => "");
+      const errorMsg = `${res.status}: ${text.slice(0, 500)}`;
+      await db.mailLog.update({
+        where: { id: mailLogId },
+        data: {
+          status: "FAILED",
+          attempts: { increment: 1 },
+          lastError: errorMsg,
+          lastAttemptAt: now,
+        },
+      });
       console.error(`[email] send failed (${res.status}): ${text}`);
-      return { ok: false, error: `${res.status}: ${text.slice(0, 200)}` };
+      return { ok: false, error: errorMsg, mailLogId };
     }
     const data = await res.json().catch(() => ({}));
-    return { ok: true, id: data.id };
+    await db.mailLog.update({
+      where: { id: mailLogId },
+      data: {
+        status: "SENT",
+        attempts: { increment: 1 },
+        sentAt: now,
+        lastAttemptAt: now,
+        providerId: data.id ?? null,
+        lastError: null,
+      },
+    });
+    return { ok: true, id: data.id, mailLogId };
   } catch (e) {
+    const errorMsg = e instanceof Error ? e.message : String(e);
+    await db.mailLog.update({
+      where: { id: mailLogId },
+      data: {
+        status: "FAILED",
+        attempts: { increment: 1 },
+        lastError: errorMsg,
+        lastAttemptAt: now,
+      },
+    });
     console.error("[email] send threw:", e);
-    return { ok: false, error: e instanceof Error ? e.message : String(e) };
+    return { ok: false, error: errorMsg, mailLogId };
   }
 }
 

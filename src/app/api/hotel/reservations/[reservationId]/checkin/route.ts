@@ -157,6 +157,7 @@ export async function POST(
     // stores the check-in side of each night (so a 5/10–5/13 stay
     // produces three rows: 5/10, 5/11, 5/12). Rate uses the room
     // type's weekendRate when the night falls on Fri/Sat.
+    let roomNightTotal = 0;
     for (let i = 0; i < nights; i++) {
       const night = new Date(reservation.checkInDate);
       night.setUTCDate(night.getUTCDate() + i);
@@ -169,6 +170,25 @@ export async function POST(
           amount: nightlyRate,
           description: `Room ${roomNumber} — ${night.toISOString().slice(0, 10)}${isWeekend && roomTypeForRate.weekendRate ? " (weekend rate)" : ""}`,
           night,
+          chargedById: auth.id,
+        },
+      });
+      roomNightTotal += nightlyRate;
+    }
+
+    // Prepaid bookings (Booking.com Pay-Online, Airbnb, etc.) — the
+    // OTA already collected the room charge. Post a negative MISC
+    // line that nets the room nights out so the folio balance only
+    // reflects incidentals (cafe, minibar, activities) the guest
+    // settles at the desk. Tourism tax is also skipped at checkout
+    // for prepaids since it's typically included in the prepaid total.
+    if (reservation.prepaid && roomNightTotal > 0) {
+      await tx.folioCharge.create({
+        data: {
+          folioId: reservation.folio!.id,
+          type: "MISC",
+          amount: -roomNightTotal,
+          description: `Prepaid via ${reservation.source.replace("_", ".")} — room nights covered`,
           chargedById: auth.id,
         },
       });
@@ -193,6 +213,7 @@ export async function POST(
       to: reservation.guest.email,
       subject: tpl.subject,
       html: tpl.html,
+      hotelId: reservation.hotelId,
     }).catch(() => {});
   }
 

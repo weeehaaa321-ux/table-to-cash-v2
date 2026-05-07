@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { requireStaffAuth } from "@/lib/api-auth";
-import { computeFolioBalance, countNights } from "@/lib/hotel";
+import { computeFolioBalance, countNights, rateForNight } from "@/lib/hotel";
 import {
   pickFromAddress,
   renderCheckOutReceiptEmail,
@@ -46,7 +46,11 @@ export async function POST(
         },
       },
       folio: { include: { charges: true } },
-      room: true,
+      room: { include: { roomType: true } },
+      // Top-level roomType too: when the reservation isn't yet bound
+      // to a physical room (BOOKED → CHECKED_IN auto-assignment edge
+      // case), fall back to the type-level rate config.
+      roomType: true,
       guest: { select: { name: true, email: true } },
     },
   });
@@ -90,16 +94,21 @@ export async function POST(
       });
     }
     // Add charges for any extra nights (extension at checkout).
-    const rate = Number(reservation.nightlyRate);
+    // Use rateForNight so weekend pricing is honoured per-night —
+    // not the average rate from Reservation.nightlyRate which is
+    // an avg-of-mixed-rates and would mis-bill weekend extensions.
+    const rateRoomType = reservation.room?.roomType ?? reservation.roomType;
     for (let i = roomNightCharges.length; i < actualNights; i++) {
       const night = new Date(reservation.checkInDate);
       night.setUTCDate(night.getUTCDate() + i);
+      const nightlyRate = rateForNight(rateRoomType, night);
+      const isWeekend = night.getUTCDay() === 5 || night.getUTCDay() === 6;
       await tx.folioCharge.create({
         data: {
           folioId: reservation.folio!.id,
           type: "ROOM_NIGHT",
-          amount: rate,
-          description: `Room ${reservation.room?.number ?? "unassigned"} — ${night.toISOString().slice(0, 10)} (extension)`,
+          amount: nightlyRate,
+          description: `Room ${reservation.room?.number ?? "unassigned"} — ${night.toISOString().slice(0, 10)} (extension${isWeekend && rateRoomType.weekendRate ? ", weekend rate" : ""})`,
           night,
           chargedById: auth.id,
         },
@@ -121,7 +130,12 @@ export async function POST(
   const hasTaxLine = (folioRefreshed?.charges ?? []).some(
     (c) => !c.voided && c.description.startsWith("Tourism + service tax")
   );
-  if (taxPercent > 0 && !hasTaxLine) {
+  // Skip the tax line for prepaid bookings — OTAs that prepay
+  // (Airbnb, Booking.com Pay-Online, Expedia Collect) typically
+  // include all taxes in the guest's prepayment, so charging again
+  // at checkout double-bills. If your specific OTA bills net-of-tax,
+  // the front desk can post the tax manually as a misc line.
+  if (taxPercent > 0 && !hasTaxLine && !reservation.prepaid) {
     const roomNightTotal = (folioRefreshed?.charges ?? [])
       .filter((c) => !c.voided && c.type === "ROOM_NIGHT")
       .reduce((s, c) => s + Number(c.amount), 0);
@@ -200,6 +214,7 @@ export async function POST(
       bcc: reservation.hotel.notificationEmail || undefined,
       subject: tpl.subject,
       html: tpl.html,
+      hotelId: reservation.hotelId,
     }).catch(() => {});
   }
 

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { requireStaffAuth } from "@/lib/api-auth";
+import { rateForNight } from "@/lib/hotel";
 
 async function loadReservation(reservationId: string, restaurantId: string) {
   const reservation = await db.reservation.findUnique({
@@ -9,6 +10,9 @@ async function loadReservation(reservationId: string, restaurantId: string) {
       hotel: { select: { restaurantId: true } },
       guest: true,
       room: { include: { roomType: true } },
+      // Fallback when roomId is null (type-bound reservation that
+      // hasn't been checked in yet but is being extended).
+      roomType: true,
       folio: { include: { charges: { orderBy: { chargedAt: "desc" } } } },
       sessions: { select: { id: true, openedAt: true, closedAt: true } },
     },
@@ -111,13 +115,25 @@ export async function PATCH(
     }
     // Replace placeholder guest details with real ones at check-in.
     // The Guest model holds these; we update the related row instead
-    // of mirroring fields on Reservation.
-    if (body.guestName?.trim() || body.guestPhone?.trim() || body.guestIdNumber?.trim() || body.guestNationality?.trim()) {
+    // of mirroring fields on Reservation. Setting a real name flips
+    // isPlaceholder back to false so the warning badges disappear.
+    if (
+      body.guestName?.trim() ||
+      body.guestPhone?.trim() ||
+      body.guestIdNumber?.trim() ||
+      body.guestNationality?.trim() ||
+      body.guestEmail?.trim()
+    ) {
       const guestData: Record<string, unknown> = {};
-      if (body.guestName?.trim()) guestData.name = body.guestName.trim();
+      if (body.guestName?.trim()) {
+        guestData.name = body.guestName.trim();
+        // Real name typed → no longer a placeholder.
+        guestData.isPlaceholder = false;
+      }
       if (body.guestPhone?.trim()) guestData.phone = body.guestPhone.trim();
       if (body.guestIdNumber?.trim()) guestData.idNumber = body.guestIdNumber.trim();
-      if (body.guestNationality?.trim()) guestData.nationality = body.guestNationality.trim();
+      if (body.guestNationality?.trim())
+        guestData.nationality = body.guestNationality.trim();
       if (body.guestEmail?.trim()) guestData.email = body.guestEmail.trim();
       await db.guest.update({ where: { id: reservation.guestId }, data: guestData });
     }
@@ -158,8 +174,10 @@ export async function PATCH(
 
     // Post one ROOM_NIGHT charge per added night (so the folio reflects
     // the extension immediately — checkout reconciles too, but staff
-    // and guest both see the cost on the folio right away).
-    const rate = Number(reservation.nightlyRate);
+    // and guest both see the cost on the folio right away). Use
+    // rateForNight so weekend pricing is honoured per-night; the
+    // averaged Reservation.nightlyRate would mis-bill weekend extensions.
+    const rateRoomType = reservation.room?.roomType ?? reservation.roomType;
     await db.$transaction(async (tx) => {
       await tx.reservation.update({
         where: { id: reservationId },
@@ -169,12 +187,14 @@ export async function PATCH(
         const cur = new Date(reservation.checkOutDate);
         while (cur < newCheckOut) {
           const night = new Date(cur);
+          const nightlyRate = rateForNight(rateRoomType, night);
+          const isWeekend = night.getUTCDay() === 5 || night.getUTCDay() === 6;
           await tx.folioCharge.create({
             data: {
               folioId: reservation.folio.id,
               type: "ROOM_NIGHT",
-              amount: rate,
-              description: `Room ${reservation.room?.number ?? "unassigned"} — ${night.toISOString().slice(0, 10)} (extension)`,
+              amount: nightlyRate,
+              description: `Room ${reservation.room?.number ?? "unassigned"} — ${night.toISOString().slice(0, 10)} (extension${isWeekend && rateRoomType.weekendRate ? ", weekend rate" : ""})`,
               night,
               chargedById: auth.id,
             },

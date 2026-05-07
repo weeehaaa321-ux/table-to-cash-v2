@@ -657,27 +657,32 @@ model Hotel {
 // Reservation is a snapshot, so RoomType price changes don't rewrite
 // historical bookings.
 model RoomType {
-  id           String        @id @default(cuid())
-  hotel        Hotel         @relation(fields: [hotelId], references: [id])
-  hotelId      String
-  name         String
-  description  String?
-  capacity     Int           @default(2)
-  baseRate     Decimal       @db.Decimal(10, 2)
+  id              String        @id @default(cuid())
+  hotel           Hotel         @relation(fields: [hotelId], references: [id])
+  hotelId         String
+  name            String
+  description     String?
+  capacity        Int           @default(2)
+  baseRate        Decimal       @db.Decimal(10, 2)
   // Override rate that applies to nights where check-in falls on
   // Friday or Saturday (Egypt's weekend). Null = use baseRate. Useful
   // for beach properties that fill on weekends and want to capture
   // the premium without manual price changes.
-  weekendRate  Decimal?      @db.Decimal(10, 2)
+  weekendRate     Decimal?      @db.Decimal(10, 2)
   // Minimum number of nights per booking. Direct bookings under this
   // threshold are rejected at /api/book/reserve. Default 1 = no
   // restriction. Used during high-demand seasons (Christmas etc.).
-  minNights    Int           @default(1)
-  amenities    String[] // ["sea-view", "ac", "balcony", "jacuzzi"]
-  sortOrder    Int           @default(0)
-  rooms        Room[]
-  createdAt    DateTime      @default(now())
-  reservations Reservation[]
+  minNights       Int           @default(1)
+  // Per-room-type secret used in the iCal export URL. Generated
+  // lazily on first export. Per-type (rather than one shared
+  // hotel-wide token) so a leaked URL only exposes one type's
+  // availability calendar.
+  icalExportToken String?       @unique
+  amenities       String[] // ["sea-view", "ac", "balcony", "jacuzzi"]
+  sortOrder       Int           @default(0)
+  rooms           Room[]
+  createdAt       DateTime      @default(now())
+  reservations    Reservation[]
 
   @@index([hotelId])
 }
@@ -715,19 +720,25 @@ enum RoomStatus {
 // re-link. Neither is mandatory in Phase 1 (walk-ins without ID),
 // so both stay nullable with soft indexes.
 model Guest {
-  id           String        @id @default(cuid())
-  hotel        Hotel         @relation(fields: [hotelId], references: [id])
-  hotelId      String
-  name         String
-  phone        String?
-  email        String?
-  idNumber     String? // passport / national ID
-  nationality  String?
-  address      String?
-  dateOfBirth  DateTime?     @db.Date
-  notes        String? // allergies, preferences, history
-  reservations Reservation[]
-  createdAt    DateTime      @default(now())
+  id            String        @id @default(cuid())
+  hotel         Hotel         @relation(fields: [hotelId], references: [id])
+  hotelId       String
+  name          String
+  phone         String?
+  email         String?
+  idNumber      String? // passport / national ID
+  nationality   String?
+  address       String?
+  dateOfBirth   DateTime?     @db.Date
+  notes         String? // allergies, preferences, history
+  // True for OTA placeholder rows ("Booking.com guest") created by
+  // the iCal pull. Front desk replaces with real details at check-in
+  // (CheckInModal forces a name when this is set). Explicit column
+  // beats name-suffix regex matching, which falsely flagged guests
+  // whose surname was "Guest".
+  isPlaceholder Boolean       @default(false)
+  reservations  Reservation[]
+  createdAt     DateTime      @default(now())
 
   @@index([hotelId])
   @@index([hotelId, phone])
@@ -787,6 +798,14 @@ model Reservation {
   // dedupe on re-sync: one Booking.com VEVENT.UID = one Reservation.
   // Null for direct + walk-in bookings.
   externalUid       String?
+  // Which iCal feed this reservation was pulled from. Format:
+  // "{source}:{roomNumber}" matching the source+roomNumber on the
+  // Hotel.icalSyncs entry. Used to scope silent-removal reconciliation:
+  // when an OTA quietly drops a VEVENT (no STATUS:CANCELLED), we can
+  // filter to "reservations from THIS feed whose UID isn't in this
+  // sync run" without touching reservations from other feeds that
+  // share the same source.
+  icalSourceRoom    String?
   // OTA-facing booking reference (Booking.com confirmation number,
   // Airbnb HMxx code, Expedia itinerary). Free text — front desk
   // pastes it from the OTA's confirmation email so we can cross-check
@@ -805,6 +824,7 @@ model Reservation {
   cancelledAt       DateTime?
   cancelReason      String?
 
+  @@unique([hotelId, externalUid])
   @@index([hotelId, checkInDate, checkOutDate])
   @@index([hotelId, status])
   @@index([guestId])
@@ -902,4 +922,41 @@ enum FolioChargeType {
   ACTIVITY
   MINIBAR
   MISC
+}
+
+// MailLog — one row per outbound transactional email attempt.
+// sendEmail() always writes a row with status=PENDING, then flips
+// it to SENT or FAILED based on the Resend response. The retry cron
+// finds FAILED rows with attempts < 3 and tries again. After 3
+// attempts we mark ABANDONED and stop retrying.
+//
+// payload holds the rendered HTML + text + bcc + replyTo so the
+// retry can replay exactly what was first attempted; we don't
+// re-render templates on retry.
+model MailLog {
+  id            String     @id @default(cuid())
+  hotelId       String?
+  toAddress     String
+  fromAddress   String
+  subject       String
+  status        MailStatus @default(PENDING)
+  attempts      Int        @default(0)
+  lastError     String?
+  payload       Json
+  // Provider message id (Resend "id" field) — handy for support
+  // tickets and debugging.
+  providerId    String?
+  createdAt     DateTime   @default(now())
+  sentAt        DateTime?
+  lastAttemptAt DateTime?
+
+  @@index([status, createdAt])
+  @@index([hotelId, createdAt])
+}
+
+enum MailStatus {
+  PENDING
+  SENT
+  FAILED
+  ABANDONED
 }
