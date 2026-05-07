@@ -37,8 +37,12 @@
     -moz-user-select: text;
     -ms-user-select: text;
     user-select: text;
+    cursor: text;
   }
   html, body { margin: 0; padding: 0; }
+  /* Reset cursor to pointer on interactive elements so links and
+     buttons still feel clickable. Everything else stays I-beam. */
+  a, button, [role="button"], nav.toc a, nav.toc li { cursor: pointer; }
   body {
     font-family: "Cairo", "Segoe UI", system-ui, -apple-system, sans-serif;
     font-size: 16px;
@@ -46,13 +50,7 @@
     color: var(--ink);
     background: var(--bg);
     padding: 0 0 120px;
-    cursor: auto;
   }
-  /* Text containers get an I-beam cursor so it's obvious they're
-     selectable. Avoids the "can I click this?" hesitation. */
-  p, h1, h2, h3, h4, li, td, th, .why, .item, .figure, .a, .q,
-  .feature-block, .compare-card, .timeline-step, .numbers-row, .faq, .card,
-  .pillar, .closing { cursor: text; }
   ::selection { background: #ffe27a; color: var(--ink); }
   ::-moz-selection { background: #ffe27a; color: var(--ink); }
   .wrap { max-width: 860px; margin: 0 auto; padding: 0 24px; }
