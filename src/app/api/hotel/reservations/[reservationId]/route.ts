@@ -108,11 +108,56 @@ export async function PATCH(
     if (newCheckOut <= reservation.checkInDate) {
       return NextResponse.json({ error: "checkOutDate must be after checkInDate" }, { status: 400 });
     }
-    const updated = await db.reservation.update({
-      where: { id: reservationId },
-      data: { checkOutDate: newCheckOut },
+    if (newCheckOut <= reservation.checkOutDate) {
+      return NextResponse.json(
+        { error: "Extension date must be after current checkout" },
+        { status: 400 }
+      );
+    }
+    // Conflict check: another booking on this room covering any of the
+    // newly added nights would silently overlap if we just extended.
+    // Reuse the availability finder and ensure our room is still free
+    // for the extended range (excluding ourselves).
+    const stillFree = await import("@/lib/hotel").then((m) =>
+      m.findAvailableRooms(reservation.hotelId, reservation.checkOutDate, newCheckOut, {
+        excludeReservationId: reservationId,
+      })
+    );
+    if (!stillFree.find((r) => r.id === reservation.roomId)) {
+      return NextResponse.json(
+        { error: "Room is booked by another reservation in the extension window" },
+        { status: 409 }
+      );
+    }
+
+    // Post one ROOM_NIGHT charge per added night (so the folio reflects
+    // the extension immediately — checkout reconciles too, but staff
+    // and guest both see the cost on the folio right away).
+    const rate = Number(reservation.nightlyRate);
+    await db.$transaction(async (tx) => {
+      await tx.reservation.update({
+        where: { id: reservationId },
+        data: { checkOutDate: newCheckOut },
+      });
+      if (reservation.folio?.id) {
+        const cur = new Date(reservation.checkOutDate);
+        while (cur < newCheckOut) {
+          const night = new Date(cur);
+          await tx.folioCharge.create({
+            data: {
+              folioId: reservation.folio.id,
+              type: "ROOM_NIGHT",
+              amount: rate,
+              description: `Room ${reservation.room.number} — ${night.toISOString().slice(0, 10)} (extension)`,
+              night,
+              chargedById: auth.id,
+            },
+          });
+          cur.setUTCDate(cur.getUTCDate() + 1);
+        }
+      }
     });
-    return NextResponse.json({ reservation: updated });
+    return NextResponse.json({ ok: true });
   }
 
   return NextResponse.json({ error: "Unknown action" }, { status: 400 });

@@ -5744,6 +5744,13 @@ function OwnerControlSystem({ verifiedOwnerId }: { verifiedOwnerId: string }) {
           </div>
 
           <div className="flex items-center gap-2 lg:hidden">
+            <a
+              href="/hotel"
+              className="px-2 py-1 text-[11px] font-extrabold rounded-md bg-amber-100 text-amber-800 hover:bg-amber-200"
+              title="Hotel front desk"
+            >
+              🛏️ Hotel
+            </a>
             <LanguageToggle lang={lang} onToggle={toggleLang} />
             <LogoutButton role="owner" />
           </div>
@@ -5760,6 +5767,13 @@ function OwnerControlSystem({ verifiedOwnerId }: { verifiedOwnerId: string }) {
               <p className="text-[9px] text-text-muted uppercase tracking-wider">{t("dashboard.header.avgOrder")}</p>
               <p className="text-sm font-bold text-text-primary tabular-nums">{formatEGP(metrics.avgOrderValue)} {t("common.egp")}</p>
             </div>
+            <a
+              href="/hotel"
+              className="px-3 py-1 text-xs font-extrabold rounded-lg bg-amber-100 text-amber-800 hover:bg-amber-200"
+              title="Open hotel front desk"
+            >
+              🛏️ Hotel
+            </a>
             <LanguageToggle lang={lang} onToggle={toggleLang} />
             <LogoutButton role="owner" />
           </div>

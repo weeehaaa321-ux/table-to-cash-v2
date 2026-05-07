@@ -1457,8 +1457,40 @@ export class SessionUseCases {
 
       const affected = await tx.order.findMany({
         where: { sessionId, paidAt: { gte: windowStart, lte: windowEnd } },
-        select: { id: true, status: true, total: true, paymentMethod: true, parentOrderId: true },
+        select: {
+          id: true,
+          status: true,
+          total: true,
+          paymentMethod: true,
+          parentOrderId: true,
+          folioCharge: { select: { id: true, folioId: true, folio: { select: { status: true } } } },
+        },
       });
+
+      // Hotel charge-to-room reversal: if any of the affected orders
+      // posted a FolioCharge against a still-OPEN folio, void it so
+      // the room ledger stays consistent. If the folio is already
+      // SETTLED, the cashier can't safely undo this — the money has
+      // moved — so we abort and let the front desk handle a manual
+      // adjustment via the hotel admin.
+      for (const o of affected) {
+        if (o.folioCharge) {
+          if (o.folioCharge.folio.status !== "OPEN") {
+            throw new Error(
+              `Cannot reverse: order ${o.id.slice(-8)} was charged to a settled hotel folio. Issue a refund through the hotel front desk instead.`
+            );
+          }
+          await tx.folioCharge.update({
+            where: { id: o.folioCharge.id },
+            data: {
+              voided: true,
+              voidReason: `Reversed by cashier${reason ? ` (${reason})` : ""}`,
+              voidedAt: new Date(),
+              voidedById: actor.id,
+            },
+          });
+        }
+      }
 
       for (const o of affected) {
         await tx.order.update({

@@ -106,6 +106,12 @@ type Today = {
   departures: Reservation[];
   inHouse: Reservation[];
   occupancy: { occupied: number; total: number };
+  revenue?: {
+    byType: Record<string, number>;
+    collectedByMethod: Record<string, number>;
+    totalCollected: number;
+    totalPosted: number;
+  };
 };
 
 type Staff = { id: string; name: string; role: string };
@@ -268,7 +274,7 @@ function HotelLogin({ onLogin }: { onLogin: (s: Staff) => void }) {
 // MAIN DASHBOARD
 // ═══════════════════════════════════════════════
 
-type Tab = "today" | "reservations" | "rooms" | "config";
+type Tab = "today" | "reservations" | "walkin" | "calendar" | "rooms" | "config";
 
 function HotelDashboard({ staff, onLogout }: { staff: Staff; onLogout: () => void }) {
   const [tab, setTab] = useState<Tab>("today");
@@ -319,7 +325,9 @@ function HotelDashboard({ staff, onLogout }: { staff: Staff; onLogout: () => voi
         <nav className="max-w-6xl mx-auto px-4 flex gap-1 overflow-x-auto">
           {([
             ["today", "Today"],
+            ["walkin", "Walk-in"],
             ["reservations", "Reservations"],
+            ["calendar", "Calendar"],
             ["rooms", "Rooms"],
             ["config", "Setup"],
           ] as [Tab, string][]).map(([k, label]) => (
@@ -340,7 +348,9 @@ function HotelDashboard({ staff, onLogout }: { staff: Staff; onLogout: () => voi
 
       <main className="max-w-6xl mx-auto px-4 py-6">
         {tab === "today" && <TodayTab staff={staff} />}
+        {tab === "walkin" && <WalkInTab staff={staff} />}
         {tab === "reservations" && <ReservationsTab staff={staff} />}
+        {tab === "calendar" && <CalendarTab staff={staff} />}
         {tab === "rooms" && <RoomsTab staff={staff} />}
         {tab === "config" && <ConfigTab staff={staff} />}
       </main>
@@ -482,6 +492,8 @@ function TodayTab({ staff }: { staff: Staff }) {
         />
       </div>
 
+      {data.revenue && <RevenuePanel revenue={data.revenue} />}
+
       <Section title="Arrivals">
         {data.arrivals.length === 0 ? (
           <Empty>No arrivals today.</Empty>
@@ -512,6 +524,91 @@ function TodayTab({ staff }: { staff: Staff }) {
         )}
       </Section>
     </div>
+  );
+}
+
+function RevenuePanel({
+  revenue,
+}: {
+  revenue: NonNullable<Today["revenue"]>;
+}) {
+  const order: [string, string][] = [
+    ["ROOM_NIGHT", "Room nights"],
+    ["FOOD", "Cafe → room"],
+    ["ACTIVITY", "Activities → room"],
+    ["MINIBAR", "Minibar"],
+    ["MISC", "Other"],
+  ];
+  const methodOrder: [string, string][] = [
+    ["CASH", "Cash"],
+    ["CARD", "Card"],
+    ["INSTAPAY", "InstaPay"],
+  ];
+  return (
+    <section className="bg-white border border-sand-200 rounded-xl p-5 shadow-sm">
+      <h2 className="text-sm font-extrabold uppercase tracking-wider text-ink-mute mb-3">
+        Revenue today
+      </h2>
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        <div>
+          <div className="text-[11px] font-extrabold uppercase tracking-wider text-ink-mute mb-2">
+            Posted to folios today
+          </div>
+          {order.map(([k, label]) => {
+            const v = revenue.byType[k] || 0;
+            if (v === 0) return null;
+            return (
+              <div
+                key={k}
+                className="flex items-center justify-between text-sm py-1 border-b border-sand-100 last:border-b-0"
+              >
+                <span className="text-ink-soft">{label}</span>
+                <span className="font-bold tabular-nums">
+                  {fmtEGP(v)} EGP
+                </span>
+              </div>
+            );
+          })}
+          <div className="flex items-center justify-between text-sm pt-2 mt-1 border-t border-sand-300">
+            <span className="font-extrabold">Total posted</span>
+            <span className="font-extrabold tabular-nums text-amber-800">
+              {fmtEGP(revenue.totalPosted)} EGP
+            </span>
+          </div>
+        </div>
+        <div>
+          <div className="text-[11px] font-extrabold uppercase tracking-wider text-ink-mute mb-2">
+            Collected at checkout today
+          </div>
+          {methodOrder.map(([k, label]) => {
+            const v = revenue.collectedByMethod[k] || 0;
+            if (v === 0) return null;
+            return (
+              <div
+                key={k}
+                className="flex items-center justify-between text-sm py-1 border-b border-sand-100 last:border-b-0"
+              >
+                <span className="text-ink-soft">{label}</span>
+                <span className="font-bold tabular-nums">
+                  {fmtEGP(v)} EGP
+                </span>
+              </div>
+            );
+          })}
+          <div className="flex items-center justify-between text-sm pt-2 mt-1 border-t border-sand-300">
+            <span className="font-extrabold">Total collected</span>
+            <span className="font-extrabold tabular-nums text-status-good-700">
+              {fmtEGP(revenue.totalCollected)} EGP
+            </span>
+          </div>
+        </div>
+      </div>
+      <p className="text-[11px] text-ink-mute mt-3">
+        Posted = charges added to folios today. Collected = folios actually
+        settled today (different days because most stays span several nights
+        before the cash arrives).
+      </p>
+    </section>
   );
 }
 
@@ -642,10 +739,13 @@ function InHouseRow({
   onAction: () => void;
   staff: Staff;
 }) {
-  const [openFolio, setOpenFolio] = useState(false);
+  const [openDetail, setOpenDetail] = useState(false);
   return (
     <>
-      <div className="bg-white border border-sand-200 rounded-xl p-4 flex flex-wrap items-center gap-3">
+      <button
+        onClick={() => setOpenDetail(true)}
+        className="w-full text-left bg-white border border-sand-200 hover:border-amber-400 transition rounded-xl p-4 flex flex-wrap items-center gap-3"
+      >
         <div className="flex-1 min-w-[180px]">
           <div className="font-extrabold text-ink">{reservation.guest.name}</div>
           <div className="text-xs text-ink-soft">
@@ -654,17 +754,12 @@ function InHouseRow({
             <strong>{fmtEGP(folioBalance(reservation.folio))} EGP</strong>
           </div>
         </div>
-        <button
-          onClick={() => setOpenFolio(true)}
-          className="px-3 py-1.5 bg-sand-100 hover:bg-sand-200 text-ink-soft font-bold rounded-lg text-xs"
-        >
-          Folio
-        </button>
-      </div>
-      {openFolio && (
-        <FolioModal
-          reservation={reservation}
-          onClose={() => setOpenFolio(false)}
+        <span className="text-xs font-bold text-amber-700">Open →</span>
+      </button>
+      {openDetail && (
+        <ReservationDetailModal
+          reservationId={reservation.id}
+          onClose={() => setOpenDetail(false)}
           onChange={onAction}
         />
       )}
@@ -778,100 +873,700 @@ function CheckoutModal({
   );
 }
 
-function FolioModal({
-  reservation,
+/**
+ * Reservation detail modal — single screen for everything you can do
+ * to one booking. Replaces the older FolioModal which only showed
+ * charges. Status drives which actions are available; the modal
+ * reloads its own copy of the reservation after each action so the
+ * UI stays consistent without depending on the parent re-fetching.
+ */
+function ReservationDetailModal({
+  reservationId,
   onClose,
   onChange,
 }: {
-  reservation: Reservation;
+  reservationId: string;
   onClose: () => void;
+  /** Called whenever the reservation state changes (status, folio,
+   *  edit) so the parent (Today / list) can refresh its data. */
   onChange: () => void;
 }) {
-  const [refresh, setRefresh] = useState(0);
-  const [folio, setFolio] = useState<Folio | null>(reservation.folio);
+  const [reservation, setReservation] = useState<Reservation | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [err, setErr] = useState<string | null>(null);
+  const [editing, setEditing] = useState(false);
+  const [confirmingCancel, setConfirmingCancel] = useState(false);
+  const [extending, setExtending] = useState(false);
+  const [showAddCharge, setShowAddCharge] = useState(false);
+  const [showCheckout, setShowCheckout] = useState(false);
+  const [busy, setBusy] = useState(false);
 
-  // Re-fetch the reservation (and its folio) so newly added charges
-  // appear without closing the modal.
+  async function reload() {
+    setLoading(true);
+    try {
+      const res = await authedFetch(
+        `/api/hotel/reservations/${reservationId}`,
+        { cache: "no-store" }
+      );
+      const d = await res.json();
+      if (!res.ok) throw new Error(d.error || "Failed to load");
+      setReservation(d.reservation);
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "Failed to load");
+    } finally {
+      setLoading(false);
+    }
+  }
+
   useEffect(() => {
-    if (refresh === 0) return;
-    authedFetch(`/api/hotel/reservations/${reservation.id}`, { cache: "no-store" })
-      .then((r) => r.json())
-      .then((d) => setFolio(d.reservation?.folio || null));
-  }, [refresh, reservation.id]);
+    reload();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [reservationId]);
 
-  const [showAdd, setShowAdd] = useState(false);
-  const balance = folioBalance(folio);
+  async function checkIn() {
+    if (busy) return;
+    setBusy(true);
+    setErr(null);
+    try {
+      const res = await authedFetch(
+        `/api/hotel/reservations/${reservationId}/checkin`,
+        { method: "POST" }
+      );
+      if (!res.ok) {
+        const d = await res.json().catch(() => ({}));
+        throw new Error(d.error || "Check-in failed");
+      }
+      await reload();
+      onChange();
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "Check-in failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function noShow() {
+    if (busy) return;
+    if (!confirm("Mark this reservation as a no-show? Folio will be voided.")) return;
+    setBusy(true);
+    setErr(null);
+    try {
+      const res = await authedFetch(`/api/hotel/reservations/${reservationId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "no_show" }),
+      });
+      if (!res.ok) {
+        const d = await res.json().catch(() => ({}));
+        throw new Error(d.error || "Failed");
+      }
+      await reload();
+      onChange();
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "Failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  if (loading && !reservation) {
+    return (
+      <Modal onClose={onClose} title="Reservation" wide>
+        <div className="text-sm text-ink-mute py-12 text-center">Loading…</div>
+      </Modal>
+    );
+  }
+  if (!reservation) {
+    return (
+      <Modal onClose={onClose} title="Reservation" wide>
+        <div className="text-sm text-status-bad-700 py-6">{err || "Not found"}</div>
+      </Modal>
+    );
+  }
+
+  const balance = folioBalance(reservation.folio);
+  const status = reservation.status;
+  const isFinal = status === "CHECKED_OUT" || status === "CANCELLED" || status === "NO_SHOW";
 
   return (
     <Modal
       onClose={onClose}
-      title={`Folio — ${reservation.guest.name} (Room ${reservation.room.number})`}
+      title={`${reservation.guest.name} · Room ${reservation.room.number}`}
       wide
     >
-      <div className="space-y-4">
-        <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 flex items-center justify-between">
-          <span className="text-xs font-bold text-amber-700 uppercase tracking-wider">
-            Balance
-          </span>
-          <span className="text-2xl font-extrabold text-amber-800">
-            {fmtEGP(balance)} EGP
-          </span>
+      <div className="space-y-5">
+        {/* Status + key facts */}
+        <div className="flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-sand-200">
+          <StatusBadge status={status} />
+          <div className="text-xs text-ink-mute">
+            {fmtDate(reservation.checkInDate)} → {fmtDate(reservation.checkOutDate)} ·{" "}
+            {reservation.adults} adult{reservation.adults === 1 ? "" : "s"}
+            {reservation.children > 0 && `, ${reservation.children} kid${reservation.children === 1 ? "" : "s"}`}
+          </div>
         </div>
 
-        <div className="border border-sand-200 rounded-lg overflow-hidden">
-          <div className="grid grid-cols-[1fr_auto_auto] gap-3 px-3 py-2 bg-sand-50 text-[11px] font-extrabold uppercase tracking-wider text-ink-mute">
-            <div>Description</div>
-            <div>Type</div>
-            <div className="text-right">Amount</div>
+        {/* Guest info */}
+        <section>
+          <div className="text-[11px] font-extrabold uppercase tracking-wider text-ink-mute mb-1">
+            Guest
           </div>
-          {(folio?.charges || []).length === 0 ? (
-            <div className="px-3 py-6 text-sm text-ink-mute text-center">
-              No charges yet.
+          <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-sm">
+            <div>
+              <span className="text-ink-mute">Name:</span>{" "}
+              <strong>{reservation.guest.name}</strong>
+            </div>
+            <div>
+              <span className="text-ink-mute">Phone:</span>{" "}
+              {reservation.guest.phone || "—"}
+            </div>
+            <div>
+              <span className="text-ink-mute">ID:</span>{" "}
+              {reservation.guest.idNumber || "—"}
+            </div>
+            <div>
+              <span className="text-ink-mute">Nationality:</span>{" "}
+              {reservation.guest.nationality || "—"}
+            </div>
+          </div>
+        </section>
+
+        {/* Stay info — editable */}
+        <section>
+          <div className="flex items-center justify-between mb-1">
+            <div className="text-[11px] font-extrabold uppercase tracking-wider text-ink-mute">
+              Stay
+            </div>
+            {!isFinal && !editing && (
+              <button
+                onClick={() => setEditing(true)}
+                className="text-[11px] font-bold text-amber-700 hover:underline"
+              >
+                Edit
+              </button>
+            )}
+          </div>
+          {!editing ? (
+            <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-sm">
+              <div>
+                <span className="text-ink-mute">Room:</span>{" "}
+                <strong>
+                  {reservation.room.number} ({reservation.room.roomType.name})
+                </strong>
+              </div>
+              <div>
+                <span className="text-ink-mute">Rate:</span>{" "}
+                <strong>{fmtEGP(reservation.nightlyRate)} EGP/night</strong>
+              </div>
+              {reservation.specialRequests && (
+                <div className="col-span-2">
+                  <span className="text-ink-mute">Special requests:</span>{" "}
+                  {reservation.specialRequests}
+                </div>
+              )}
+              {reservation.internalNotes && (
+                <div className="col-span-2">
+                  <span className="text-ink-mute">Internal notes:</span>{" "}
+                  <em>{reservation.internalNotes}</em>
+                </div>
+              )}
             </div>
           ) : (
-            (folio!.charges || []).map((c) => (
-              <div
-                key={c.id}
-                className={`grid grid-cols-[1fr_auto_auto] gap-3 px-3 py-2 text-sm border-t border-sand-200 ${
-                  c.voided ? "line-through text-ink-mute" : ""
-                }`}
-              >
-                <div>{c.description}</div>
-                <div className="text-xs text-ink-mute">{c.type}</div>
-                <div className="text-right font-bold tabular-nums">
-                  {fmtEGP(c.amount)}
-                </div>
-              </div>
-            ))
+            <EditStayForm
+              reservation={reservation}
+              onCancel={() => setEditing(false)}
+              onSaved={async () => {
+                setEditing(false);
+                await reload();
+                onChange();
+              }}
+            />
           )}
-        </div>
+        </section>
 
-        <div className="flex flex-wrap gap-2 justify-between">
-          <button
-            onClick={() => setShowAdd(true)}
-            className="px-4 py-2 bg-sand-100 hover:bg-sand-200 text-ink font-bold rounded-lg text-sm"
-          >
-            + Add charge (minibar / misc)
-          </button>
+        {/* Folio */}
+        <section>
+          <div className="flex items-center justify-between mb-2">
+            <div className="text-[11px] font-extrabold uppercase tracking-wider text-ink-mute">
+              Folio
+            </div>
+            <div className="text-lg font-extrabold text-amber-800 tabular-nums">
+              {fmtEGP(balance)} EGP
+            </div>
+          </div>
+          <div className="border border-sand-200 rounded-lg overflow-hidden">
+            <div className="grid grid-cols-[1fr_auto_auto_auto] gap-2 px-3 py-2 bg-sand-50 text-[11px] font-extrabold uppercase tracking-wider text-ink-mute">
+              <div>Description</div>
+              <div>Type</div>
+              <div className="text-right">Amount</div>
+              <div></div>
+            </div>
+            {(reservation.folio?.charges || []).length === 0 ? (
+              <div className="px-3 py-4 text-sm text-ink-mute text-center">
+                No charges yet.
+              </div>
+            ) : (
+              reservation.folio!.charges.map((c) => (
+                <div
+                  key={c.id}
+                  className={`grid grid-cols-[1fr_auto_auto_auto] gap-2 px-3 py-2 text-sm border-t border-sand-200 ${
+                    c.voided ? "line-through text-ink-mute" : ""
+                  }`}
+                >
+                  <div>{c.description}</div>
+                  <div className="text-xs text-ink-mute">{c.type}</div>
+                  <div className="text-right font-bold tabular-nums">
+                    {fmtEGP(c.amount)}
+                  </div>
+                  <div>
+                    {!c.voided && reservation.folio?.status === "OPEN" && (
+                      <button
+                        onClick={async () => {
+                          const reason = prompt("Why void this charge?");
+                          if (!reason) return;
+                          const res = await authedFetch(
+                            `/api/hotel/folios/${reservation.folio!.id}/charge`,
+                            {
+                              method: "DELETE",
+                              headers: { "Content-Type": "application/json" },
+                              body: JSON.stringify({ chargeId: c.id, reason }),
+                            }
+                          );
+                          if (res.ok) {
+                            await reload();
+                            onChange();
+                          } else {
+                            alert("Void failed");
+                          }
+                        }}
+                        className="text-[11px] font-bold text-status-bad-700 hover:underline"
+                      >
+                        Void
+                      </button>
+                    )}
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+          {reservation.folio?.status === "OPEN" && !isFinal && (
+            <button
+              onClick={() => setShowAddCharge(true)}
+              className="mt-2 px-3 py-1.5 bg-sand-100 hover:bg-sand-200 text-ink font-bold rounded-lg text-xs"
+            >
+              + Add charge (minibar / misc)
+            </button>
+          )}
+        </section>
+
+        {err && (
+          <div className="p-2 bg-status-bad-50 text-status-bad-700 rounded-lg text-sm">
+            {err}
+          </div>
+        )}
+
+        {/* Action buttons by status */}
+        <div className="flex flex-wrap gap-2 justify-end pt-3 border-t border-sand-200">
+          {status === "BOOKED" && (
+            <>
+              <button
+                disabled={busy}
+                onClick={() => setConfirmingCancel(true)}
+                className="px-3 py-2 text-xs font-bold text-status-bad-700 hover:bg-status-bad-50 rounded-lg disabled:opacity-50"
+              >
+                Cancel booking
+              </button>
+              <button
+                disabled={busy}
+                onClick={noShow}
+                className="px-3 py-2 text-xs font-bold text-ink-soft hover:bg-sand-100 rounded-lg disabled:opacity-50"
+              >
+                Mark no-show
+              </button>
+              <button
+                disabled={busy}
+                onClick={checkIn}
+                className="px-4 py-2 bg-amber-600 hover:bg-amber-700 text-white font-extrabold rounded-lg text-sm disabled:opacity-50"
+              >
+                {busy ? "…" : "Check in"}
+              </button>
+            </>
+          )}
+          {status === "CHECKED_IN" && (
+            <>
+              <button
+                disabled={busy}
+                onClick={() => setExtending(true)}
+                className="px-3 py-2 text-xs font-bold text-ink-soft hover:bg-sand-100 rounded-lg disabled:opacity-50"
+              >
+                Extend stay
+              </button>
+              <button
+                disabled={busy}
+                onClick={() => setShowCheckout(true)}
+                className="px-4 py-2 bg-status-good-600 hover:bg-status-good-700 text-white font-extrabold rounded-lg text-sm disabled:opacity-50"
+              >
+                Check out & settle
+              </button>
+            </>
+          )}
           <button
             onClick={onClose}
-            className="px-4 py-2 text-sm font-bold text-ink-soft hover:bg-sand-100 rounded-lg"
+            className="px-3 py-2 text-xs font-bold text-ink-soft hover:bg-sand-100 rounded-lg"
           >
             Close
           </button>
         </div>
 
-        {showAdd && (
+        {/* Sub-modals */}
+        {showAddCharge && reservation.folio && (
           <AddChargeModal
-            folioId={folio!.id}
-            onClose={() => setShowAdd(false)}
-            onAdded={() => {
-              setShowAdd(false);
-              setRefresh((n) => n + 1);
+            folioId={reservation.folio.id}
+            onClose={() => setShowAddCharge(false)}
+            onAdded={async () => {
+              setShowAddCharge(false);
+              await reload();
               onChange();
             }}
           />
         )}
+        {showCheckout && (
+          <CheckoutModal
+            reservation={reservation}
+            onClose={() => setShowCheckout(false)}
+            onDone={async () => {
+              setShowCheckout(false);
+              await reload();
+              onChange();
+            }}
+          />
+        )}
+        {confirmingCancel && (
+          <CancelConfirmModal
+            reservationId={reservationId}
+            onClose={() => setConfirmingCancel(false)}
+            onCancelled={async () => {
+              setConfirmingCancel(false);
+              await reload();
+              onChange();
+            }}
+          />
+        )}
+        {extending && (
+          <ExtendModal
+            reservation={reservation}
+            onClose={() => setExtending(false)}
+            onExtended={async () => {
+              setExtending(false);
+              await reload();
+              onChange();
+            }}
+          />
+        )}
+      </div>
+    </Modal>
+  );
+}
+
+/** Inline edit form for a reservation — non-destructive fields. */
+function EditStayForm({
+  reservation,
+  onCancel,
+  onSaved,
+}: {
+  reservation: Reservation;
+  onCancel: () => void;
+  onSaved: () => void;
+}) {
+  const [adults, setAdults] = useState(reservation.adults);
+  const [childCount, setChildCount] = useState(reservation.children);
+  const [nightlyRate, setNightlyRate] = useState(String(reservation.nightlyRate));
+  const [specialRequests, setSpecialRequests] = useState(
+    reservation.specialRequests || ""
+  );
+  const [internalNotes, setInternalNotes] = useState(
+    reservation.internalNotes || ""
+  );
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  async function save() {
+    if (busy) return;
+    const rate = Number(nightlyRate);
+    if (!Number.isFinite(rate) || rate < 0) {
+      setErr("Rate must be a number");
+      return;
+    }
+    setBusy(true);
+    setErr(null);
+    try {
+      const res = await authedFetch(`/api/hotel/reservations/${reservation.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "edit",
+          adults,
+          children: childCount,
+          nightlyRate: rate,
+          specialRequests,
+          internalNotes,
+        }),
+      });
+      if (!res.ok) {
+        const d = await res.json().catch(() => ({}));
+        throw new Error(d.error || "Save failed");
+      }
+      onSaved();
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "Save failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="space-y-2 bg-sand-50 rounded-lg p-3">
+      <div className="grid grid-cols-3 gap-2">
+        <label className="block">
+          <div className="text-[10px] font-bold uppercase tracking-wider text-ink-mute">
+            Adults
+          </div>
+          <input
+            type="number"
+            min={1}
+            value={adults}
+            onChange={(e) => setAdults(Number(e.target.value) || 1)}
+            className="w-full px-2 py-1 border border-sand-300 rounded text-sm"
+          />
+        </label>
+        <label className="block">
+          <div className="text-[10px] font-bold uppercase tracking-wider text-ink-mute">
+            Children
+          </div>
+          <input
+            type="number"
+            min={0}
+            value={childCount}
+            onChange={(e) => setChildCount(Number(e.target.value) || 0)}
+            className="w-full px-2 py-1 border border-sand-300 rounded text-sm"
+          />
+        </label>
+        <label className="block">
+          <div className="text-[10px] font-bold uppercase tracking-wider text-ink-mute">
+            Rate (EGP/night)
+          </div>
+          <input
+            type="number"
+            step="0.01"
+            value={nightlyRate}
+            onChange={(e) => setNightlyRate(e.target.value)}
+            className="w-full px-2 py-1 border border-sand-300 rounded text-sm"
+          />
+        </label>
+      </div>
+      <label className="block">
+        <div className="text-[10px] font-bold uppercase tracking-wider text-ink-mute">
+          Special requests (visible to staff and on receipts)
+        </div>
+        <textarea
+          value={specialRequests}
+          onChange={(e) => setSpecialRequests(e.target.value)}
+          rows={2}
+          className="w-full px-2 py-1 border border-sand-300 rounded text-sm"
+        />
+      </label>
+      <label className="block">
+        <div className="text-[10px] font-bold uppercase tracking-wider text-ink-mute">
+          Internal notes (staff-only)
+        </div>
+        <textarea
+          value={internalNotes}
+          onChange={(e) => setInternalNotes(e.target.value)}
+          rows={2}
+          className="w-full px-2 py-1 border border-sand-300 rounded text-sm"
+        />
+      </label>
+      {err && (
+        <div className="p-2 bg-status-bad-50 text-status-bad-700 rounded text-xs">
+          {err}
+        </div>
+      )}
+      <div className="flex gap-2 justify-end">
+        <button
+          onClick={onCancel}
+          disabled={busy}
+          className="px-3 py-1.5 text-xs font-bold text-ink-soft hover:bg-sand-100 rounded"
+        >
+          Cancel
+        </button>
+        <button
+          onClick={save}
+          disabled={busy}
+          className="px-3 py-1.5 bg-amber-600 hover:bg-amber-700 text-white font-extrabold rounded text-xs disabled:opacity-50"
+        >
+          {busy ? "…" : "Save"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function CancelConfirmModal({
+  reservationId,
+  onClose,
+  onCancelled,
+}: {
+  reservationId: string;
+  onClose: () => void;
+  onCancelled: () => void;
+}) {
+  const [reason, setReason] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  async function submit() {
+    if (busy) return;
+    setBusy(true);
+    setErr(null);
+    try {
+      const res = await authedFetch(`/api/hotel/reservations/${reservationId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "cancel", reason }),
+      });
+      if (!res.ok) {
+        const d = await res.json().catch(() => ({}));
+        throw new Error(d.error || "Cancel failed");
+      }
+      onCancelled();
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "Cancel failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Modal onClose={onClose} title="Cancel reservation">
+      <div className="space-y-3">
+        <p className="text-sm text-ink-soft">
+          The reservation will be cancelled and the folio voided. Charges
+          posted before this point are preserved in the audit trail.
+        </p>
+        <input
+          autoFocus
+          value={reason}
+          onChange={(e) => setReason(e.target.value)}
+          placeholder="Reason (optional but recommended)"
+          className="w-full px-3 py-2 border border-sand-300 rounded-lg"
+        />
+        {err && (
+          <div className="p-2 bg-status-bad-50 text-status-bad-700 rounded-lg text-sm">
+            {err}
+          </div>
+        )}
+        <div className="flex gap-2 justify-end">
+          <button
+            onClick={onClose}
+            disabled={busy}
+            className="px-4 py-2 text-sm font-bold text-ink-soft hover:bg-sand-100 rounded-lg disabled:opacity-50"
+          >
+            Keep
+          </button>
+          <button
+            onClick={submit}
+            disabled={busy}
+            className="px-4 py-2 bg-status-bad-600 hover:bg-status-bad-700 text-white font-extrabold rounded-lg text-sm disabled:opacity-50"
+          >
+            {busy ? "…" : "Cancel reservation"}
+          </button>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+/**
+ * Extend-stay modal. Used when a guest already CHECKED_IN wants to
+ * push their checkout date out. Calls the "extend" PATCH action AND
+ * posts ROOM_NIGHT charges for each newly added night so the folio
+ * reflects the extension immediately.
+ */
+function ExtendModal({
+  reservation,
+  onClose,
+  onExtended,
+}: {
+  reservation: Reservation;
+  onClose: () => void;
+  onExtended: () => void;
+}) {
+  const [newCheckOut, setNewCheckOut] = useState(
+    addDays(fmtDate(reservation.checkOutDate), 1)
+  );
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  async function submit() {
+    if (busy) return;
+    setBusy(true);
+    setErr(null);
+    try {
+      // Server-side: PATCH with action=extend updates the checkout
+      // date AND posts ROOM_NIGHT charges for each added night in a
+      // single transaction. We don't need to post charges separately.
+      const res = await authedFetch(`/api/hotel/reservations/${reservation.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "extend", checkOutDate: newCheckOut }),
+      });
+      if (!res.ok) {
+        const d = await res.json().catch(() => ({}));
+        throw new Error(d.error || "Extend failed");
+      }
+      onExtended();
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "Extend failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Modal onClose={onClose} title="Extend stay">
+      <div className="space-y-3">
+        <p className="text-sm text-ink-soft">
+          Current checkout: <strong>{fmtDate(reservation.checkOutDate)}</strong>.
+          Pick the new checkout date — extra nights will be added to the folio
+          at the same nightly rate.
+        </p>
+        <input
+          type="date"
+          value={newCheckOut}
+          min={addDays(fmtDate(reservation.checkOutDate), 1)}
+          onChange={(e) => setNewCheckOut(e.target.value)}
+          className="w-full px-3 py-2 border border-sand-300 rounded-lg"
+        />
+        {err && (
+          <div className="p-2 bg-status-bad-50 text-status-bad-700 rounded-lg text-sm">
+            {err}
+          </div>
+        )}
+        <div className="flex gap-2 justify-end">
+          <button
+            onClick={onClose}
+            disabled={busy}
+            className="px-4 py-2 text-sm font-bold text-ink-soft hover:bg-sand-100 rounded-lg"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={submit}
+            disabled={busy}
+            className="px-4 py-2 bg-amber-600 hover:bg-amber-700 text-white font-extrabold rounded-lg text-sm disabled:opacity-50"
+          >
+            {busy ? "…" : "Extend"}
+          </button>
+        </div>
       </div>
     </Modal>
   );
@@ -985,6 +1680,7 @@ function ReservationsTab({ staff }: { staff: Staff }) {
   const [showNew, setShowNew] = useState(false);
   const [filter, setFilter] = useState<string>("all");
   const [loading, setLoading] = useState(true);
+  const [openId, setOpenId] = useState<string | null>(null);
 
   async function load() {
     setLoading(true);
@@ -1055,7 +1751,11 @@ function ReservationsTab({ staff }: { staff: Staff }) {
             </thead>
             <tbody>
               {filtered.map((r) => (
-                <tr key={r.id} className="border-t border-sand-200 hover:bg-sand-50">
+                <tr
+                  key={r.id}
+                  onClick={() => setOpenId(r.id)}
+                  className="border-t border-sand-200 hover:bg-sand-50 cursor-pointer"
+                >
                   <td className="px-3 py-2">
                     <div className="font-bold text-ink">{r.guest.name}</div>
                     <div className="text-[11px] text-ink-mute">
@@ -1091,6 +1791,13 @@ function ReservationsTab({ staff }: { staff: Staff }) {
           }}
         />
       )}
+      {openId && (
+        <ReservationDetailModal
+          reservationId={openId}
+          onClose={() => setOpenId(null)}
+          onChange={load}
+        />
+      )}
     </div>
   );
 }
@@ -1116,9 +1823,14 @@ function StatusBadge({ status }: { status: string }) {
 function NewBookingModal({
   onClose,
   onCreated,
+  prefill,
 }: {
   onClose: () => void;
   onCreated: () => void;
+  /** When opened from the calendar's empty-cell click, the room and
+   *  dates are already known. We skip the dates and room-pick steps
+   *  and let the user just pick the guest. */
+  prefill?: { room: Room; checkIn: string; checkOut: string };
 }) {
   const [step, setStep] = useState<"guest" | "dates" | "room">("guest");
   const [guest, setGuest] = useState<Guest | null>(null);
@@ -1131,8 +1843,10 @@ function NewBookingModal({
     nationality: "",
   });
 
-  const [checkIn, setCheckIn] = useState(todayISO());
-  const [checkOut, setCheckOut] = useState(addDays(todayISO(), 1));
+  const [checkIn, setCheckIn] = useState(prefill?.checkIn || todayISO());
+  const [checkOut, setCheckOut] = useState(
+    prefill?.checkOut || addDays(todayISO(), 1)
+  );
   const [adults, setAdults] = useState(2);
   const [children, setChildren] = useState(0);
 
@@ -1172,7 +1886,17 @@ function NewBookingModal({
       const d = await res.json();
       if (!res.ok) throw new Error(d.error || "Failed");
       setGuest(d.guest);
-      setStep("dates");
+      // Prefill (calendar): room + dates already known; create the
+      // reservation directly. Otherwise: walk through dates → rooms.
+      if (prefill) {
+        await createReservation(
+          prefill.room.id,
+          Number(prefill.room.roomType.baseRate),
+          d.guest.id
+        );
+      } else {
+        setStep("dates");
+      }
     } catch (e) {
       setErr(e instanceof Error ? e.message : "Failed");
     } finally {
@@ -1199,8 +1923,13 @@ function NewBookingModal({
     }
   }
 
-  async function createReservation(roomId: string, nightlyRate: number) {
-    if (!guest) return;
+  async function createReservation(
+    roomId: string,
+    nightlyRate: number,
+    guestIdOverride?: string
+  ) {
+    const gid = guestIdOverride ?? guest?.id;
+    if (!gid) return;
     setBusy(true);
     setErr(null);
     try {
@@ -1208,7 +1937,7 @@ function NewBookingModal({
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          guestId: guest.id,
+          guestId: gid,
           roomId,
           checkInDate: checkIn,
           checkOutDate: checkOut,
@@ -1228,16 +1957,35 @@ function NewBookingModal({
   }
 
   return (
-    <Modal onClose={onClose} title="New booking" wide>
+    <Modal
+      onClose={onClose}
+      title={
+        prefill
+          ? `New booking · Room ${prefill.room.number} · ${prefill.checkIn}`
+          : "New booking"
+      }
+      wide
+    >
       <div className="space-y-4">
-        <Stepper
-          steps={[
-            ["guest", "Guest"],
-            ["dates", "Dates"],
-            ["room", "Room"],
-          ]}
-          current={step}
-        />
+        {!prefill && (
+          <Stepper
+            steps={[
+              ["guest", "Guest"],
+              ["dates", "Dates"],
+              ["room", "Room"],
+            ]}
+            current={step}
+          />
+        )}
+        {prefill && (
+          <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 text-sm">
+            Booking <strong>Room {prefill.room.number}</strong> ({prefill.room.roomType.name}) ·{" "}
+            <strong>{prefill.checkIn}</strong> → <strong>{prefill.checkOut}</strong> ·{" "}
+            {fmtEGP(prefill.room.roomType.baseRate)} EGP/night.
+            <br />
+            Pick or add a guest below.
+          </div>
+        )}
 
         {step === "guest" && !newGuestMode && (
           <div>
@@ -1259,7 +2007,18 @@ function NewBookingModal({
                     key={g.id}
                     onClick={() => {
                       setGuest(g);
-                      setStep("dates");
+                      // Calendar prefill path: room + dates known, so
+                      // create the reservation directly. Default path:
+                      // guest is just the start of a 3-step flow.
+                      if (prefill) {
+                        createReservation(
+                          prefill.room.id,
+                          Number(prefill.room.roomType.baseRate),
+                          g.id
+                        );
+                      } else {
+                        setStep("dates");
+                      }
                     }}
                     className="w-full text-left px-3 py-2 hover:bg-sand-50 border-b border-sand-100 last:border-b-0"
                   >
@@ -1483,6 +2242,640 @@ function Stepper({
           )}
         </div>
       ))}
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════
+// TAB: WALK-IN
+//
+// Optimized for the front desk picking up the phone or talking to a
+// guest at the counter: "do you have anything tonight?". Defaults to
+// tonight → tomorrow, lists free rooms instantly, and a one-click
+// "Book & check in" creates the reservation, posts ROOM_NIGHT
+// charges, and flips status to CHECKED_IN in one go.
+// ═══════════════════════════════════════════════
+
+function WalkInTab({ staff }: { staff: Staff }) {
+  const [from, setFrom] = useState(todayISO());
+  const [to, setTo] = useState(addDays(todayISO(), 1));
+  const [rooms, setRooms] = useState<Room[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [err, setErr] = useState<string | null>(null);
+  const [pickedRoom, setPickedRoom] = useState<Room | null>(null);
+
+  async function load() {
+    setLoading(true);
+    setErr(null);
+    try {
+      const res = await authedFetch(
+        `/api/hotel/availability?from=${from}&to=${to}`,
+        { cache: "no-store" }
+      );
+      const d = await res.json();
+      if (!res.ok) throw new Error(d.error || "Failed");
+      setRooms(d.rooms || []);
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "Failed");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  return (
+    <div className="space-y-4">
+      <div className="bg-white border border-sand-200 rounded-xl p-4">
+        <div className="flex flex-wrap items-end gap-3">
+          <label className="block">
+            <div className="text-[10px] font-bold uppercase tracking-wider text-ink-mute mb-1">
+              From
+            </div>
+            <input
+              type="date"
+              value={from}
+              onChange={(e) => setFrom(e.target.value)}
+              className="px-3 py-2 border border-sand-300 rounded-lg"
+            />
+          </label>
+          <label className="block">
+            <div className="text-[10px] font-bold uppercase tracking-wider text-ink-mute mb-1">
+              To
+            </div>
+            <input
+              type="date"
+              value={to}
+              onChange={(e) => setTo(e.target.value)}
+              className="px-3 py-2 border border-sand-300 rounded-lg"
+            />
+          </label>
+          <button
+            onClick={load}
+            disabled={loading}
+            className="px-4 py-2 bg-amber-600 hover:bg-amber-700 text-white font-extrabold rounded-lg text-sm disabled:opacity-50"
+          >
+            {loading ? "…" : "Refresh"}
+          </button>
+          <div className="ms-auto text-sm text-ink-soft">
+            {rooms.length} room{rooms.length === 1 ? "" : "s"} free
+          </div>
+        </div>
+      </div>
+
+      {err && (
+        <div className="p-3 bg-status-bad-50 text-status-bad-700 rounded-lg text-sm">
+          {err}
+        </div>
+      )}
+
+      {loading ? (
+        <div className="text-sm text-ink-mute">Loading…</div>
+      ) : rooms.length === 0 ? (
+        <Empty>No rooms free for that range.</Empty>
+      ) : (
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+          {rooms.map((room) => (
+            <button
+              key={room.id}
+              onClick={() => setPickedRoom(room)}
+              className="text-left p-4 bg-white border-2 border-sand-300 hover:border-amber-500 rounded-xl transition"
+            >
+              <div className="flex items-center justify-between">
+                <div className="font-extrabold text-lg">Room {room.number}</div>
+                <RoomStatusPill status={room.status} />
+              </div>
+              <div className="text-sm text-ink-soft">
+                {room.roomType.name} · cap {room.roomType.capacity}
+              </div>
+              <div className="mt-2 text-amber-700 font-extrabold">
+                {fmtEGP(room.roomType.baseRate)} EGP/night
+              </div>
+              <div className="mt-3 text-[11px] font-extrabold uppercase tracking-wider text-amber-700">
+                Book & check in →
+              </div>
+            </button>
+          ))}
+        </div>
+      )}
+
+      {pickedRoom && (
+        <WalkInBookingModal
+          room={pickedRoom}
+          from={from}
+          to={to}
+          onClose={() => setPickedRoom(null)}
+          onDone={() => {
+            setPickedRoom(null);
+            load();
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+/**
+ * Modal for the walk-in flow: collect minimal guest details
+ * (name + phone + nationality), create both the Guest and the
+ * Reservation, then immediately check in (posting room-night
+ * charges) — all in three sequential API calls. The UI shows a
+ * single "Book & check in" CTA so the front desk doesn't have to
+ * round-trip through three confirmation screens for a guest
+ * standing in front of them.
+ */
+function WalkInBookingModal({
+  room,
+  from,
+  to,
+  onClose,
+  onDone,
+}: {
+  room: Room;
+  from: string;
+  to: string;
+  onClose: () => void;
+  onDone: () => void;
+}) {
+  const [name, setName] = useState("");
+  const [phone, setPhone] = useState("");
+  const [idNumber, setIdNumber] = useState("");
+  const [nationality, setNationality] = useState("");
+  const [adults, setAdults] = useState(2);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const [step, setStep] = useState<string | null>(null);
+
+  async function submit() {
+    if (busy) return;
+    if (!name.trim()) {
+      setErr("Guest name required");
+      return;
+    }
+    setBusy(true);
+    setErr(null);
+    try {
+      // Step 1: create or reuse the guest. We don't dedupe automatic-
+      // ally here — front desk has the option to look up the existing
+      // guest in the Reservations tab if they want. This keeps the
+      // walk-in flow fast.
+      setStep("Creating guest…");
+      const guestRes = await authedFetch("/api/hotel/guests", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: name.trim(),
+          phone: phone.trim() || null,
+          idNumber: idNumber.trim() || null,
+          nationality: nationality.trim() || null,
+        }),
+      });
+      const guestData = await guestRes.json();
+      if (!guestRes.ok) throw new Error(guestData.error || "Guest create failed");
+
+      // Step 2: create the reservation.
+      setStep("Booking room…");
+      const reservationRes = await authedFetch("/api/hotel/reservations", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          guestId: guestData.guest.id,
+          roomId: room.id,
+          checkInDate: from,
+          checkOutDate: to,
+          nightlyRate: Number(room.roomType.baseRate),
+          adults,
+          source: "WALK_IN",
+        }),
+      });
+      const reservationData = await reservationRes.json();
+      if (!reservationRes.ok)
+        throw new Error(reservationData.error || "Booking failed");
+
+      // Step 3: immediately check in.
+      setStep("Checking in…");
+      const checkInRes = await authedFetch(
+        `/api/hotel/reservations/${reservationData.reservation.id}/checkin`,
+        { method: "POST" }
+      );
+      if (!checkInRes.ok) {
+        const d = await checkInRes.json().catch(() => ({}));
+        throw new Error(d.error || "Check-in failed");
+      }
+
+      onDone();
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "Failed");
+    } finally {
+      setBusy(false);
+      setStep(null);
+    }
+  }
+
+  return (
+    <Modal onClose={onClose} title={`Walk-in — Room ${room.number}`}>
+      <div className="space-y-3">
+        <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 text-sm">
+          {room.roomType.name} · {fmtEGP(room.roomType.baseRate)} EGP/night ·{" "}
+          {from} → {to}
+        </div>
+        <input
+          autoFocus
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          placeholder="Guest name (required)"
+          className="w-full px-3 py-2 border border-sand-300 rounded-lg"
+        />
+        <input
+          value={phone}
+          onChange={(e) => setPhone(e.target.value)}
+          placeholder="Phone (optional)"
+          className="w-full px-3 py-2 border border-sand-300 rounded-lg"
+        />
+        <div className="grid grid-cols-2 gap-2">
+          <input
+            value={idNumber}
+            onChange={(e) => setIdNumber(e.target.value)}
+            placeholder="ID / passport"
+            className="px-3 py-2 border border-sand-300 rounded-lg"
+          />
+          <input
+            value={nationality}
+            onChange={(e) => setNationality(e.target.value)}
+            placeholder="Nationality"
+            className="px-3 py-2 border border-sand-300 rounded-lg"
+          />
+        </div>
+        <label className="block">
+          <div className="text-[10px] font-bold uppercase tracking-wider text-ink-mute mb-1">
+            Adults
+          </div>
+          <input
+            type="number"
+            min={1}
+            value={adults}
+            onChange={(e) => setAdults(Number(e.target.value) || 1)}
+            className="w-full px-3 py-2 border border-sand-300 rounded-lg"
+          />
+        </label>
+        {err && (
+          <div className="p-2 bg-status-bad-50 text-status-bad-700 rounded-lg text-sm">
+            {err}
+          </div>
+        )}
+        {step && (
+          <div className="p-2 bg-amber-50 text-amber-700 rounded-lg text-sm">
+            {step}
+          </div>
+        )}
+        <div className="flex gap-2 justify-end">
+          <button
+            onClick={onClose}
+            disabled={busy}
+            className="px-4 py-2 text-sm font-bold text-ink-soft hover:bg-sand-100 rounded-lg disabled:opacity-50"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={submit}
+            disabled={busy}
+            className="px-4 py-2 bg-amber-600 hover:bg-amber-700 text-white font-extrabold rounded-lg text-sm disabled:opacity-50"
+          >
+            {busy ? "…" : "Book & check in"}
+          </button>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+// ═══════════════════════════════════════════════
+// TAB: CALENDAR
+//
+// Month grid: rooms (rows) × days-of-month (columns). Each
+// reservation that overlaps a day renders as a coloured block in
+// that cell; click it to open the detail modal. Click an empty
+// cell → opens the new-booking flow pre-filled with that room
+// and date. Used by the owner for planning ("what does next week
+// look like?") and by the front desk for visual conflict avoidance.
+// ═══════════════════════════════════════════════
+
+function CalendarTab({ staff }: { staff: Staff }) {
+  const now = new Date();
+  const [year, setYear] = useState(now.getUTCFullYear());
+  const [month, setMonth] = useState(now.getUTCMonth()); // 0-indexed
+  const [rooms, setRooms] = useState<Room[]>([]);
+  const [reservations, setReservations] = useState<Reservation[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [openId, setOpenId] = useState<string | null>(null);
+  const [newBooking, setNewBooking] = useState<{
+    room: Room;
+    date: string;
+  } | null>(null);
+
+  const firstDay = useMemo(() => {
+    const d = new Date(Date.UTC(year, month, 1));
+    return d;
+  }, [year, month]);
+  const lastDay = useMemo(() => {
+    const d = new Date(Date.UTC(year, month + 1, 0));
+    return d;
+  }, [year, month]);
+  const daysInMonth = lastDay.getUTCDate();
+
+  async function load() {
+    setLoading(true);
+    try {
+      const [roomsRes, resRes] = await Promise.all([
+        authedFetch("/api/hotel/rooms", { cache: "no-store" }).then((r) =>
+          r.json()
+        ),
+        authedFetch(
+          `/api/hotel/reservations?from=${fmtDate(firstDay)}&to=${fmtDate(
+            new Date(Date.UTC(year, month + 1, 1))
+          )}`,
+          { cache: "no-store" }
+        ).then((r) => r.json()),
+      ]);
+      setRooms(roomsRes.rooms || []);
+      setReservations(resRes.reservations || []);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [year, month]);
+
+  function shift(delta: number) {
+    let m = month + delta;
+    let y = year;
+    if (m < 0) {
+      m = 11;
+      y--;
+    } else if (m > 11) {
+      m = 0;
+      y++;
+    }
+    setYear(y);
+    setMonth(m);
+  }
+
+  // Index reservations by room → list of resvs covering this room.
+  // Each resv knows its first and last day-index on the visible grid.
+  const resvByRoom = useMemo(() => {
+    const map = new Map<
+      string,
+      Array<{
+        reservation: Reservation;
+        startCol: number; // day-of-month, 1-based
+        endCol: number; // day-of-month, 1-based, inclusive
+      }>
+    >();
+    for (const r of reservations) {
+      // Skip cancelled / no-show — they don't occupy the room visually.
+      if (r.status === "CANCELLED" || r.status === "NO_SHOW") continue;
+      const start = new Date(r.checkInDate);
+      const end = new Date(r.checkOutDate);
+      // Clamp to the visible month.
+      const visibleStart = start < firstDay ? firstDay : start;
+      const visibleEndExclusive = end > new Date(Date.UTC(year, month + 1, 1))
+        ? new Date(Date.UTC(year, month + 1, 1))
+        : end;
+      // checkout date is exclusive of the last night; subtract 1 day
+      // to get the last occupied night.
+      const visibleEnd = new Date(visibleEndExclusive);
+      visibleEnd.setUTCDate(visibleEnd.getUTCDate() - 1);
+      if (visibleEnd < visibleStart) continue;
+      const startCol = visibleStart.getUTCDate();
+      const endCol = visibleEnd.getUTCDate();
+      const list = map.get(r.room.id) || [];
+      list.push({ reservation: r, startCol, endCol });
+      map.set(r.room.id, list);
+    }
+    return map;
+  }, [reservations, firstDay, year, month]);
+
+  const monthLabel = firstDay.toLocaleDateString("en-US", {
+    month: "long",
+    year: "numeric",
+    timeZone: "UTC",
+  });
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => shift(-1)}
+            className="px-3 py-1.5 bg-sand-100 hover:bg-sand-200 text-ink font-bold rounded-lg text-sm"
+          >
+            ←
+          </button>
+          <div className="text-lg font-extrabold text-ink min-w-[140px] text-center">
+            {monthLabel}
+          </div>
+          <button
+            onClick={() => shift(1)}
+            className="px-3 py-1.5 bg-sand-100 hover:bg-sand-200 text-ink font-bold rounded-lg text-sm"
+          >
+            →
+          </button>
+          <button
+            onClick={() => {
+              setYear(now.getUTCFullYear());
+              setMonth(now.getUTCMonth());
+            }}
+            className="px-3 py-1.5 text-xs font-bold text-ink-soft hover:bg-sand-100 rounded-lg"
+          >
+            Today
+          </button>
+        </div>
+        <div className="text-xs text-ink-mute">
+          {rooms.length} rooms · {reservations.length} reservations this month
+        </div>
+      </div>
+
+      {loading ? (
+        <div className="text-sm text-ink-mute">Loading…</div>
+      ) : rooms.length === 0 ? (
+        <Empty>No rooms configured yet.</Empty>
+      ) : (
+        <div className="bg-white border border-sand-200 rounded-xl overflow-x-auto">
+          <table className="border-collapse min-w-max">
+            <thead>
+              <tr>
+                <th className="sticky start-0 z-10 bg-sand-50 text-left px-3 py-2 text-[11px] font-extrabold uppercase tracking-wider text-ink-mute border-b border-sand-200 min-w-[100px]">
+                  Room
+                </th>
+                {Array.from({ length: daysInMonth }, (_, i) => i + 1).map(
+                  (d) => {
+                    const date = new Date(Date.UTC(year, month, d));
+                    const isToday =
+                      d === now.getUTCDate() &&
+                      month === now.getUTCMonth() &&
+                      year === now.getUTCFullYear();
+                    const dow = date.getUTCDay();
+                    const isWeekend = dow === 5 || dow === 6; // Egypt weekend = Fri/Sat
+                    return (
+                      <th
+                        key={d}
+                        className={`px-1 py-2 text-[10px] font-bold border-b border-sand-200 min-w-[28px] ${
+                          isToday
+                            ? "bg-amber-100 text-amber-800"
+                            : isWeekend
+                            ? "bg-sand-100 text-ink-mute"
+                            : "text-ink-mute"
+                        }`}
+                      >
+                        {d}
+                      </th>
+                    );
+                  }
+                )}
+              </tr>
+            </thead>
+            <tbody>
+              {rooms.map((room) => {
+                const list = resvByRoom.get(room.id) || [];
+                // Build a 1..daysInMonth array marking which day is
+                // covered by which reservation. Then render: contiguous
+                // runs become one wide block, gaps become clickable
+                // empty cells.
+                const cells: Array<{
+                  reservation: Reservation;
+                  span: number;
+                }> | null[] = Array(daysInMonth).fill(null);
+                for (const item of list) {
+                  for (let d = item.startCol; d <= item.endCol; d++) {
+                    cells[d - 1] = { reservation: item.reservation, span: 0 };
+                  }
+                }
+                return (
+                  <tr key={room.id} className="border-b border-sand-100">
+                    <td className="sticky start-0 z-10 bg-white px-3 py-2 text-sm font-extrabold border-r border-sand-200">
+                      <div>{room.number}</div>
+                      <div className="text-[10px] font-normal text-ink-mute">
+                        {room.roomType.name}
+                      </div>
+                    </td>
+                    {Array.from({ length: daysInMonth }, (_, i) => i).map(
+                      (idx) => {
+                        const cell = cells[idx];
+                        const day = idx + 1;
+                        if (cell && typeof cell === "object") {
+                          // Render block only on the first cell of a
+                          // contiguous run (otherwise it'd repeat).
+                          const isStart =
+                            idx === 0 ||
+                            !cells[idx - 1] ||
+                            (cells[idx - 1] as { reservation: Reservation })
+                              .reservation.id !== cell.reservation.id;
+                          if (!isStart) return null;
+                          // Compute span (how many cells this block covers).
+                          let span = 1;
+                          while (
+                            idx + span < daysInMonth &&
+                            cells[idx + span] &&
+                            (cells[idx + span] as { reservation: Reservation })
+                              .reservation.id === cell.reservation.id
+                          ) {
+                            span++;
+                          }
+                          const colorByStatus: Record<string, string> = {
+                            BOOKED: "bg-ocean-200 hover:bg-ocean-300 text-ocean-900",
+                            CHECKED_IN:
+                              "bg-status-good-200 hover:bg-status-good-300 text-status-good-900",
+                            CHECKED_OUT: "bg-sand-200 text-ink-mute",
+                          };
+                          const color =
+                            colorByStatus[cell.reservation.status] ||
+                            "bg-sand-200";
+                          return (
+                            <td
+                              key={day}
+                              colSpan={span}
+                              className="p-0.5"
+                            >
+                              <button
+                                onClick={() => setOpenId(cell.reservation.id)}
+                                className={`w-full h-7 rounded text-[10px] font-bold truncate px-1 transition ${color}`}
+                                title={`${cell.reservation.guest.name} · ${fmtDate(
+                                  cell.reservation.checkInDate
+                                )} → ${fmtDate(cell.reservation.checkOutDate)}`}
+                              >
+                                {cell.reservation.guest.name}
+                              </button>
+                            </td>
+                          );
+                        }
+                        return (
+                          <td
+                            key={day}
+                            className="p-0.5 align-middle"
+                            onClick={() =>
+                              setNewBooking({
+                                room,
+                                date: fmtDate(new Date(Date.UTC(year, month, day))),
+                              })
+                            }
+                          >
+                            <div className="w-full h-7 rounded hover:bg-sand-100 cursor-pointer" />
+                          </td>
+                        );
+                      }
+                    )}
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      <div className="flex flex-wrap items-center gap-3 text-xs text-ink-mute">
+        <span className="inline-flex items-center gap-1">
+          <span className="inline-block w-3 h-3 rounded bg-ocean-200" /> Booked
+        </span>
+        <span className="inline-flex items-center gap-1">
+          <span className="inline-block w-3 h-3 rounded bg-status-good-200" />{" "}
+          Checked-in
+        </span>
+        <span className="inline-flex items-center gap-1">
+          <span className="inline-block w-3 h-3 rounded bg-sand-200" /> Past
+        </span>
+        <span className="ms-auto">
+          Click a block to open the reservation. Click an empty cell to start
+          a new booking on that room/date.
+        </span>
+      </div>
+
+      {openId && (
+        <ReservationDetailModal
+          reservationId={openId}
+          onClose={() => setOpenId(null)}
+          onChange={load}
+        />
+      )}
+      {newBooking && (
+        <NewBookingModal
+          prefill={{
+            room: newBooking.room,
+            checkIn: newBooking.date,
+            checkOut: addDays(newBooking.date, 1),
+          }}
+          onClose={() => setNewBooking(null)}
+          onCreated={() => {
+            setNewBooking(null);
+            load();
+          }}
+        />
+      )}
     </div>
   );
 }
