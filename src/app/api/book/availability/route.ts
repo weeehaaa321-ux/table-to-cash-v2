@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
-import { findAvailableRooms } from "@/lib/hotel";
+import { findAvailableRooms, computeStayCost } from "@/lib/hotel";
 
 /**
  * GET /api/book/availability?slug=&from=&to=
@@ -43,31 +43,49 @@ export async function GET(request: NextRequest) {
   // Group by room type — the booking page lets guests pick a TYPE
   // (e.g. "Sea View"), and we assign the actual room number at
   // booking time. Avoids exposing per-room internal numbering.
-  const byType = new Map<
-    string,
-    {
-      id: string;
-      name: string;
-      description: string | null;
-      capacity: number;
-      baseRate: number;
-      amenities: string[];
-      availableCount: number;
-    }
-  >();
+  type Bucket = {
+    id: string;
+    name: string;
+    description: string | null;
+    capacity: number;
+    baseRate: number;
+    weekendRate: number | null;
+    minNights: number;
+    amenities: string[];
+    availableCount: number;
+    /** Total cost for the requested range, factoring in weekend
+     *  pricing per night. Saves the client from doing the math
+     *  wrong. */
+    totalForRange: number;
+    /** True if the range is shorter than the type's min-nights —
+     *  the booking page should grey out / refuse this option. */
+    belowMinNights: boolean;
+  };
+  const byType = new Map<string, Bucket>();
   for (const room of rooms) {
     const t = byType.get(room.roomTypeId);
     if (t) {
       t.availableCount += 1;
     } else {
+      const cost = computeStayCost(room.roomType, fromDate, toDate);
+      const nights = Math.round(
+        (toDate.getTime() - fromDate.getTime()) / (24 * 60 * 60 * 1000)
+      );
       byType.set(room.roomTypeId, {
         id: room.roomTypeId,
         name: room.roomType.name,
         description: room.roomType.description,
         capacity: room.roomType.capacity,
         baseRate: Number(room.roomType.baseRate),
+        weekendRate:
+          room.roomType.weekendRate != null
+            ? Number(room.roomType.weekendRate)
+            : null,
+        minNights: room.roomType.minNights,
         amenities: room.roomType.amenities,
         availableCount: 1,
+        totalForRange: cost.total,
+        belowMinNights: nights < room.roomType.minNights,
       });
     }
   }

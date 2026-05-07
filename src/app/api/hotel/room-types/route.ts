@@ -33,7 +33,17 @@ export async function POST(request: NextRequest) {
   if (!hotelId) return NextResponse.json({ error: "No hotel configured" }, { status: 400 });
 
   const body = await request.json();
-  const { id, name, description, capacity, baseRate, amenities, sortOrder } = body;
+  const {
+    id,
+    name,
+    description,
+    capacity,
+    baseRate,
+    weekendRate,
+    minNights,
+    amenities,
+    sortOrder,
+  } = body;
   if (typeof name !== "string" || !name.trim()) {
     return NextResponse.json({ error: "name required" }, { status: 400 });
   }
@@ -46,6 +56,11 @@ export async function POST(request: NextRequest) {
     description: description?.trim() || null,
     capacity: Math.max(1, Number(capacity) || 2),
     baseRate,
+    // weekendRate is optional; null clears the override (revert to
+    // baseRate for Fri/Sat). Reject zero/negative — likely a typo.
+    weekendRate:
+      typeof weekendRate === "number" && weekendRate > 0 ? weekendRate : null,
+    minNights: Math.max(1, Number(minNights) || 1),
     amenities: Array.isArray(amenities) ? amenities.filter((a) => typeof a === "string") : [],
     sortOrder: Number(sortOrder) || 0,
   };

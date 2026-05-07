@@ -1,6 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
-import { findAvailableRooms, countNights } from "@/lib/hotel";
+import { findAvailableRooms, countNights, computeStayCost } from "@/lib/hotel";
+import {
+  pickFromAddress,
+  renderBookingConfirmationEmail,
+  sendEmail,
+} from "@/lib/email";
 
 /**
  * POST /api/book/reserve
@@ -63,19 +68,52 @@ export async function POST(request: NextRequest) {
 
   const restaurant = await db.restaurant.findUnique({
     where: { slug },
-    select: { hotel: { select: { id: true } } },
+    select: {
+      hotel: {
+        select: {
+          id: true,
+          name: true,
+          checkInTime: true,
+          checkOutTime: true,
+          notificationEmail: true,
+          emailFrom: true,
+        },
+      },
+    },
   });
   if (!restaurant?.hotel) {
     return NextResponse.json({ error: "Hotel not found" }, { status: 404 });
   }
-  const hotelId = restaurant.hotel.id;
+  const hotel = restaurant.hotel;
+  const hotelId = hotel.id;
 
   const roomType = await db.roomType.findUnique({
     where: { id: roomTypeId },
-    select: { id: true, baseRate: true, hotelId: true, capacity: true },
+    select: {
+      id: true,
+      name: true,
+      baseRate: true,
+      weekendRate: true,
+      minNights: true,
+      hotelId: true,
+      capacity: true,
+    },
   });
   if (!roomType || roomType.hotelId !== hotelId) {
     return NextResponse.json({ error: "Room type not found" }, { status: 404 });
+  }
+
+  // Minimum-stay enforcement: high-season blocks (Christmas etc.) are
+  // configured by setting RoomType.minNights > 1. We reject early so
+  // the guest sees a clear message instead of a generic failure.
+  const nights = countNights(fromDate, toDate);
+  if (nights < roomType.minNights) {
+    return NextResponse.json(
+      {
+        error: `Minimum stay for ${roomType.name} is ${roomType.minNights} nights`,
+      },
+      { status: 400 }
+    );
   }
 
   // Pick first available room of that type.
@@ -90,6 +128,13 @@ export async function POST(request: NextRequest) {
 
   const adultCount = Math.max(1, Math.min(roomType.capacity, Number(adults) || 2));
   const childCount = Math.max(0, Number(children) || 0);
+
+  // Compute the actual total walking each night, applying weekendRate
+  // where appropriate. We store the average rate on the reservation
+  // for backward compatibility; check-in posts per-night ROOM_NIGHT
+  // charges with the right per-night amount.
+  const cost = computeStayCost(roomType, fromDate, toDate);
+  const avgRate = nights > 0 ? cost.total / nights : Number(roomType.baseRate);
 
   // Same-transaction guest+reservation+folio create. Direct booking
   // never auto-checks-in — front desk verifies ID at arrival.
@@ -111,7 +156,7 @@ export async function POST(request: NextRequest) {
         roomId: candidate.id,
         checkInDate: fromDate,
         checkOutDate: toDate,
-        nightlyRate: Number(roomType.baseRate),
+        nightlyRate: avgRate,
         adults: adultCount,
         children: childCount,
         source: "DIRECT",
@@ -126,12 +171,45 @@ export async function POST(request: NextRequest) {
     return { guest: newGuest, reservation };
   });
 
+  // Confirmation email — best-effort, doesn't block the booking on
+  // an email failure. If RESEND_API_KEY isn't configured the helper
+  // logs and no-ops, so this stays safe pre-launch.
+  if (guest.email?.trim()) {
+    const tpl = renderBookingConfirmationEmail({
+      hotelName: hotel.name,
+      guestName: guest.name,
+      roomNumber: candidate.number,
+      roomTypeName: roomType.name,
+      checkInDate: from,
+      checkOutDate: to,
+      nights,
+      totalEstimate: cost.total,
+      bookingRef: result.reservation.id.slice(-10).toUpperCase(),
+      checkInTime: hotel.checkInTime,
+      checkOutTime: hotel.checkOutTime,
+    });
+    sendEmail({
+      from: pickFromAddress(hotel.emailFrom),
+      to: guest.email.trim(),
+      bcc: hotel.notificationEmail || undefined,
+      subject: tpl.subject,
+      html: tpl.html,
+    }).catch(() => {});
+  } else if (hotel.notificationEmail) {
+    // No guest email but the front desk still wants a heads-up.
+    sendEmail({
+      from: pickFromAddress(hotel.emailFrom),
+      to: hotel.notificationEmail,
+      subject: `New direct booking — ${guest.name}`,
+      html: `<p>${guest.name} just booked Room ${candidate.number} for ${nights} night(s) (${from} → ${to}).</p>`,
+    }).catch(() => {});
+  }
+
   return NextResponse.json({
     ok: true,
     reservationId: result.reservation.id,
     roomNumber: candidate.number,
-    nights: countNights(fromDate, toDate),
-    totalEstimate:
-      Number(roomType.baseRate) * countNights(fromDate, toDate),
+    nights,
+    totalEstimate: cost.total,
   });
 }

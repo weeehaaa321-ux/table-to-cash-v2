@@ -2,6 +2,11 @@ import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { requireStaffAuth } from "@/lib/api-auth";
 import { computeFolioBalance, countNights } from "@/lib/hotel";
+import {
+  pickFromAddress,
+  renderCheckOutReceiptEmail,
+  sendEmail,
+} from "@/lib/email";
 
 /**
  * POST /api/hotel/reservations/[id]/checkout
@@ -31,9 +36,17 @@ export async function POST(
   const reservation = await db.reservation.findUnique({
     where: { id: reservationId },
     include: {
-      hotel: { select: { restaurantId: true } },
+      hotel: {
+        select: {
+          restaurantId: true,
+          name: true,
+          notificationEmail: true,
+          emailFrom: true,
+        },
+      },
       folio: { include: { charges: true } },
       room: true,
+      guest: { select: { name: true, email: true } },
     },
   });
   if (!reservation || reservation.hotel.restaurantId !== auth.restaurantId) {
@@ -126,6 +139,34 @@ export async function POST(
       data: { status: "VACANT_DIRTY" },
     });
   });
+
+  // Receipt email — best-effort. The receipt body lists every non-
+  // voided charge with its amount, so the guest leaves with a clear
+  // record matching the printed receipt the front desk hands them.
+  if (reservation.guest.email) {
+    const liveCharges = (folioRefreshed?.charges ?? []).filter((c) => !c.voided);
+    const tpl = renderCheckOutReceiptEmail({
+      hotelName: reservation.hotel.name,
+      guestName: reservation.guest.name,
+      roomNumber: reservation.room.number,
+      checkInDate: reservation.checkInDate.toISOString().slice(0, 10),
+      checkOutDate: actualCheckOut.toISOString().slice(0, 10),
+      charges: liveCharges.map((c) => ({
+        description: c.description,
+        amount: Number(c.amount),
+        type: c.type,
+      })),
+      total: balance,
+      paymentMethod,
+    });
+    sendEmail({
+      from: pickFromAddress(reservation.hotel.emailFrom),
+      to: reservation.guest.email,
+      bcc: reservation.hotel.notificationEmail || undefined,
+      subject: tpl.subject,
+      html: tpl.html,
+    }).catch(() => {});
+  }
 
   return NextResponse.json({ ok: true, settledTotal: balance });
 }

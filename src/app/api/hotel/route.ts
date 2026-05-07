@@ -31,26 +31,31 @@ export async function POST(request: NextRequest) {
   if (auth instanceof NextResponse) return auth;
 
   const body = await request.json();
-  const { name, address, checkInTime, checkOutTime } = body;
+  const {
+    name,
+    address,
+    checkInTime,
+    checkOutTime,
+    notificationEmail,
+    emailFrom,
+  } = body;
   if (typeof name !== "string" || !name.trim()) {
     return NextResponse.json({ error: "name required" }, { status: 400 });
   }
 
+  const data = {
+    name: name.trim(),
+    address: address?.trim() || null,
+    checkInTime: checkInTime || "14:00",
+    checkOutTime: checkOutTime || "12:00",
+    notificationEmail: notificationEmail?.trim() || null,
+    emailFrom: emailFrom?.trim() || null,
+  };
+
   const hotel = await db.hotel.upsert({
     where: { restaurantId: auth.restaurantId },
-    create: {
-      restaurantId: auth.restaurantId,
-      name: name.trim(),
-      address: address?.trim() || null,
-      checkInTime: checkInTime || "14:00",
-      checkOutTime: checkOutTime || "12:00",
-    },
-    update: {
-      name: name.trim(),
-      address: address?.trim() || null,
-      checkInTime: checkInTime || "14:00",
-      checkOutTime: checkOutTime || "12:00",
-    },
+    create: { restaurantId: auth.restaurantId, ...data },
+    update: data,
   });
 
   return NextResponse.json({ hotel });

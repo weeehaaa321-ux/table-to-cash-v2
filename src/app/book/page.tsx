@@ -11,7 +11,13 @@ type RoomType = {
   amenities: string[];
 };
 
-type AvailableType = RoomType & { availableCount: number };
+type AvailableType = RoomType & {
+  availableCount: number;
+  weekendRate: number | null;
+  minNights: number;
+  totalForRange: number;
+  belowMinNights: boolean;
+};
 
 type Hotel = {
   id: string;
@@ -327,13 +333,16 @@ export default function BookPage() {
             </h2>
             <div className="space-y-3">
               {available.map((t) => {
-                const totalForStay = Number(t.baseRate) * Math.max(1, nights);
+                const totalForStay = t.totalForRange;
                 const picked = pickedType?.id === t.id;
+                const blocked = t.belowMinNights;
                 return (
                   <div
                     key={t.id}
                     className={`bg-white rounded-2xl shadow-sm border p-5 transition ${
-                      picked
+                      blocked
+                        ? "border-sand-200 opacity-60"
+                        : picked
                         ? "border-amber-500 ring-2 ring-amber-200"
                         : "border-sand-200"
                     }`}
@@ -361,6 +370,12 @@ export default function BookPage() {
                         <p className="text-[11px] text-ink-mute mt-2">
                           Sleeps up to {t.capacity} · {t.availableCount} room
                           {t.availableCount === 1 ? "" : "s"} left
+                          {t.weekendRate && (
+                            <>
+                              {" "}
+                              · weekend rate {fmtEGP(t.weekendRate)} EGP
+                            </>
+                          )}
                         </p>
                       </div>
                       <div className="text-right shrink-0">
@@ -375,16 +390,22 @@ export default function BookPage() {
                         </div>
                       </div>
                     </div>
-                    <button
-                      onClick={() => setPickedType(t)}
-                      className={`mt-4 w-full py-2.5 rounded-xl font-extrabold text-sm transition ${
-                        picked
-                          ? "bg-amber-700 text-white"
-                          : "bg-amber-100 text-amber-800 hover:bg-amber-200"
-                      }`}
-                    >
-                      {picked ? "Selected ✓" : "Select"}
-                    </button>
+                    {blocked ? (
+                      <div className="mt-4 px-3 py-2.5 rounded-xl bg-sand-100 text-ink-soft text-xs font-bold text-center">
+                        Minimum {t.minNights} nights required for these dates
+                      </div>
+                    ) : (
+                      <button
+                        onClick={() => setPickedType(t)}
+                        className={`mt-4 w-full py-2.5 rounded-xl font-extrabold text-sm transition ${
+                          picked
+                            ? "bg-amber-700 text-white"
+                            : "bg-amber-100 text-amber-800 hover:bg-amber-200"
+                        }`}
+                      >
+                        {picked ? "Selected ✓" : "Select"}
+                      </button>
+                    )}
                   </div>
                 );
               })}
@@ -441,9 +462,7 @@ export default function BookPage() {
             >
               {submitting
                 ? "Booking…"
-                : `Confirm — ${fmtEGP(
-                    Number(pickedType.baseRate) * Math.max(1, nights)
-                  )} EGP`}
+                : `Confirm — ${fmtEGP(pickedType.totalForRange)} EGP`}
             </button>
             <p className="text-[11px] text-ink-mute mt-2 text-center">
               No payment now. You'll settle at check-out.

@@ -42,6 +42,50 @@ export function countNights(checkInDate: Date, checkOutDate: Date): number {
   return Math.max(0, Math.round(ms / (24 * 60 * 60 * 1000)));
 }
 
+type RateRoomType = {
+  baseRate: number | string | { toString(): string };
+  weekendRate: number | string | { toString(): string } | null;
+};
+
+/**
+ * Returns the rate for a single night. The "night" is identified by
+ * its check-in date — i.e. the night of 2026-05-10 starts on the
+ * evening of May 10. In Egypt the weekend is Friday + Saturday, so
+ * those check-in dates pull the weekendRate when set.
+ */
+export function rateForNight(roomType: RateRoomType, night: Date): number {
+  const dow = night.getUTCDay(); // 0=Sun, 5=Fri, 6=Sat
+  const isWeekend = dow === 5 || dow === 6;
+  const weekend = roomType.weekendRate != null ? Number(roomType.weekendRate) : null;
+  if (isWeekend && weekend != null && weekend > 0) return weekend;
+  return Number(roomType.baseRate);
+}
+
+/**
+ * Total stay cost given a room type and a date range, walking
+ * each night and applying the rate for that night. Returns:
+ *   { total, perNight: [{date, rate}, ...] }
+ * Used by /book to show the right total upfront and by check-in
+ * to post the right ROOM_NIGHT charges.
+ */
+export function computeStayCost(
+  roomType: RateRoomType,
+  checkIn: Date,
+  checkOut: Date
+): { total: number; perNight: Array<{ date: Date; rate: number }> } {
+  const nights = countNights(checkIn, checkOut);
+  const perNight: Array<{ date: Date; rate: number }> = [];
+  let total = 0;
+  for (let i = 0; i < nights; i++) {
+    const date = new Date(checkIn);
+    date.setUTCDate(date.getUTCDate() + i);
+    const rate = rateForNight(roomType, date);
+    perNight.push({ date, rate });
+    total += rate;
+  }
+  return { total, perNight };
+}
+
 /**
  * Sum of non-voided charges minus opening deposit. Negative numbers
  * (credits) net out as expected. Used at folio detail and at settle.

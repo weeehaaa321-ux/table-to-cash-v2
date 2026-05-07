@@ -609,28 +609,36 @@ model CashDrawer {
 // the Hotel only carries hotel-specific fields.
 
 model Hotel {
-  id           String        @id @default(cuid())
-  restaurant   Restaurant    @relation(fields: [restaurantId], references: [id])
-  restaurantId String        @unique
-  name         String
-  address      String?
+  id                String        @id @default(cuid())
+  restaurant        Restaurant    @relation(fields: [restaurantId], references: [id])
+  restaurantId      String        @unique
+  name              String
+  address           String?
   // Display strings (e.g. "14:00", "12:00"). Front desk uses them to
   // colour late-arrival / early-departure rows. Not enforced — actual
   // check-in/out timestamps are written by the staff action.
-  checkInTime  String        @default("14:00")
-  checkOutTime String        @default("12:00")
+  checkInTime       String        @default("14:00")
+  checkOutTime      String        @default("12:00")
   // OTA iCal feeds the cron job pulls. Shape:
   //   [{ source: "BOOKING_COM" | "AIRBNB", url: "...", roomNumber: "101",
   //      lastSyncedAt: "...", lastError: "...", reservationsCreated: N }]
   // We store this as JSON so adding a new OTA doesn't require a
   // migration; the sync code reads/writes the array at the hotel
   // level. Keep it small (a few dozen URLs max for any small hotel).
-  icalSyncs    Json?
-  roomTypes    RoomType[]
-  rooms        Room[]
-  reservations Reservation[]
-  guests       Guest[]
-  createdAt    DateTime      @default(now())
+  icalSyncs         Json?
+  // Where to copy the front desk on every direct-booking confirmation
+  // email. Null = no notifications. Public-form bookings always send
+  // a guest copy; this just controls the BCC on the staff side.
+  notificationEmail String?
+  // "From" address on outbound emails. Defaults to a Resend sandbox
+  // sender when null; set this once you've verified your domain in
+  // Resend (e.g. "Neom Hotel <booking@neom-dahab.com>").
+  emailFrom         String?
+  roomTypes         RoomType[]
+  rooms             Room[]
+  reservations      Reservation[]
+  guests            Guest[]
+  createdAt         DateTime      @default(now())
 }
 
 // RoomType — Standard / Sea View / Suite. Defines the published
@@ -645,6 +653,15 @@ model RoomType {
   description String?
   capacity    Int      @default(2)
   baseRate    Decimal  @db.Decimal(10, 2)
+  // Override rate that applies to nights where check-in falls on
+  // Friday or Saturday (Egypt's weekend). Null = use baseRate. Useful
+  // for beach properties that fill on weekends and want to capture
+  // the premium without manual price changes.
+  weekendRate Decimal? @db.Decimal(10, 2)
+  // Minimum number of nights per booking. Direct bookings under this
+  // threshold are rejected at /api/book/reserve. Default 1 = no
+  // restriction. Used during high-demand seasons (Christmas etc.).
+  minNights   Int      @default(1)
   amenities   String[] // ["sea-view", "ac", "balcony", "jacuzzi"]
   sortOrder   Int      @default(0)
   rooms       Room[]

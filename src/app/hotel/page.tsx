@@ -39,6 +39,8 @@ type RoomType = {
   description: string | null;
   capacity: number;
   baseRate: string | number;
+  weekendRate: string | number | null;
+  minNights: number;
   amenities: string[];
   sortOrder: number;
   _count?: { rooms: number };
@@ -3188,7 +3190,22 @@ function ConfigTab({ staff }: { staff: Staff }) {
               <div>
                 <div className="font-extrabold">{rt.name}</div>
                 <div className="text-xs text-ink-mute">
-                  {fmtEGP(rt.baseRate)} EGP/night · cap {rt.capacity} ·{" "}
+                  {fmtEGP(rt.baseRate)} EGP base
+                  {rt.weekendRate && (
+                    <>
+                      {" "}
+                      · <strong>{fmtEGP(rt.weekendRate)}</strong> EGP weekend
+                    </>
+                  )}
+                  {" "}
+                  · cap {rt.capacity}
+                  {rt.minNights > 1 && (
+                    <>
+                      {" "}
+                      · min {rt.minNights} nights
+                    </>
+                  )}
+                  {" · "}
                   {rt._count?.rooms || 0} room
                   {(rt._count?.rooms || 0) === 1 ? "" : "s"}
                 </div>
@@ -3514,6 +3531,8 @@ function NewRoomTypeModal({
 }) {
   const [name, setName] = useState("");
   const [baseRate, setBaseRate] = useState("");
+  const [weekendRate, setWeekendRate] = useState("");
+  const [minNights, setMinNights] = useState("1");
   const [capacity, setCapacity] = useState("2");
   const [amenitiesStr, setAmenitiesStr] = useState("");
   const [busy, setBusy] = useState(false);
@@ -3539,6 +3558,8 @@ function NewRoomTypeModal({
         body: JSON.stringify({
           name: name.trim(),
           baseRate: rate,
+          weekendRate: weekendRate.trim() ? Number(weekendRate) : undefined,
+          minNights: Math.max(1, Number(minNights) || 1),
           capacity: Number(capacity) || 2,
           amenities: amenitiesStr
             .split(",")
@@ -3566,22 +3587,60 @@ function NewRoomTypeModal({
           className="w-full px-3 py-2 border border-sand-300 rounded-lg"
           autoFocus
         />
-        <input
-          type="number"
-          step="0.01"
-          value={baseRate}
-          onChange={(e) => setBaseRate(e.target.value)}
-          placeholder="Nightly rate (EGP)"
-          className="w-full px-3 py-2 border border-sand-300 rounded-lg"
-        />
-        <input
-          type="number"
-          min={1}
-          value={capacity}
-          onChange={(e) => setCapacity(e.target.value)}
-          placeholder="Capacity (guests)"
-          className="w-full px-3 py-2 border border-sand-300 rounded-lg"
-        />
+        <div className="grid grid-cols-2 gap-2">
+          <label className="block">
+            <div className="text-[10px] font-bold uppercase tracking-wider text-ink-mute mb-1">
+              Base rate (EGP/night)
+            </div>
+            <input
+              type="number"
+              step="0.01"
+              value={baseRate}
+              onChange={(e) => setBaseRate(e.target.value)}
+              placeholder="1500"
+              className="w-full px-3 py-2 border border-sand-300 rounded-lg"
+            />
+          </label>
+          <label className="block">
+            <div className="text-[10px] font-bold uppercase tracking-wider text-ink-mute mb-1">
+              Weekend rate (Fri/Sat)
+            </div>
+            <input
+              type="number"
+              step="0.01"
+              value={weekendRate}
+              onChange={(e) => setWeekendRate(e.target.value)}
+              placeholder="optional"
+              className="w-full px-3 py-2 border border-sand-300 rounded-lg"
+            />
+          </label>
+        </div>
+        <div className="grid grid-cols-2 gap-2">
+          <label className="block">
+            <div className="text-[10px] font-bold uppercase tracking-wider text-ink-mute mb-1">
+              Capacity (guests)
+            </div>
+            <input
+              type="number"
+              min={1}
+              value={capacity}
+              onChange={(e) => setCapacity(e.target.value)}
+              className="w-full px-3 py-2 border border-sand-300 rounded-lg"
+            />
+          </label>
+          <label className="block">
+            <div className="text-[10px] font-bold uppercase tracking-wider text-ink-mute mb-1">
+              Min nights
+            </div>
+            <input
+              type="number"
+              min={1}
+              value={minNights}
+              onChange={(e) => setMinNights(e.target.value)}
+              className="w-full px-3 py-2 border border-sand-300 rounded-lg"
+            />
+          </label>
+        </div>
         <input
           value={amenitiesStr}
           onChange={(e) => setAmenitiesStr(e.target.value)}
