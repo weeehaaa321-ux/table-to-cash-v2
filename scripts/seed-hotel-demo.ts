@@ -136,7 +136,7 @@ async function main() {
     { number: "303", typeName: "Suite", floor: 3 },
   ];
 
-  const rooms: Record<string, { id: string; number: string; baseRate: number }> = {};
+  const rooms: Record<string, { id: string; number: string; baseRate: number; roomTypeId: string }> = {};
   for (const def of roomDefs) {
     const created = await db.room.upsert({
       where: { hotelId_number: { hotelId: hotel.id, number: def.number } },
@@ -153,6 +153,7 @@ async function main() {
       id: created.id,
       number: created.number,
       baseRate: types[def.typeName].baseRate,
+      roomTypeId: types[def.typeName].id,
     };
   }
   console.log(`  rooms: ${Object.keys(rooms).length}`);
@@ -287,6 +288,7 @@ async function main() {
         data: {
           hotelId: hotel.id,
           guestId: guest.id,
+          roomTypeId: room.roomTypeId,
           roomId: room.id,
           checkInDate: args.checkIn,
           checkOutDate: args.checkOut,

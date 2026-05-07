@@ -42,6 +42,7 @@ export async function POST(
           name: true,
           notificationEmail: true,
           emailFrom: true,
+          tourismTaxPercent: true,
         },
       },
       folio: { include: { charges: true } },
@@ -98,7 +99,7 @@ export async function POST(
           folioId: reservation.folio!.id,
           type: "ROOM_NIGHT",
           amount: rate,
-          description: `Room ${reservation.room.number} — ${night.toISOString().slice(0, 10)} (extension)`,
+          description: `Room ${reservation.room?.number ?? "unassigned"} — ${night.toISOString().slice(0, 10)} (extension)`,
           night,
           chargedById: auth.id,
         },
@@ -106,13 +107,45 @@ export async function POST(
     }
   });
 
-  // Recompute balance after reconcile.
+  // Tourism tax: applied to non-voided ROOM_NIGHT charges, posted as
+  // a single MISC line so the receipt shows it broken out. Only
+  // posted if Hotel.tourismTaxPercent is set and > 0 AND no tax line
+  // already exists on this folio (idempotent against re-runs).
   const folioRefreshed = await db.folio.findUnique({
     where: { id: reservation.folio.id },
     include: { charges: true },
   });
+  const taxPercent = reservation.hotel.tourismTaxPercent
+    ? Number(reservation.hotel.tourismTaxPercent)
+    : 0;
+  const hasTaxLine = (folioRefreshed?.charges ?? []).some(
+    (c) => !c.voided && c.description.startsWith("Tourism + service tax")
+  );
+  if (taxPercent > 0 && !hasTaxLine) {
+    const roomNightTotal = (folioRefreshed?.charges ?? [])
+      .filter((c) => !c.voided && c.type === "ROOM_NIGHT")
+      .reduce((s, c) => s + Number(c.amount), 0);
+    const taxAmount = Math.round(roomNightTotal * (taxPercent / 100) * 100) / 100;
+    if (taxAmount > 0) {
+      await db.folioCharge.create({
+        data: {
+          folioId: reservation.folio.id,
+          type: "MISC",
+          amount: taxAmount,
+          description: `Tourism + service tax (${taxPercent}%)`,
+          chargedById: auth.id,
+        },
+      });
+    }
+  }
+
+  // Recompute balance AFTER tax line posted.
+  const folioFinal = await db.folio.findUnique({
+    where: { id: reservation.folio.id },
+    include: { charges: true },
+  });
   const balance = computeFolioBalance(
-    (folioRefreshed?.charges ?? []).map((c) => ({
+    (folioFinal?.charges ?? []).map((c) => ({
       amount: Number(c.amount),
       voided: c.voided,
     })),
@@ -134,21 +167,23 @@ export async function POST(
       where: { id: reservationId },
       data: { status: "CHECKED_OUT", checkedOutAt: now, checkOutDate: actualCheckOut },
     });
-    await tx.room.update({
-      where: { id: reservation.roomId },
-      data: { status: "VACANT_DIRTY" },
-    });
+    if (reservation.roomId) {
+      await tx.room.update({
+        where: { id: reservation.roomId },
+        data: { status: "VACANT_DIRTY" },
+      });
+    }
   });
 
   // Receipt email — best-effort. The receipt body lists every non-
   // voided charge with its amount, so the guest leaves with a clear
   // record matching the printed receipt the front desk hands them.
   if (reservation.guest.email) {
-    const liveCharges = (folioRefreshed?.charges ?? []).filter((c) => !c.voided);
+    const liveCharges = (folioFinal?.charges ?? []).filter((c) => !c.voided);
     const tpl = renderCheckOutReceiptEmail({
       hotelName: reservation.hotel.name,
       guestName: reservation.guest.name,
-      roomNumber: reservation.room.number,
+      roomNumber: reservation.room?.number ?? "unassigned",
       checkInDate: reservation.checkInDate.toISOString().slice(0, 10),
       checkOutDate: actualCheckOut.toISOString().slice(0, 10),
       charges: liveCharges.map((c) => ({

@@ -88,6 +88,10 @@ type Reservation = {
   id: string;
   status: "BOOKED" | "CHECKED_IN" | "CHECKED_OUT" | "CANCELLED" | "NO_SHOW";
   source: string;
+  externalRef: string | null;
+  externalUid: string | null;
+  commissionPercent: string | number | null;
+  prepaid: boolean;
   checkInDate: string;
   checkOutDate: string;
   checkedInAt: string | null;
@@ -99,9 +103,42 @@ type Reservation = {
   internalNotes: string | null;
   stayToken: string | null;
   guest: Guest;
-  room: Room;
+  roomType: RoomType;
+  room: Room | null;
   folio: Folio | null;
 };
+
+const SOURCE_LABELS: Record<string, { label: string; emoji: string; color: string }> = {
+  DIRECT: { label: "Direct", emoji: "🏨", color: "bg-amber-100 text-amber-800" },
+  WALK_IN: { label: "Walk-in", emoji: "🚶", color: "bg-sand-100 text-ink-soft" },
+  BOOKING_COM: { label: "Booking.com", emoji: "📘", color: "bg-blue-100 text-blue-800" },
+  AIRBNB: { label: "Airbnb", emoji: "🅰️", color: "bg-rose-100 text-rose-800" },
+  EXPEDIA: { label: "Expedia", emoji: "✈️", color: "bg-yellow-100 text-yellow-800" },
+  TRIPADVISOR: { label: "TripAdvisor", emoji: "🦉", color: "bg-emerald-100 text-emerald-800" },
+  HOSTELWORLD: { label: "Hostelworld", emoji: "🌍", color: "bg-orange-100 text-orange-800" },
+  VRBO: { label: "Vrbo", emoji: "🏖️", color: "bg-cyan-100 text-cyan-800" },
+  AGODA: { label: "Agoda", emoji: "🇸🇬", color: "bg-purple-100 text-purple-800" },
+  OTHER: { label: "Other", emoji: "📅", color: "bg-sand-100 text-ink-soft" },
+};
+
+function SourceBadge({ source }: { source: string }) {
+  const meta = SOURCE_LABELS[source] || SOURCE_LABELS.OTHER;
+  return (
+    <span
+      className={`inline-flex items-center gap-1 px-2 py-0.5 text-[10px] font-extrabold uppercase tracking-wider rounded ${meta.color}`}
+    >
+      <span>{meta.emoji}</span>
+      {meta.label}
+    </span>
+  );
+}
+
+function isPlaceholderGuest(guest: Guest): boolean {
+  // OTA-pulled reservations create placeholder guests with names like
+  // "Booking.com guest" until the front desk replaces them with real
+  // details at check-in. Detect by suffix so we can flag the row.
+  return /\bguest$/.test(guest.name);
+}
 
 type Today = {
   hotel: Hotel | null;
@@ -281,7 +318,7 @@ function HotelLogin({ onLogin }: { onLogin: (s: Staff) => void }) {
 // MAIN DASHBOARD
 // ═══════════════════════════════════════════════
 
-type Tab = "today" | "reservations" | "walkin" | "calendar" | "rooms" | "config";
+type Tab = "today" | "reservations" | "walkin" | "calendar" | "rooms" | "reports" | "config";
 
 function HotelDashboard({ staff, onLogout }: { staff: Staff; onLogout: () => void }) {
   const [tab, setTab] = useState<Tab>("today");
@@ -336,6 +373,7 @@ function HotelDashboard({ staff, onLogout }: { staff: Staff; onLogout: () => voi
             ["reservations", "Reservations"],
             ["calendar", "Calendar"],
             ["rooms", "Rooms"],
+            ["reports", "Reports"],
             ["config", "Setup"],
           ] as [Tab, string][]).map(([k, label]) => (
             <button
@@ -359,6 +397,7 @@ function HotelDashboard({ staff, onLogout }: { staff: Staff; onLogout: () => voi
         {tab === "reservations" && <ReservationsTab staff={staff} />}
         {tab === "calendar" && <CalendarTab staff={staff} />}
         {tab === "rooms" && <RoomsTab staff={staff} />}
+        {tab === "reports" && <ReportsTab />}
         {tab === "config" && <ConfigTab staff={staff} />}
       </main>
     </div>
@@ -659,7 +698,13 @@ function ArrivalRow({
   staff: Staff;
 }) {
   const [busy, setBusy] = useState(false);
-  async function checkIn() {
+  const [showCheckIn, setShowCheckIn] = useState(false);
+  const placeholder = isPlaceholderGuest(reservation.guest);
+  const needsRoomAssignment = !reservation.room;
+
+  async function quickCheckIn() {
+    // Fast path used only when guest has real details AND a room is
+    // already assigned. Otherwise the modal opens to capture both.
     if (busy) return;
     setBusy(true);
     try {
@@ -676,23 +721,305 @@ function ArrivalRow({
       setBusy(false);
     }
   }
+
+  function startCheckIn() {
+    if (placeholder || needsRoomAssignment) {
+      setShowCheckIn(true);
+    } else {
+      quickCheckIn();
+    }
+  }
+
   return (
-    <div className="bg-white border border-sand-200 rounded-xl p-4 flex flex-wrap items-center gap-3">
-      <div className="flex-1 min-w-[180px]">
-        <div className="font-extrabold text-ink">{reservation.guest.name}</div>
-        <div className="text-xs text-ink-soft">
-          Room {reservation.room.number} · {reservation.room.roomType.name} ·{" "}
-          {fmtDate(reservation.checkInDate)} → {fmtDate(reservation.checkOutDate)}
+    <>
+      <div className="bg-white border border-sand-200 rounded-xl p-4 flex flex-wrap items-center gap-3">
+        <div className="flex-1 min-w-[180px]">
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="font-extrabold text-ink">{reservation.guest.name}</span>
+            <SourceBadge source={reservation.source} />
+            {placeholder && (
+              <span className="text-[10px] font-extrabold uppercase tracking-wider text-status-warn-700 bg-status-warn-50 px-2 py-0.5 rounded">
+                Capture details at check-in
+              </span>
+            )}
+          </div>
+          <div className="text-xs text-ink-soft">
+            {reservation.room ? `Room ${reservation.room.number}` : `${reservation.roomType.name} (assign at check-in)`} ·{" "}
+            {fmtDate(reservation.checkInDate)} → {fmtDate(reservation.checkOutDate)}
+            {reservation.externalRef && (
+              <>
+                {" "}
+                · ref <code className="text-[11px]">{reservation.externalRef}</code>
+              </>
+            )}
+          </div>
+        </div>
+        <button
+          disabled={busy}
+          onClick={startCheckIn}
+          className="px-4 py-2 bg-amber-600 hover:bg-amber-700 text-white font-bold rounded-lg text-sm disabled:opacity-50"
+        >
+          Check in
+        </button>
+      </div>
+      {showCheckIn && (
+        <CheckInModal
+          reservation={reservation}
+          onClose={() => setShowCheckIn(false)}
+          onDone={() => {
+            setShowCheckIn(false);
+            onAction();
+          }}
+        />
+      )}
+    </>
+  );
+}
+
+/**
+ * Check-in capture modal. Used when:
+ *   - the guest is a placeholder (OTA-imported) — front desk types
+ *     the real name + phone + ID + nationality before continuing,
+ *   - or the reservation hasn't been bound to a physical room yet —
+ *     front desk picks one of the available rooms of the booked type.
+ *
+ * The PATCH "edit" action takes the guest fields (it updates the
+ * related Guest row), and the POST /checkin takes the optional
+ * roomId. Both run from this single Save button.
+ */
+function CheckInModal({
+  reservation,
+  onClose,
+  onDone,
+}: {
+  reservation: Reservation;
+  onClose: () => void;
+  onDone: () => void;
+}) {
+  const placeholder = isPlaceholderGuest(reservation.guest);
+  const needsRoomAssignment = !reservation.room;
+
+  const [name, setName] = useState(placeholder ? "" : reservation.guest.name);
+  const [phone, setPhone] = useState(reservation.guest.phone || "");
+  const [email, setEmail] = useState(reservation.guest.email || "");
+  const [idNumber, setIdNumber] = useState(reservation.guest.idNumber || "");
+  const [nationality, setNationality] = useState(reservation.guest.nationality || "");
+  const [externalRef, setExternalRef] = useState(reservation.externalRef || "");
+  const [rooms, setRooms] = useState<Room[]>([]);
+  const [pickedRoomId, setPickedRoomId] = useState<string>("");
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!needsRoomAssignment) return;
+    authedFetch("/api/hotel/rooms", { cache: "no-store" })
+      .then((r) => r.json())
+      .then((d) => {
+        const eligible = (d.rooms || []).filter(
+          (r: Room) =>
+            r.roomTypeId === reservation.roomType.id &&
+            (r.status === "VACANT_CLEAN" || r.status === "VACANT_DIRTY")
+        );
+        setRooms(eligible);
+        if (eligible.length === 1) setPickedRoomId(eligible[0].id);
+      });
+  }, [needsRoomAssignment, reservation.roomType.id]);
+
+  async function submit() {
+    if (busy) return;
+    if (placeholder && !name.trim()) {
+      setErr("Real guest name is required for OTA bookings.");
+      return;
+    }
+    if (needsRoomAssignment && !pickedRoomId && rooms.length > 0) {
+      setErr("Pick which physical room you're assigning.");
+      return;
+    }
+    setBusy(true);
+    setErr(null);
+    try {
+      // Step 1: capture guest details + OTA ref via the edit action.
+      if (placeholder || externalRef !== (reservation.externalRef || "")) {
+        const editRes = await authedFetch(
+          `/api/hotel/reservations/${reservation.id}`,
+          {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              action: "edit",
+              guestName: name.trim() || undefined,
+              guestPhone: phone.trim() || undefined,
+              guestEmail: email.trim() || undefined,
+              guestIdNumber: idNumber.trim() || undefined,
+              guestNationality: nationality.trim() || undefined,
+              externalRef: externalRef.trim(),
+            }),
+          }
+        );
+        if (!editRes.ok) {
+          const d = await editRes.json().catch(() => ({}));
+          throw new Error(d.error || "Saving guest details failed");
+        }
+      }
+      // Step 2: actual check-in (assigns room, posts room nights,
+      // generates stay token, sends welcome email).
+      const checkInRes = await authedFetch(
+        `/api/hotel/reservations/${reservation.id}/checkin`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(pickedRoomId ? { roomId: pickedRoomId } : {}),
+        }
+      );
+      if (!checkInRes.ok) {
+        const d = await checkInRes.json().catch(() => ({}));
+        throw new Error(d.error || "Check-in failed");
+      }
+      onDone();
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "Check-in failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Modal onClose={onClose} title="Check in" wide>
+      <div className="space-y-4">
+        <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 text-sm">
+          <SourceBadge source={reservation.source} />
+          <span className="ms-2">
+            {reservation.roomType.name} ·{" "}
+            {fmtDate(reservation.checkInDate)} →{" "}
+            {fmtDate(reservation.checkOutDate)}
+          </span>
+        </div>
+
+        {placeholder && (
+          <div className="bg-status-warn-50 border border-status-warn-200 rounded-lg p-3 text-sm text-status-warn-800">
+            This is an <strong>{reservation.source.replace("_", ".")}</strong>{" "}
+            booking. The guest's real details aren't on file — capture them
+            here from their passport / ID. The OTA confirmation code below
+            helps cross-check on the extranet.
+          </div>
+        )}
+
+        <div className="space-y-2">
+          <div className="text-[11px] font-extrabold uppercase tracking-wider text-ink-mute">
+            Guest details
+          </div>
+          <input
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            placeholder="Full name *"
+            className="w-full px-3 py-2 border border-sand-300 rounded-lg"
+            autoFocus
+          />
+          <div className="grid grid-cols-2 gap-2">
+            <input
+              value={phone}
+              onChange={(e) => setPhone(e.target.value)}
+              placeholder="Phone"
+              className="px-3 py-2 border border-sand-300 rounded-lg"
+            />
+            <input
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              placeholder="Email"
+              type="email"
+              className="px-3 py-2 border border-sand-300 rounded-lg"
+            />
+          </div>
+          <div className="grid grid-cols-2 gap-2">
+            <input
+              value={idNumber}
+              onChange={(e) => setIdNumber(e.target.value)}
+              placeholder="ID / passport number"
+              className="px-3 py-2 border border-sand-300 rounded-lg"
+            />
+            <input
+              value={nationality}
+              onChange={(e) => setNationality(e.target.value)}
+              placeholder="Nationality"
+              className="px-3 py-2 border border-sand-300 rounded-lg"
+            />
+          </div>
+        </div>
+
+        {(reservation.source !== "DIRECT" && reservation.source !== "WALK_IN") && (
+          <div>
+            <div className="text-[11px] font-extrabold uppercase tracking-wider text-ink-mute mb-1">
+              OTA confirmation code
+            </div>
+            <input
+              value={externalRef}
+              onChange={(e) => setExternalRef(e.target.value)}
+              placeholder="Booking.com / Airbnb confirmation #"
+              className="w-full px-3 py-2 border border-sand-300 rounded-lg"
+            />
+          </div>
+        )}
+
+        {needsRoomAssignment && (
+          <div>
+            <div className="text-[11px] font-extrabold uppercase tracking-wider text-ink-mute mb-1">
+              Assign physical room ({reservation.roomType.name})
+            </div>
+            {rooms.length === 0 ? (
+              <div className="bg-status-bad-50 text-status-bad-700 rounded-lg p-2 text-sm">
+                No clean or dirty rooms of this type available. Mark a room as
+                vacant first.
+              </div>
+            ) : (
+              <div className="grid grid-cols-3 gap-2">
+                {rooms.map((r) => (
+                  <button
+                    key={r.id}
+                    type="button"
+                    onClick={() => setPickedRoomId(r.id)}
+                    className={`px-3 py-2 rounded-lg text-sm font-bold border-2 ${
+                      pickedRoomId === r.id
+                        ? "bg-amber-50 border-amber-600 text-amber-700"
+                        : "bg-white border-sand-300 text-ink-soft"
+                    }`}
+                  >
+                    {r.number}
+                    {r.status === "VACANT_DIRTY" && (
+                      <span className="block text-[10px] font-bold uppercase tracking-wider text-status-warn-700">
+                        Dirty
+                      </span>
+                    )}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        {err && (
+          <div className="p-2 bg-status-bad-50 text-status-bad-700 rounded-lg text-sm">
+            {err}
+          </div>
+        )}
+
+        <div className="flex gap-2 justify-end pt-2 border-t border-sand-200">
+          <button
+            onClick={onClose}
+            disabled={busy}
+            className="px-4 py-2 text-sm font-bold text-ink-soft hover:bg-sand-100 rounded-lg"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={submit}
+            disabled={busy}
+            className="px-4 py-2 bg-amber-600 hover:bg-amber-700 text-white font-extrabold rounded-lg text-sm disabled:opacity-50"
+          >
+            {busy ? "Checking in…" : "Check in"}
+          </button>
         </div>
       </div>
-      <button
-        disabled={busy}
-        onClick={checkIn}
-        className="px-4 py-2 bg-amber-600 hover:bg-amber-700 text-white font-bold rounded-lg text-sm disabled:opacity-50"
-      >
-        Check in
-      </button>
-    </div>
+    </Modal>
   );
 }
 
@@ -712,7 +1039,7 @@ function DepartureRow({
         <div className="flex-1 min-w-[180px]">
           <div className="font-extrabold text-ink">{reservation.guest.name}</div>
           <div className="text-xs text-ink-soft">
-            Room {reservation.room.number} · folio balance{" "}
+            {reservation.room ? `Room ${reservation.room.number}` : reservation.roomType.name} · folio balance{" "}
             <strong>{fmtEGP(folioBalance(reservation.folio))} EGP</strong>
           </div>
         </div>
@@ -756,7 +1083,7 @@ function InHouseRow({
         <div className="flex-1 min-w-[180px]">
           <div className="font-extrabold text-ink">{reservation.guest.name}</div>
           <div className="text-xs text-ink-soft">
-            Room {reservation.room.number} · until{" "}
+            {reservation.room ? `Room ${reservation.room.number}` : reservation.roomType.name} · until{" "}
             {fmtDate(reservation.checkOutDate)} · folio{" "}
             <strong>{fmtEGP(folioBalance(reservation.folio))} EGP</strong>
           </div>
@@ -818,7 +1145,7 @@ function CheckoutModal({
   }
 
   return (
-    <Modal onClose={onClose} title={`Checkout — Room ${reservation.room.number}`}>
+    <Modal onClose={onClose} title={`Checkout — ${reservation.room ? `Room ${reservation.room.number}` : reservation.roomType.name}`}>
       <div className="space-y-4">
         <div className="bg-sand-50 rounded-lg p-3">
           <div className="text-xs text-ink-mute">Guest</div>
@@ -998,19 +1325,82 @@ function ReservationDetailModal({
   return (
     <Modal
       onClose={onClose}
-      title={`${reservation.guest.name} · Room ${reservation.room.number}`}
+      title={`${reservation.guest.name} · ${reservation.room ? `Room ${reservation.room.number}` : reservation.roomType.name}`}
       wide
     >
       <div className="space-y-5">
         {/* Status + key facts */}
         <div className="flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-sand-200">
-          <StatusBadge status={status} />
+          <div className="flex items-center gap-2 flex-wrap">
+            <StatusBadge status={status} />
+            <SourceBadge source={reservation.source} />
+            {reservation.prepaid && (
+              <span className="px-2 py-0.5 text-[10px] font-extrabold uppercase tracking-wider rounded bg-status-good-100 text-status-good-700">
+                Prepaid
+              </span>
+            )}
+          </div>
           <div className="text-xs text-ink-mute">
             {fmtDate(reservation.checkInDate)} → {fmtDate(reservation.checkOutDate)} ·{" "}
             {reservation.adults} adult{reservation.adults === 1 ? "" : "s"}
             {reservation.children > 0 && `, ${reservation.children} kid${reservation.children === 1 ? "" : "s"}`}
           </div>
         </div>
+
+        {/* OTA reference banner — only when this came from an OTA. Shows
+            the channel's confirmation code so front desk can cross-check
+            on the OTA extranet. */}
+        {(reservation.externalRef || reservation.externalUid) && (
+          <section className="bg-blue-50 border border-blue-200 rounded-lg p-3">
+            <div className="flex items-start justify-between gap-2 flex-wrap">
+              <div>
+                <div className="text-[11px] font-extrabold uppercase tracking-wider text-blue-700 mb-1">
+                  OTA reference
+                </div>
+                <div className="text-sm text-blue-900">
+                  {reservation.externalRef ? (
+                    <>
+                      Confirmation:{" "}
+                      <code className="font-mono font-bold">
+                        {reservation.externalRef}
+                      </code>
+                    </>
+                  ) : (
+                    <span className="text-blue-700">
+                      Imported via iCal — no confirmation code yet. Add
+                      one from the OTA extranet so front desk can verify.
+                    </span>
+                  )}
+                </div>
+              </div>
+              <button
+                onClick={async () => {
+                  const cur = reservation.externalRef || "";
+                  const next = prompt(
+                    "OTA confirmation code (Booking.com / Airbnb / etc.)",
+                    cur
+                  );
+                  if (next === null) return;
+                  const res = await authedFetch(
+                    `/api/hotel/reservations/${reservation.id}`,
+                    {
+                      method: "PATCH",
+                      headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify({
+                        action: "edit",
+                        externalRef: next.trim() || null,
+                      }),
+                    }
+                  );
+                  if (res.ok) await reload();
+                }}
+                className="text-[11px] font-bold text-blue-700 hover:underline"
+              >
+                {reservation.externalRef ? "Edit" : "Add"}
+              </button>
+            </div>
+          </section>
+        )}
 
         {/* Guest info */}
         <section>
@@ -1084,7 +1474,9 @@ function ReservationDetailModal({
               <div>
                 <span className="text-ink-mute">Room:</span>{" "}
                 <strong>
-                  {reservation.room.number} ({reservation.room.roomType.name})
+                  {reservation.room
+                    ? `${reservation.room.number} (${reservation.room.roomType.name})`
+                    : `${reservation.roomType.name} — assign at check-in`}
                 </strong>
               </div>
               <div>
@@ -1777,6 +2169,7 @@ function ReservationsTab({ staff }: { staff: Staff }) {
             <thead className="bg-sand-50 text-[11px] font-extrabold uppercase tracking-wider text-ink-mute">
               <tr>
                 <th className="text-left px-3 py-2">Guest</th>
+                <th className="text-left px-3 py-2">Source</th>
                 <th className="text-left px-3 py-2">Room</th>
                 <th className="text-left px-3 py-2">Dates</th>
                 <th className="text-left px-3 py-2">Status</th>
@@ -1791,14 +2184,31 @@ function ReservationsTab({ staff }: { staff: Staff }) {
                   className="border-t border-sand-200 hover:bg-sand-50 cursor-pointer"
                 >
                   <td className="px-3 py-2">
-                    <div className="font-bold text-ink">{r.guest.name}</div>
+                    <div className="font-bold text-ink">
+                      {r.guest.name}
+                      {isPlaceholderGuest(r.guest) && (
+                        <span className="ms-1 text-[10px] font-extrabold uppercase tracking-wider text-status-warn-700">
+                          (placeholder)
+                        </span>
+                      )}
+                    </div>
                     <div className="text-[11px] text-ink-mute">
                       {r.guest.phone || ""}
                     </div>
                   </td>
                   <td className="px-3 py-2">
-                    <div className="font-bold">{r.room.number}</div>
-                    <div className="text-[11px] text-ink-mute">{r.room.roomType.name}</div>
+                    <SourceBadge source={r.source} />
+                    {r.externalRef && (
+                      <div className="text-[10px] text-ink-mute mt-0.5 font-mono">
+                        {r.externalRef}
+                      </div>
+                    )}
+                  </td>
+                  <td className="px-3 py-2">
+                    <div className="font-bold">
+                      {r.room ? r.room.number : "—"}
+                    </div>
+                    <div className="text-[11px] text-ink-mute">{r.roomType.name}</div>
                   </td>
                   <td className="px-3 py-2 text-xs">
                     {fmtDate(r.checkInDate)} → {fmtDate(r.checkOutDate)}
@@ -2688,6 +3098,10 @@ function CalendarTab({ staff }: { staff: Staff }) {
       if (visibleEnd < visibleStart) continue;
       const startCol = visibleStart.getUTCDate();
       const endCol = visibleEnd.getUTCDate();
+      // Type-bound reservations (no roomId yet) skip the room-row
+      // calendar — they'll appear once the front desk assigns a room
+      // at check-in. The "Reservations" tab still lists them.
+      if (!r.room) continue;
       const list = map.get(r.room.id) || [];
       list.push({ reservation: r, startCol, endCol });
       map.set(r.room.id, list);
@@ -2910,6 +3324,201 @@ function CalendarTab({ staff }: { staff: Staff }) {
           }}
         />
       )}
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════
+// TAB: REPORTS
+//
+// Standard hotelier KPIs: occupancy %, ADR, RevPAR, channel mix
+// (gross / commission / net per source). Period selector picks the
+// last 7 / 30 days; custom range nice-to-have, deferred.
+// ═══════════════════════════════════════════════
+
+type ReportsData = {
+  period: string;
+  from: string;
+  to: string;
+  inventory: {
+    totalRooms: number;
+    windowDays: number;
+    availableRoomNights: number;
+  };
+  rooms: {
+    bookedRoomNights: number;
+    revenue: number;
+    occupancyPercent: number;
+    adr: number;
+    revPar: number;
+  };
+  settled: { count: number; total: number };
+  channels: Array<{
+    source: string;
+    nights: number;
+    gross: number;
+    commission: number;
+    net: number;
+  }>;
+};
+
+function ReportsTab() {
+  const [period, setPeriod] = useState<"week" | "month">("month");
+  const [data, setData] = useState<ReportsData | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  async function load() {
+    setLoading(true);
+    try {
+      const res = await authedFetch(`/api/hotel/reports?period=${period}`, {
+        cache: "no-store",
+      });
+      const d = await res.json();
+      if (res.ok) setData(d);
+    } finally {
+      setLoading(false);
+    }
+  }
+  useEffect(() => {
+    load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [period]);
+
+  if (loading && !data) {
+    return <div className="text-sm text-ink-mute">Loading…</div>;
+  }
+  if (!data) return null;
+
+  return (
+    <div className="space-y-6">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex gap-1">
+          {[
+            ["week", "Last 7 days"],
+            ["month", "Last 30 days"],
+          ].map(([k, label]) => (
+            <button
+              key={k}
+              onClick={() => setPeriod(k as "week" | "month")}
+              className={`px-3 py-1.5 rounded-lg text-xs font-bold ${
+                period === k
+                  ? "bg-amber-600 text-white"
+                  : "bg-white border border-sand-300 text-ink-soft"
+              }`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+        <div className="text-xs text-ink-mute">
+          {data.from} → {data.to} · {data.inventory.totalRooms} rooms ·{" "}
+          {data.inventory.windowDays} days
+        </div>
+      </div>
+
+      {/* KPI cards */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        <KpiCard
+          label="Occupancy"
+          value={`${data.rooms.occupancyPercent.toFixed(1)}%`}
+          sub={`${data.rooms.bookedRoomNights} / ${data.inventory.availableRoomNights} room-nights`}
+        />
+        <KpiCard
+          label="ADR"
+          value={`${fmtEGP(data.rooms.adr)} EGP`}
+          sub="Avg daily rate per booked night"
+        />
+        <KpiCard
+          label="RevPAR"
+          value={`${fmtEGP(data.rooms.revPar)} EGP`}
+          sub="Revenue per available room"
+        />
+        <KpiCard
+          label="Cash collected"
+          value={`${fmtEGP(data.settled.total)} EGP`}
+          sub={`${data.settled.count} folios settled`}
+        />
+      </div>
+
+      {/* Channel mix */}
+      <section>
+        <h2 className="text-sm font-extrabold uppercase tracking-wider text-ink-mute mb-2">
+          Channel mix
+        </h2>
+        {data.channels.length === 0 ? (
+          <Empty>No room nights billed in this window.</Empty>
+        ) : (
+          <div className="bg-white border border-sand-200 rounded-xl overflow-hidden">
+            <div className="grid grid-cols-[1.4fr_1fr_1fr_1fr_1fr] gap-3 px-3 py-2 bg-sand-50 text-[11px] font-extrabold uppercase tracking-wider text-ink-mute">
+              <div>Channel</div>
+              <div className="text-right">Nights</div>
+              <div className="text-right">Gross</div>
+              <div className="text-right">Commission</div>
+              <div className="text-right">Net</div>
+            </div>
+            {data.channels.map((c) => {
+              const meta =
+                SOURCE_LABELS[c.source] || SOURCE_LABELS.OTHER;
+              const sharePercent =
+                data.rooms.revenue > 0
+                  ? (c.gross / data.rooms.revenue) * 100
+                  : 0;
+              return (
+                <div
+                  key={c.source}
+                  className="grid grid-cols-[1.4fr_1fr_1fr_1fr_1fr] gap-3 px-3 py-2 text-sm border-t border-sand-200 items-center"
+                >
+                  <div className="flex items-center gap-2">
+                    <SourceBadge source={c.source} />
+                    <span className="text-[11px] text-ink-mute">
+                      {sharePercent.toFixed(0)}%
+                    </span>
+                  </div>
+                  <div className="text-right tabular-nums">{c.nights}</div>
+                  <div className="text-right font-bold tabular-nums">
+                    {fmtEGP(c.gross)}
+                  </div>
+                  <div className="text-right text-status-bad-700 tabular-nums">
+                    −{fmtEGP(c.commission)}
+                  </div>
+                  <div className="text-right font-extrabold tabular-nums">
+                    {fmtEGP(c.net)}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </section>
+      <p className="text-[11px] text-ink-mute">
+        Commission uses each channel's typical rate (Booking.com 17%, Airbnb
+        3%, Expedia 18%, etc.) unless an explicit{" "}
+        <code className="font-mono">commissionPercent</code> is set on a
+        reservation. Numbers cover ROOM_NIGHT charges only — F&amp;B and
+        activities aren't subject to OTA commission.
+      </p>
+    </div>
+  );
+}
+
+function KpiCard({
+  label,
+  value,
+  sub,
+}: {
+  label: string;
+  value: string;
+  sub: string;
+}) {
+  return (
+    <div className="bg-white border border-sand-200 rounded-xl p-4 shadow-sm">
+      <div className="text-[11px] font-extrabold uppercase tracking-wider text-ink-mute">
+        {label}
+      </div>
+      <div className="text-2xl font-extrabold text-ink mt-1 tabular-nums">
+        {value}
+      </div>
+      <div className="text-[11px] text-ink-mute mt-1">{sub}</div>
     </div>
   );
 }
@@ -3233,9 +3842,262 @@ function ConfigTab({ staff }: { staff: Staff }) {
       {/* OTA iCal sync — owner manages Booking.com / Airbnb feeds. */}
       <IcalSyncSection staff={staff} />
 
+      {/* iCal export — URLs the owner pastes BACK into OTA extranets
+          so they don't double-book us with our direct bookings. */}
+      <IcalExportSection roomTypes={roomTypes} />
+
+      {/* Tourism-tax + email config + general hotel settings. */}
+      <HotelSettingsSection />
+
       {/* Direct booking link — copy/paste for the owner's website. */}
       <DirectBookingSection />
     </div>
+  );
+}
+
+/**
+ * Show one iCal export URL per room type. Owner pastes each into the
+ * matching listing on Booking.com / Airbnb / Expedia extranets so
+ * those OTAs see when we're booked from elsewhere and stop selling
+ * the same nights. Rotating the token (in HotelSettingsSection)
+ * invalidates every export URL at once — use sparingly.
+ */
+function IcalExportSection({ roomTypes }: { roomTypes: RoomType[] }) {
+  const [token, setToken] = useState<string | null>(null);
+  const restaurantSlug =
+    typeof window !== "undefined"
+      ? process.env.NEXT_PUBLIC_RESTAURANT_SLUG || "neom-dahab"
+      : "neom-dahab";
+
+  useEffect(() => {
+    authedFetch(`/api/hotel?slug=${restaurantSlug}`, { cache: "no-store" })
+      .then((r) => r.json())
+      .then((d) => setToken(d.hotel?.icalExportToken || null));
+  }, [restaurantSlug]);
+
+  function slugify(s: string) {
+    return s
+      .toLowerCase()
+      .normalize("NFD")
+      .replace(/[̀-ͯ]/g, "")
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/(^-|-$)+/g, "");
+  }
+
+  return (
+    <section className="mt-8">
+      <h2 className="text-sm font-extrabold uppercase tracking-wider text-ink-mute mb-2">
+        iCal export — give these URLs to OTAs
+      </h2>
+      <p className="text-sm text-ink-soft mb-3">
+        Each URL below shows OTAs which nights are already booked (from
+        direct, walk-in, or other channels) so they stop selling those
+        nights. Paste the matching URL into Booking.com → Sync calendars,
+        Airbnb → Listing → Calendar → Import calendar, etc.
+      </p>
+      {!token ? (
+        <div className="bg-status-warn-50 border border-status-warn-200 text-status-warn-800 rounded-lg p-3 text-sm">
+          Generate the export token by saving the hotel settings below
+          (any save creates one if missing).
+        </div>
+      ) : roomTypes.length === 0 ? (
+        <Empty>Add at least one room type first.</Empty>
+      ) : (
+        <div className="space-y-2">
+          {roomTypes.map((rt) => {
+            const url =
+              typeof window !== "undefined"
+                ? `${window.location.origin}/api/ical/${restaurantSlug}/${slugify(rt.name)}?token=${token}`
+                : "";
+            return (
+              <div
+                key={rt.id}
+                className="bg-white border border-sand-200 rounded-xl p-3"
+              >
+                <div className="text-sm font-extrabold mb-1">{rt.name}</div>
+                <div className="flex items-center gap-2">
+                  <code className="flex-1 bg-sand-50 px-2 py-1 rounded font-mono text-[11px] break-all">
+                    {url}
+                  </code>
+                  <button
+                    onClick={() => {
+                      if (typeof window !== "undefined")
+                        navigator.clipboard.writeText(url);
+                    }}
+                    className="px-3 py-1.5 bg-amber-600 hover:bg-amber-700 text-white font-bold rounded text-xs"
+                  >
+                    Copy
+                  </button>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </section>
+  );
+}
+
+/**
+ * General hotel settings: notification email, "from" address,
+ * tourism tax %, and the destructive "rotate iCal export token"
+ * action. Tax updates apply to future checkouts only — past
+ * settled folios aren't rewritten.
+ */
+function HotelSettingsSection() {
+  const [hotel, setHotel] = useState<{
+    name: string;
+    address: string | null;
+    checkInTime: string;
+    checkOutTime: string;
+    notificationEmail: string | null;
+    emailFrom: string | null;
+    tourismTaxPercent: string | number | null;
+  } | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<string | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+  const slug =
+    typeof window !== "undefined"
+      ? process.env.NEXT_PUBLIC_RESTAURANT_SLUG || "neom-dahab"
+      : "neom-dahab";
+
+  async function load() {
+    const res = await authedFetch(`/api/hotel?slug=${slug}`, {
+      cache: "no-store",
+    });
+    const d = await res.json();
+    setHotel(d.hotel);
+  }
+  useEffect(() => {
+    load();
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  async function save(rotateIcalToken = false) {
+    if (busy || !hotel) return;
+    setBusy(true);
+    setErr(null);
+    setMsg(null);
+    try {
+      const res = await authedFetch("/api/hotel", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: hotel.name,
+          address: hotel.address,
+          checkInTime: hotel.checkInTime,
+          checkOutTime: hotel.checkOutTime,
+          notificationEmail: hotel.notificationEmail,
+          emailFrom: hotel.emailFrom,
+          tourismTaxPercent:
+            hotel.tourismTaxPercent != null
+              ? Number(hotel.tourismTaxPercent)
+              : null,
+          rotateIcalToken,
+        }),
+      });
+      const d = await res.json();
+      if (!res.ok) throw new Error(d.error || "Save failed");
+      setMsg(rotateIcalToken ? "Token rotated. Update OTA URLs!" : "Saved.");
+      await load();
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "Save failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  if (!hotel) return null;
+  return (
+    <section className="mt-8">
+      <h2 className="text-sm font-extrabold uppercase tracking-wider text-ink-mute mb-2">
+        Hotel settings
+      </h2>
+      <div className="bg-white border border-sand-200 rounded-xl p-4 space-y-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <label className="block">
+            <div className="text-[10px] font-bold uppercase tracking-wider text-ink-mute mb-1">
+              Tourism + service tax (%)
+            </div>
+            <input
+              type="number"
+              step="0.01"
+              value={hotel.tourismTaxPercent ?? ""}
+              onChange={(e) =>
+                setHotel({
+                  ...hotel,
+                  tourismTaxPercent: e.target.value === "" ? null : e.target.value,
+                })
+              }
+              placeholder="12"
+              className="w-full px-3 py-2 border border-sand-300 rounded-lg"
+            />
+          </label>
+          <label className="block">
+            <div className="text-[10px] font-bold uppercase tracking-wider text-ink-mute mb-1">
+              Front desk notification email (BCC)
+            </div>
+            <input
+              type="email"
+              value={hotel.notificationEmail || ""}
+              onChange={(e) =>
+                setHotel({ ...hotel, notificationEmail: e.target.value || null })
+              }
+              placeholder="frontdesk@neom-dahab.com"
+              className="w-full px-3 py-2 border border-sand-300 rounded-lg"
+            />
+          </label>
+          <label className="block">
+            <div className="text-[10px] font-bold uppercase tracking-wider text-ink-mute mb-1">
+              Email "from" (verify domain in Resend first)
+            </div>
+            <input
+              value={hotel.emailFrom || ""}
+              onChange={(e) =>
+                setHotel({ ...hotel, emailFrom: e.target.value || null })
+              }
+              placeholder="Neom Hotel <booking@neom-dahab.com>"
+              className="w-full px-3 py-2 border border-sand-300 rounded-lg"
+            />
+          </label>
+        </div>
+
+        {err && (
+          <div className="p-2 bg-status-bad-50 text-status-bad-700 rounded-lg text-sm">
+            {err}
+          </div>
+        )}
+        {msg && (
+          <div className="p-2 bg-status-good-50 text-status-good-700 rounded-lg text-sm">
+            {msg}
+          </div>
+        )}
+        <div className="flex gap-2 justify-between flex-wrap">
+          <button
+            onClick={() => {
+              if (
+                confirm(
+                  "Rotate iCal export token? Every OTA URL you've already pasted will stop working — you'll need to update them."
+                )
+              ) {
+                save(true);
+              }
+            }}
+            disabled={busy}
+            className="px-3 py-1.5 text-xs font-bold text-status-bad-700 hover:bg-status-bad-50 rounded-lg"
+          >
+            Rotate iCal token
+          </button>
+          <button
+            onClick={() => save(false)}
+            disabled={busy}
+            className="px-4 py-2 bg-amber-600 hover:bg-amber-700 text-white font-extrabold rounded-lg text-sm disabled:opacity-50"
+          >
+            {busy ? "…" : "Save settings"}
+          </button>
+        </div>
+      </div>
+    </section>
   );
 }
 
@@ -3246,16 +4108,24 @@ function ConfigTab({ staff }: { staff: Staff }) {
  * each feed; "Sync now" forces an immediate run.
  */
 function IcalSyncSection({ staff }: { staff: Staff }) {
-  const [entries, setEntries] = useState<
-    Array<{
-      source: "BOOKING_COM" | "AIRBNB" | "OTHER";
-      url: string;
-      roomNumber: string;
-      lastSyncedAt?: string;
-      lastError?: string;
-      reservationsCreated?: number;
-    }>
-  >([]);
+  type IcalSource =
+    | "BOOKING_COM"
+    | "AIRBNB"
+    | "EXPEDIA"
+    | "TRIPADVISOR"
+    | "HOSTELWORLD"
+    | "VRBO"
+    | "AGODA"
+    | "OTHER";
+  type IcalEntry = {
+    source: IcalSource;
+    url: string;
+    roomNumber: string;
+    lastSyncedAt?: string;
+    lastError?: string;
+    reservationsCreated?: number;
+  };
+  const [entries, setEntries] = useState<IcalEntry[]>([]);
   const [rooms, setRooms] = useState<Room[]>([]);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
@@ -3265,7 +4135,7 @@ function IcalSyncSection({ staff }: { staff: Staff }) {
 
   // New-entry form draft
   const [draft, setDraft] = useState<{
-    source: "BOOKING_COM" | "AIRBNB" | "OTHER";
+    source: IcalSource;
     url: string;
     roomNumber: string;
   }>({ source: "BOOKING_COM", url: "", roomNumber: "" });
@@ -3431,12 +4301,17 @@ function IcalSyncSection({ staff }: { staff: Staff }) {
             <select
               value={draft.source}
               onChange={(e) =>
-                setDraft({ ...draft, source: e.target.value as typeof draft.source })
+                setDraft({ ...draft, source: e.target.value as IcalSource })
               }
               className="px-3 py-2 border border-sand-300 rounded-lg text-sm"
             >
               <option value="BOOKING_COM">Booking.com</option>
               <option value="AIRBNB">Airbnb</option>
+              <option value="EXPEDIA">Expedia / Hotels.com</option>
+              <option value="TRIPADVISOR">TripAdvisor</option>
+              <option value="HOSTELWORLD">Hostelworld</option>
+              <option value="VRBO">Vrbo</option>
+              <option value="AGODA">Agoda</option>
               <option value="OTHER">Other</option>
             </select>
             <select

@@ -14,7 +14,7 @@ async function main() {
       where: { id: r.id },
       data: { stayToken: token },
     });
-    console.log(`  ${r.guest.name} (Room ${r.room.number}): /stay/${token}`);
+    console.log(`  ${r.guest.name} (Room ${r.room?.number ?? "—"}): /stay/${token}`);
   }
   console.log("Done.");
 }

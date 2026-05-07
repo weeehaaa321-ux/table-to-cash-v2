@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { requireStaffAuth } from "@/lib/api-auth";
-import { countNights, findAvailableRooms } from "@/lib/hotel";
+import { countNights, findAvailableRooms, findAvailableRoomTypes } from "@/lib/hotel";
 
 async function getHotelIdForStaff(restaurantId: string) {
   const hotel = await db.hotel.findUnique({
@@ -93,21 +93,39 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "checkOutDate must be after checkInDate" }, { status: 400 });
   }
 
-  // Conflict check: another booking on this room overlapping our range.
-  const available = await findAvailableRooms(hotelId, checkIn, checkOut);
-  if (!available.find((r) => r.id === roomId)) {
-    return NextResponse.json(
-      { error: "Room is not available for the requested dates" },
-      { status: 409 }
-    );
-  }
-
-  // Pull room+type for nightlyRate fallback.
+  // Front desk can pick a specific room (typical for walk-ins) or
+  // pre-assign by type only (typical for direct bookings ahead of
+  // check-in, so we can pool inventory). Both paths must check
+  // type-level availability; the room-specific path additionally
+  // verifies the chosen room isn't already held by a roomId-bound
+  // reservation in the same window.
   const room = await db.room.findUnique({
     where: { id: roomId, hotelId },
     include: { roomType: true },
   });
   if (!room) return NextResponse.json({ error: "Room not found" }, { status: 404 });
+
+  const types = await findAvailableRoomTypes(hotelId, checkIn, checkOut);
+  const targetType = types.find((t) => t.id === room.roomTypeId);
+  if (!targetType || targetType.available <= 0) {
+    return NextResponse.json(
+      { error: "All rooms of that type are booked for the requested dates" },
+      { status: 409 }
+    );
+  }
+
+  // Walk-in (room-specific) path: also check this exact room isn't
+  // pinned by another booking. The findAvailableRooms predicate is
+  // the right tool for this.
+  if (roomId) {
+    const physicalAvailable = await findAvailableRooms(hotelId, checkIn, checkOut);
+    if (!physicalAvailable.find((r) => r.id === roomId)) {
+      return NextResponse.json(
+        { error: "Room is held by another reservation for those dates" },
+        { status: 409 }
+      );
+    }
+  }
 
   const rate = typeof nightlyRate === "number" && nightlyRate >= 0
     ? nightlyRate
@@ -118,7 +136,8 @@ export async function POST(request: NextRequest) {
       data: {
         hotelId,
         guestId,
-        roomId,
+        roomTypeId: room.roomTypeId,
+        roomId, // explicit assignment from the admin UI; OK to be set here
         checkInDate: checkIn,
         checkOutDate: checkOut,
         nightlyRate: rate,

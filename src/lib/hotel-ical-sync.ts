@@ -2,13 +2,42 @@ import { db } from "@/lib/db";
 import { parseEvents } from "@/lib/ical";
 
 export type IcalSyncEntry = {
-  source: "BOOKING_COM" | "AIRBNB" | "OTHER";
+  source:
+    | "BOOKING_COM"
+    | "AIRBNB"
+    | "EXPEDIA"
+    | "TRIPADVISOR"
+    | "HOSTELWORLD"
+    | "VRBO"
+    | "AGODA"
+    | "OTHER";
   url: string;
   roomNumber: string;
   lastSyncedAt?: string;
   lastError?: string;
   reservationsCreated?: number;
 };
+
+function placeholderGuestName(source: IcalSyncEntry["source"]): string {
+  switch (source) {
+    case "BOOKING_COM":
+      return "Booking.com guest";
+    case "AIRBNB":
+      return "Airbnb guest";
+    case "EXPEDIA":
+      return "Expedia guest";
+    case "TRIPADVISOR":
+      return "TripAdvisor guest";
+    case "HOSTELWORLD":
+      return "Hostelworld guest";
+    case "VRBO":
+      return "Vrbo guest";
+    case "AGODA":
+      return "Agoda guest";
+    default:
+      return "OTA guest";
+  }
+}
 
 /**
  * Sync a single iCal feed. Fetches, parses VEVENTs, upserts
@@ -103,26 +132,25 @@ export async function syncIcalEntry(
     // overwrites the name when they arrive. Internal note records
     // what we know from the iCal feed (the SUMMARY usually says
     // something like "CLOSED - Booking.com booking" with no PII).
-    const placeholderName =
-      entry.source === "BOOKING_COM"
-        ? "Booking.com guest"
-        : entry.source === "AIRBNB"
-        ? "Airbnb guest"
-        : "OTA guest";
+    const placeholderName = placeholderGuestName(entry.source);
 
     await db.$transaction(async (tx) => {
       const guest = await tx.guest.create({
         data: {
           hotelId,
           name: placeholderName,
-          notes: `Imported from ${entry.source}. Replace with real guest details on arrival.`,
+          notes: `Imported from ${entry.source}. Replace with real guest details at check-in.`,
         },
       });
       const reservation = await tx.reservation.create({
         data: {
           hotelId,
           guestId: guest.id,
-          roomId: room.id,
+          roomTypeId: room.roomTypeId,
+          // OTA bookings are bound to the type via the iCal-mapped
+          // room. We DON'T pre-assign the physical room — the front
+          // desk picks at check-in so the type pool stays flexible.
+          roomId: null,
           checkInDate: event.start,
           checkOutDate: event.end,
           nightlyRate: Number(room.roomType.baseRate),

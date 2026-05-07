@@ -31,6 +31,12 @@ export async function POST(
   if (auth instanceof NextResponse) return auth;
 
   const { reservationId } = await params;
+  const body = await request.json().catch(() => ({}));
+  // Allow the front desk to assign a specific room at check-in for
+  // type-bound reservations (the typical flow for OTA + direct
+  // bookings). Walk-ins arrive with a roomId already set.
+  const assignedRoomId: string | undefined = body.roomId;
+
   const reservation = await db.reservation.findUnique({
     where: { id: reservationId },
     include: {
@@ -44,6 +50,7 @@ export async function POST(
         },
       },
       folio: true,
+      roomType: true,
       room: { include: { roomType: true } },
       guest: { select: { name: true, email: true } },
     },
@@ -59,6 +66,60 @@ export async function POST(
   }
   if (!reservation.folio) {
     return NextResponse.json({ error: "Folio missing" }, { status: 500 });
+  }
+
+  // Resolve the physical room to assign. Three valid cases:
+  //   (a) reservation.roomId already set (walk-in or admin pre-pick).
+  //   (b) front desk passes roomId in the request body to assign now.
+  //   (c) Auto-pick the first free room of the booked type if neither
+  //       is provided — covers the common case of OTA bookings where
+  //       the front desk just clicks "check in" without thinking
+  //       about which physical room.
+  let roomId: string | null = reservation.roomId;
+  let roomTypeForRate = reservation.room?.roomType ?? reservation.roomType;
+  let roomNumber = reservation.room?.number ?? "TBD";
+
+  if (!roomId && assignedRoomId) {
+    const candidate = await db.room.findUnique({
+      where: { id: assignedRoomId },
+      include: { roomType: true },
+    });
+    if (
+      !candidate ||
+      candidate.hotelId !== reservation.hotelId ||
+      candidate.roomTypeId !== reservation.roomTypeId
+    ) {
+      return NextResponse.json(
+        { error: "Picked room is not in this reservation's type" },
+        { status: 400 }
+      );
+    }
+    roomId = candidate.id;
+    roomTypeForRate = candidate.roomType;
+    roomNumber = candidate.number;
+  } else if (!roomId) {
+    // Auto-pick: first room of the booked type currently VACANT_CLEAN.
+    const free = await db.room.findFirst({
+      where: {
+        hotelId: reservation.hotelId,
+        roomTypeId: reservation.roomTypeId,
+        status: "VACANT_CLEAN",
+      },
+      include: { roomType: true },
+      orderBy: { number: "asc" },
+    });
+    if (!free) {
+      return NextResponse.json(
+        {
+          error:
+            "No clean rooms of the booked type are ready. Flip a dirty room to clean first or pick a specific room.",
+        },
+        { status: 409 }
+      );
+    }
+    roomId = free.id;
+    roomTypeForRate = free.roomType;
+    roomNumber = free.number;
   }
 
   // Per-night rate respecting weekend pricing on the room type. We
@@ -78,12 +139,19 @@ export async function POST(
   await db.$transaction(async (tx) => {
     await tx.reservation.update({
       where: { id: reservationId },
-      data: { status: "CHECKED_IN", checkedInAt: new Date(), stayToken },
+      data: {
+        status: "CHECKED_IN",
+        checkedInAt: new Date(),
+        stayToken,
+        roomId,
+      },
     });
-    await tx.room.update({
-      where: { id: reservation.roomId },
-      data: { status: "OCCUPIED" },
-    });
+    if (roomId) {
+      await tx.room.update({
+        where: { id: roomId },
+        data: { status: "OCCUPIED" },
+      });
+    }
 
     // Post one ROOM_NIGHT charge per booked night. The night field
     // stores the check-in side of each night (so a 5/10–5/13 stay
@@ -92,14 +160,14 @@ export async function POST(
     for (let i = 0; i < nights; i++) {
       const night = new Date(reservation.checkInDate);
       night.setUTCDate(night.getUTCDate() + i);
-      const nightlyRate = rateForNight(reservation.room.roomType, night);
+      const nightlyRate = rateForNight(roomTypeForRate, night);
       const isWeekend = night.getUTCDay() === 5 || night.getUTCDay() === 6;
       await tx.folioCharge.create({
         data: {
           folioId: reservation.folio!.id,
           type: "ROOM_NIGHT",
           amount: nightlyRate,
-          description: `Room ${reservation.room.number} — ${night.toISOString().slice(0, 10)}${isWeekend && reservation.room.roomType.weekendRate ? " (weekend rate)" : ""}`,
+          description: `Room ${roomNumber} — ${night.toISOString().slice(0, 10)}${isWeekend && roomTypeForRate.weekendRate ? " (weekend rate)" : ""}`,
           night,
           chargedById: auth.id,
         },
@@ -115,7 +183,7 @@ export async function POST(
     const tpl = renderCheckInWelcomeEmail({
       hotelName: reservation.hotel.name,
       guestName: reservation.guest.name,
-      roomNumber: reservation.room.number,
+      roomNumber,
       stayLink,
       checkOutDate: reservation.checkOutDate.toISOString().slice(0, 10),
       checkOutTime: reservation.hotel.checkOutTime,

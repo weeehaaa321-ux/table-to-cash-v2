@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { randomBytes } from "crypto";
 import { db } from "@/lib/db";
 import { requireStaffAuth } from "@/lib/api-auth";
 
@@ -38,10 +39,26 @@ export async function POST(request: NextRequest) {
     checkOutTime,
     notificationEmail,
     emailFrom,
+    tourismTaxPercent,
+    rotateIcalToken,
   } = body;
   if (typeof name !== "string" || !name.trim()) {
     return NextResponse.json({ error: "name required" }, { status: 400 });
   }
+
+  // Existing hotel (if any) — used to preserve the iCal token unless
+  // the owner explicitly asks to rotate it.
+  const existing = await db.hotel.findUnique({
+    where: { restaurantId: auth.restaurantId },
+    select: { icalExportToken: true },
+  });
+
+  const icalExportToken = rotateIcalToken
+    ? randomBytes(20).toString("base64url")
+    : existing?.icalExportToken ||
+      // First-time-set: generate a token automatically so the export
+      // URL is usable from the moment the hotel exists.
+      randomBytes(20).toString("base64url");
 
   const data = {
     name: name.trim(),
@@ -50,6 +67,11 @@ export async function POST(request: NextRequest) {
     checkOutTime: checkOutTime || "12:00",
     notificationEmail: notificationEmail?.trim() || null,
     emailFrom: emailFrom?.trim() || null,
+    tourismTaxPercent:
+      typeof tourismTaxPercent === "number" && tourismTaxPercent >= 0
+        ? tourismTaxPercent
+        : null,
+    icalExportToken,
   };
 
   const hotel = await db.hotel.upsert({

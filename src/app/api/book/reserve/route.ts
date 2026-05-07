@@ -1,6 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
-import { findAvailableRooms, countNights, computeStayCost } from "@/lib/hotel";
+import {
+  findAvailableRoomTypes,
+  countNights,
+  computeStayCost,
+} from "@/lib/hotel";
 import {
   pickFromAddress,
   renderBookingConfirmationEmail,
@@ -116,10 +120,11 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  // Pick first available room of that type.
-  const available = await findAvailableRooms(hotelId, fromDate, toDate);
-  const candidate = available.find((r) => r.roomTypeId === roomTypeId);
-  if (!candidate) {
+  // Type-level availability: how many of this type are free for the
+  // entire range? Reservations from any source consume the pool.
+  const types = await findAvailableRoomTypes(hotelId, fromDate, toDate);
+  const targetType = types.find((t) => t.id === roomTypeId);
+  if (!targetType || targetType.available <= 0) {
     return NextResponse.json(
       { error: "No rooms of that type are available for the requested dates" },
       { status: 409 }
@@ -153,7 +158,12 @@ export async function POST(request: NextRequest) {
       data: {
         hotelId,
         guestId: newGuest.id,
-        roomId: candidate.id,
+        roomTypeId,
+        // Don't bind to a specific room at booking time — the front
+        // desk picks the actual room at check-in. Lets us pool
+        // inventory across rooms of the same type and avoids
+        // over-promising a specific number to direct bookers.
+        roomId: null,
         checkInDate: fromDate,
         checkOutDate: toDate,
         nightlyRate: avgRate,
@@ -174,11 +184,14 @@ export async function POST(request: NextRequest) {
   // Confirmation email — best-effort, doesn't block the booking on
   // an email failure. If RESEND_API_KEY isn't configured the helper
   // logs and no-ops, so this stays safe pre-launch.
+  // We don't tell the guest a specific room number — the front desk
+  // assigns one at check-in, and giving a number now would set up a
+  // false expectation if rooms swap.
   if (guest.email?.trim()) {
     const tpl = renderBookingConfirmationEmail({
       hotelName: hotel.name,
       guestName: guest.name,
-      roomNumber: candidate.number,
+      roomNumber: "to be assigned at check-in",
       roomTypeName: roomType.name,
       checkInDate: from,
       checkOutDate: to,
@@ -196,19 +209,18 @@ export async function POST(request: NextRequest) {
       html: tpl.html,
     }).catch(() => {});
   } else if (hotel.notificationEmail) {
-    // No guest email but the front desk still wants a heads-up.
     sendEmail({
       from: pickFromAddress(hotel.emailFrom),
       to: hotel.notificationEmail,
       subject: `New direct booking — ${guest.name}`,
-      html: `<p>${guest.name} just booked Room ${candidate.number} for ${nights} night(s) (${from} → ${to}).</p>`,
+      html: `<p>${guest.name} just booked a ${roomType.name} for ${nights} night(s) (${from} → ${to}).</p>`,
     }).catch(() => {});
   }
 
   return NextResponse.json({
     ok: true,
     reservationId: result.reservation.id,
-    roomNumber: candidate.number,
+    roomTypeName: roomType.name,
     nights,
     totalEstimate: cost.total,
   });

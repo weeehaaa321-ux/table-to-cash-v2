@@ -63,7 +63,7 @@ export default function BookPage() {
 
   const [confirmation, setConfirmation] = useState<{
     reservationId: string;
-    roomNumber: string;
+    roomTypeName: string;
     nights: number;
     totalEstimate: number;
   } | null>(null);
@@ -141,7 +141,7 @@ export default function BookPage() {
       if (!res.ok) throw new Error(d.error || "Booking failed");
       setConfirmation({
         reservationId: d.reservationId,
-        roomNumber: d.roomNumber,
+        roomTypeName: d.roomTypeName,
         nights: d.nights,
         totalEstimate: d.totalEstimate,
       });
@@ -183,12 +183,12 @@ export default function BookPage() {
               Reservation confirmed
             </h1>
             <p className="text-sm text-ink-soft mt-2">
-              We've reserved <strong>Room {confirmation.roomNumber}</strong> at{" "}
+              We've reserved a <strong>{confirmation.roomTypeName}</strong> at{" "}
               <strong>{hotel.name}</strong> for{" "}
               <strong>
                 {confirmation.nights} night{confirmation.nights === 1 ? "" : "s"}
               </strong>
-              .
+              . Your specific room number is assigned at check-in.
             </p>
             <div className="mt-5 bg-sand-50 rounded-lg p-4 text-left">
               <div className="grid grid-cols-2 gap-2 text-sm">

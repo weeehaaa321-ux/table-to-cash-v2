@@ -104,7 +104,9 @@ export function computeFolioBalance(
 /**
  * Returns the rooms that are free for the entire requested date
  * range. A room is "occupied" for a date range if any non-cancelled
- * reservation overlaps. Used by the booking form and walk-in flow.
+ * reservation overlaps. Used by the booking form when the front
+ * desk wants to assign a specific room (advanced flow). The
+ * standard /book + iCal flow uses the type-level availability below.
  */
 export async function findAvailableRooms(
   hotelId: string,
@@ -122,6 +124,7 @@ export async function findAvailableRooms(
     where: {
       hotelId,
       status: { in: ["BOOKED", "CHECKED_IN"] },
+      roomId: { not: null },
       ...(options?.excludeReservationId
         ? { id: { not: options.excludeReservationId } }
         : {}),
@@ -133,6 +136,141 @@ export async function findAvailableRooms(
     select: { roomId: true },
   });
 
-  const blocked = new Set(conflicts.map((c) => c.roomId));
+  const blocked = new Set(conflicts.map((c) => c.roomId).filter(Boolean) as string[]);
   return allRooms.filter((r) => !blocked.has(r.id));
+}
+
+/**
+ * Type-level availability — the OTA-native primary path. Returns
+ * one entry per room type with how many physical rooms of that
+ * type remain free for the entire requested range, given:
+ *   - the inventory of rooms of that type (excluding MAINTENANCE),
+ *   - reservations bound to a specific room (roomId set),
+ *   - reservations bound only to a type (roomId null — typical for
+ *     OTA + direct bookings until check-in).
+ *
+ * Conservative on overlaps: if a type-bound reservation could
+ * possibly take any of the type's rooms, we count it as -1 free
+ * for the entire range.
+ *
+ * This is what /book uses to render real availability and what the
+ * iCal export uses to decide which nights are "BUSY" for OTAs.
+ */
+export async function findAvailableRoomTypes(
+  hotelId: string,
+  checkInDate: Date,
+  checkOutDate: Date,
+  options?: { excludeReservationId?: string }
+): Promise<
+  Array<{
+    id: string;
+    name: string;
+    description: string | null;
+    capacity: number;
+    baseRate: number;
+    weekendRate: number | null;
+    minNights: number;
+    amenities: string[];
+    inventory: number;
+    booked: number;
+    available: number;
+  }>
+> {
+  // Pull every room type + its inventory (excluding MAINTENANCE).
+  const types = await db.roomType.findMany({
+    where: { hotelId },
+    include: {
+      rooms: {
+        where: { status: { not: "MAINTENANCE" } },
+        select: { id: true },
+      },
+    },
+    orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }],
+  });
+
+  // All overlapping non-cancelled reservations.
+  const conflicts = await db.reservation.findMany({
+    where: {
+      hotelId,
+      status: { in: ["BOOKED", "CHECKED_IN"] },
+      ...(options?.excludeReservationId
+        ? { id: { not: options.excludeReservationId } }
+        : {}),
+      AND: [
+        { checkInDate: { lt: checkOutDate } },
+        { checkOutDate: { gt: checkInDate } },
+      ],
+    },
+    select: { roomTypeId: true, roomId: true },
+  });
+
+  return types.map((t) => {
+    const inventory = t.rooms.length;
+    const booked = conflicts.filter((c) => c.roomTypeId === t.id).length;
+    return {
+      id: t.id,
+      name: t.name,
+      description: t.description,
+      capacity: t.capacity,
+      baseRate: Number(t.baseRate),
+      weekendRate: t.weekendRate != null ? Number(t.weekendRate) : null,
+      minNights: t.minNights,
+      amenities: t.amenities,
+      inventory,
+      booked,
+      available: Math.max(0, inventory - booked),
+    };
+  });
+}
+
+/**
+ * Per-night occupancy counts for a type, used by the iCal export.
+ * Returns a Map<dateISO, { booked, inventory }> for every night in
+ * the window. The export emits a BUSY event for any night where
+ * booked >= inventory.
+ */
+export async function typeOccupancyByNight(
+  hotelId: string,
+  roomTypeId: string,
+  rangeStart: Date,
+  rangeEnd: Date
+): Promise<Map<string, { booked: number; inventory: number }>> {
+  const inventoryRooms = await db.room.count({
+    where: { hotelId, roomTypeId, status: { not: "MAINTENANCE" } },
+  });
+  const reservations = await db.reservation.findMany({
+    where: {
+      hotelId,
+      roomTypeId,
+      status: { in: ["BOOKED", "CHECKED_IN"] },
+      AND: [
+        { checkInDate: { lt: rangeEnd } },
+        { checkOutDate: { gt: rangeStart } },
+      ],
+    },
+    select: { checkInDate: true, checkOutDate: true },
+  });
+
+  const out = new Map<string, { booked: number; inventory: number }>();
+  // Initialize every night in the window with zero bookings.
+  const cursor = new Date(rangeStart);
+  while (cursor < rangeEnd) {
+    const key = cursor.toISOString().slice(0, 10);
+    out.set(key, { booked: 0, inventory: inventoryRooms });
+    cursor.setUTCDate(cursor.getUTCDate() + 1);
+  }
+  // For each reservation, mark each night it covers (inclusive of
+  // checkInDate, exclusive of checkOutDate — the night of May 10
+  // is covered by a 5/10–5/13 stay; the 5/13 night is not).
+  for (const r of reservations) {
+    const c = new Date(Math.max(r.checkInDate.getTime(), rangeStart.getTime()));
+    const end = new Date(Math.min(r.checkOutDate.getTime(), rangeEnd.getTime()));
+    while (c < end) {
+      const key = c.toISOString().slice(0, 10);
+      const cell = out.get(key);
+      if (cell) cell.booked += 1;
+      c.setUTCDate(c.getUTCDate() + 1);
+    }
+  }
+  return out;
 }

@@ -634,6 +634,17 @@ model Hotel {
   // sender when null; set this once you've verified your domain in
   // Resend (e.g. "Neom Hotel <booking@neom-dahab.com>").
   emailFrom         String?
+  // Tourism + service tax percent applied to room nights at checkout
+  // (Egypt's standard rate is around 12%, varies by governorate). Stored
+  // as a percent number (12.0 = 12%). Null or 0 = no tax line. Tax is
+  // posted as a separate FolioCharge of type MISC at checkout, so the
+  // receipt and /stay page show the breakdown clearly.
+  tourismTaxPercent Decimal?      @db.Decimal(5, 2)
+  // Public token used in the iCal export URL the owner pastes into
+  // Booking.com / Airbnb / Expedia extranets. Lets external OTAs see
+  // when we're booked from direct/walk-in/other-OTA so they stop
+  // selling those nights. Auto-generated on first export.
+  icalExportToken   String?       @unique
   roomTypes         RoomType[]
   rooms             Room[]
   reservations      Reservation[]
@@ -646,26 +657,27 @@ model Hotel {
 // Reservation is a snapshot, so RoomType price changes don't rewrite
 // historical bookings.
 model RoomType {
-  id          String   @id @default(cuid())
-  hotel       Hotel    @relation(fields: [hotelId], references: [id])
-  hotelId     String
-  name        String
-  description String?
-  capacity    Int      @default(2)
-  baseRate    Decimal  @db.Decimal(10, 2)
+  id           String        @id @default(cuid())
+  hotel        Hotel         @relation(fields: [hotelId], references: [id])
+  hotelId      String
+  name         String
+  description  String?
+  capacity     Int           @default(2)
+  baseRate     Decimal       @db.Decimal(10, 2)
   // Override rate that applies to nights where check-in falls on
   // Friday or Saturday (Egypt's weekend). Null = use baseRate. Useful
   // for beach properties that fill on weekends and want to capture
   // the premium without manual price changes.
-  weekendRate Decimal? @db.Decimal(10, 2)
+  weekendRate  Decimal?      @db.Decimal(10, 2)
   // Minimum number of nights per booking. Direct bookings under this
   // threshold are rejected at /api/book/reserve. Default 1 = no
   // restriction. Used during high-demand seasons (Christmas etc.).
-  minNights   Int      @default(1)
-  amenities   String[] // ["sea-view", "ac", "balcony", "jacuzzi"]
-  sortOrder   Int      @default(0)
-  rooms       Room[]
-  createdAt   DateTime @default(now())
+  minNights    Int           @default(1)
+  amenities    String[] // ["sea-view", "ac", "balcony", "jacuzzi"]
+  sortOrder    Int           @default(0)
+  rooms        Room[]
+  createdAt    DateTime      @default(now())
+  reservations Reservation[]
 
   @@index([hotelId])
 }
@@ -727,49 +739,71 @@ model Guest {
 // bookingGroupId can be added later if the front desk wants to treat
 // them as a single arrival.
 model Reservation {
-  id              String            @id @default(cuid())
-  hotel           Hotel             @relation(fields: [hotelId], references: [id])
-  hotelId         String
-  guest           Guest             @relation(fields: [guestId], references: [id])
-  guestId         String
-  room            Room              @relation(fields: [roomId], references: [id])
-  roomId          String
+  id                String            @id @default(cuid())
+  hotel             Hotel             @relation(fields: [hotelId], references: [id])
+  hotelId           String
+  guest             Guest             @relation(fields: [guestId], references: [id])
+  guestId           String
+  // Booked room TYPE — mandatory. OTAs sell at the type level
+  // ("Sea View"), so reservations are bound to a type. The specific
+  // physical room may not be assigned until check-in.
+  roomType          RoomType          @relation(fields: [roomTypeId], references: [id])
+  roomTypeId        String
+  // Specific physical room. Nullable: type-bound reservations (most
+  // OTA + direct bookings) leave this null until the front desk
+  // assigns a room at check-in. Walk-ins typically pick a room
+  // immediately, so this is set at booking time for them.
+  room              Room?             @relation(fields: [roomId], references: [id])
+  roomId            String?
   // Booking dates are local hotel-timezone, no time component. Times
   // are inferred from Hotel.checkInTime / checkOutTime for display.
-  checkInDate     DateTime          @db.Date
-  checkOutDate    DateTime          @db.Date
+  checkInDate       DateTime          @db.Date
+  checkOutDate      DateTime          @db.Date
   // Actual arrival/departure timestamps. Diverge from booked dates
   // for late arrivals / early departures.
-  checkedInAt     DateTime?
-  checkedOutAt    DateTime?
+  checkedInAt       DateTime?
+  checkedOutAt      DateTime?
   // Snapshot of the nightly rate at booking time. RoomType.baseRate
   // can change later without rewriting this booking's totals.
-  nightlyRate     Decimal           @db.Decimal(10, 2)
-  adults          Int               @default(2)
-  children        Int               @default(0)
-  source          ReservationSource @default(DIRECT)
-  status          ReservationStatus @default(BOOKED)
-  specialRequests String?
-  internalNotes   String?
-  folio           Folio?
+  nightlyRate       Decimal           @db.Decimal(10, 2)
+  adults            Int               @default(2)
+  children          Int               @default(0)
+  source            ReservationSource @default(DIRECT)
+  status            ReservationStatus @default(BOOKED)
+  specialRequests   String?
+  internalNotes     String?
+  folio             Folio?
   // Cafe sessions where this guest dined during their stay. Set when
   // the cashier links the table session to a reservation (typically
   // at the moment Charge-to-Room is picked).
-  sessions        TableSession[]
-  createdById     String? // Staff.id who took the booking
+  sessions          TableSession[]
+  createdById       String? // Staff.id who took the booking
   // Public guest-facing token. When set, the guest can view their
   // stay + folio at /stay/{stayToken} without a login. Generated at
   // check-in (NOT at booking time — we don't want to leak future
   // bookings to anyone who guesses the token).
-  stayToken       String?           @unique
+  stayToken         String?           @unique
   // External UID for OTA-pulled reservations. Lets the iCal cron
   // dedupe on re-sync: one Booking.com VEVENT.UID = one Reservation.
   // Null for direct + walk-in bookings.
-  externalUid     String?
-  createdAt       DateTime          @default(now())
-  updatedAt       DateTime          @updatedAt
-  cancelledAt     DateTime?
-  cancelReason    String?
+  externalUid       String?
+  // OTA-facing booking reference (Booking.com confirmation number,
+  // Airbnb HMxx code, Expedia itinerary). Free text — front desk
+  // pastes it from the OTA's confirmation email so we can cross-check
+  // bookings against the OTA extranet at check-in.
+  externalRef       String?
+  // Commission percent the channel will deduct from the gross. 15 =
+  // 15%. Used by the reports tab to show net revenue per channel.
+  // Null for DIRECT / WALK_IN — we keep 100%.
+  commissionPercent Decimal?          @db.Decimal(5, 2)
+  // Whether the OTA already collected payment from the guest. When
+  // true, the front desk doesn't try to charge the room nights again
+  // at checkout — only incidentals (cafe / minibar / activities).
+  prepaid           Boolean           @default(false)
+  createdAt         DateTime          @default(now())
+  updatedAt         DateTime          @updatedAt
+  cancelledAt       DateTime?
+  cancelReason      String?
 
   @@index([hotelId, checkInDate, checkOutDate])
   @@index([hotelId, status])
@@ -791,6 +825,11 @@ enum ReservationSource {
   WALK_IN // arrived without prior booking
   BOOKING_COM
   AIRBNB
+  EXPEDIA // also covers Hotels.com (same backend)
+  TRIPADVISOR // typically routes through a partner; we accept the iCal
+  HOSTELWORLD
+  VRBO
+  AGODA
   OTHER
 }
 
