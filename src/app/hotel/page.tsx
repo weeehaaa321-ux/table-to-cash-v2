@@ -221,11 +221,15 @@ function HotelLogin({ onLogin }: { onLogin: (s: Staff) => void }) {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Login failed");
-      const role = data.staff.role;
+      // /api/staff/login returns the staff fields flat (id, name,
+      // role, restaurantId, …) plus waiterAppEnabled — there's no
+      // outer "staff" wrapper here, unlike some other endpoints.
+      const role = data.role;
+      if (!role) throw new Error("Login response missing role");
       if (!["OWNER", "FRONT_DESK"].includes(role)) {
         throw new Error("Owner or front-desk role required");
       }
-      onLogin({ id: data.staff.id, name: data.staff.name, role });
+      onLogin({ id: data.id, name: data.name, role });
     } catch (e) {
       setErr(e instanceof Error ? e.message : "Login failed");
     } finally {
