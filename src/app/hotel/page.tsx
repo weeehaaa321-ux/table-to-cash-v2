@@ -95,6 +95,7 @@ type Reservation = {
   children: number;
   specialRequests: string | null;
   internalNotes: string | null;
+  stayToken: string | null;
   guest: Guest;
   room: Room;
   folio: Folio | null;
@@ -1033,6 +1034,33 @@ function ReservationDetailModal({
             </div>
           </div>
         </section>
+
+        {/* Guest stay link — only after check-in */}
+        {reservation.stayToken && (
+          <section className="bg-amber-50 border border-amber-200 rounded-lg p-3">
+            <div className="text-[11px] font-extrabold uppercase tracking-wider text-amber-700 mb-1">
+              Guest folio link
+            </div>
+            <div className="flex items-center gap-2">
+              <code className="flex-1 text-xs bg-white px-2 py-1 rounded border border-amber-200 truncate">
+                {typeof window !== "undefined" ? window.location.origin : ""}/stay/{reservation.stayToken}
+              </code>
+              <button
+                onClick={() => {
+                  const url = `${window.location.origin}/stay/${reservation.stayToken}`;
+                  navigator.clipboard.writeText(url);
+                }}
+                className="px-3 py-1.5 bg-amber-600 hover:bg-amber-700 text-white font-bold rounded text-xs"
+              >
+                Copy
+              </button>
+            </div>
+            <p className="text-[11px] text-amber-700 mt-1">
+              Share this URL (or its QR) with the guest to let them watch
+              their folio update in real time.
+            </p>
+          </section>
+        )}
 
         {/* Stay info — editable */}
         <section>
@@ -3184,7 +3212,296 @@ function ConfigTab({ staff }: { staff: Staff }) {
           }}
         />
       )}
+
+      {/* OTA iCal sync — owner manages Booking.com / Airbnb feeds. */}
+      <IcalSyncSection staff={staff} />
+
+      {/* Direct booking link — copy/paste for the owner's website. */}
+      <DirectBookingSection />
     </div>
+  );
+}
+
+/**
+ * OTA iCal feeds. The owner pastes the per-room iCal URL Booking.com
+ * or Airbnb gives them, picks which physical room it covers, saves.
+ * The cron `/api/cron/hotel-ical-sync` runs every 30 min and pulls
+ * each feed; "Sync now" forces an immediate run.
+ */
+function IcalSyncSection({ staff }: { staff: Staff }) {
+  const [entries, setEntries] = useState<
+    Array<{
+      source: "BOOKING_COM" | "AIRBNB" | "OTHER";
+      url: string;
+      roomNumber: string;
+      lastSyncedAt?: string;
+      lastError?: string;
+      reservationsCreated?: number;
+    }>
+  >([]);
+  const [rooms, setRooms] = useState<Room[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const [syncing, setSyncing] = useState(false);
+  const [syncResult, setSyncResult] = useState<string | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+
+  // New-entry form draft
+  const [draft, setDraft] = useState<{
+    source: "BOOKING_COM" | "AIRBNB" | "OTHER";
+    url: string;
+    roomNumber: string;
+  }>({ source: "BOOKING_COM", url: "", roomNumber: "" });
+
+  async function load() {
+    setLoading(true);
+    const [e, r] = await Promise.all([
+      authedFetch("/api/hotel/ical", { cache: "no-store" }).then((r) => r.json()),
+      authedFetch("/api/hotel/rooms", { cache: "no-store" }).then((r) => r.json()),
+    ]);
+    setEntries(e.entries || []);
+    setRooms(r.rooms || []);
+    setLoading(false);
+  }
+  useEffect(() => {
+    load();
+  }, []);
+
+  async function save(next: typeof entries) {
+    setBusy(true);
+    setErr(null);
+    try {
+      const res = await authedFetch("/api/hotel/ical", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ entries: next }),
+      });
+      const d = await res.json();
+      if (!res.ok) throw new Error(d.error || "Save failed");
+      setEntries(d.entries || []);
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "Save failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function addEntry() {
+    if (!draft.url.trim() || !draft.roomNumber) {
+      setErr("URL and room are required.");
+      return;
+    }
+    const next = [...entries, { ...draft, url: draft.url.trim() }];
+    await save(next);
+    setDraft({ source: "BOOKING_COM", url: "", roomNumber: "" });
+  }
+
+  async function removeEntry(idx: number) {
+    if (!confirm("Remove this iCal feed? Already-imported reservations stay.")) return;
+    const next = entries.filter((_, i) => i !== idx);
+    await save(next);
+  }
+
+  async function syncNow() {
+    if (syncing) return;
+    setSyncing(true);
+    setSyncResult(null);
+    setErr(null);
+    try {
+      const res = await authedFetch("/api/hotel/ical", { method: "PUT" });
+      const d = await res.json();
+      if (!res.ok) throw new Error(d.error || "Sync failed");
+      setSyncResult(
+        `Synced — ${d.totalCreated} new, ${d.totalUpdated} updated, ${d.totalCancelled} cancelled${d.errors ? `, ${d.errors} error(s)` : ""}.`
+      );
+      await load();
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "Sync failed");
+    } finally {
+      setSyncing(false);
+    }
+  }
+
+  return (
+    <section className="mt-8">
+      <div className="flex items-center justify-between mb-2">
+        <h2 className="text-sm font-extrabold uppercase tracking-wider text-ink-mute">
+          OTA calendars (Booking.com / Airbnb)
+        </h2>
+        {entries.length > 0 && (
+          <button
+            onClick={syncNow}
+            disabled={syncing}
+            className="px-3 py-1.5 bg-ocean-600 hover:bg-ocean-700 text-white font-extrabold rounded-lg text-xs disabled:opacity-50"
+          >
+            {syncing ? "Syncing…" : "Sync now"}
+          </button>
+        )}
+      </div>
+
+      {syncResult && (
+        <div className="mb-3 p-2 bg-status-good-50 text-status-good-700 rounded-lg text-sm">
+          {syncResult}
+        </div>
+      )}
+      {err && (
+        <div className="mb-3 p-2 bg-status-bad-50 text-status-bad-700 rounded-lg text-sm">
+          {err}
+        </div>
+      )}
+
+      {loading ? (
+        <div className="text-sm text-ink-mute">Loading…</div>
+      ) : entries.length === 0 ? (
+        <div className="bg-white border border-sand-200 rounded-xl p-5 text-sm text-ink-soft">
+          No OTA calendars configured. Paste the iCal URL Booking.com or
+          Airbnb gives you (one per room) below to mirror their bookings
+          into this dashboard.
+        </div>
+      ) : (
+        <div className="space-y-2">
+          {entries.map((e, idx) => (
+            <div
+              key={idx}
+              className="bg-white border border-sand-200 rounded-xl p-3 flex items-start gap-3"
+            >
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="px-2 py-0.5 text-[10px] font-extrabold uppercase tracking-wider rounded bg-ocean-100 text-ocean-700">
+                    {e.source.replace("_", ".")}
+                  </span>
+                  <span className="text-sm font-extrabold">
+                    Room {e.roomNumber}
+                  </span>
+                </div>
+                <div className="text-[11px] text-ink-mute mt-1 break-all">
+                  {e.url}
+                </div>
+                <div className="text-[11px] text-ink-mute mt-0.5">
+                  {e.lastSyncedAt
+                    ? `Last synced: ${new Date(e.lastSyncedAt).toLocaleString()}`
+                    : "Never synced"}
+                  {e.reservationsCreated
+                    ? ` · ${e.reservationsCreated} imported`
+                    : ""}
+                </div>
+                {e.lastError && (
+                  <div className="text-[11px] text-status-bad-700 mt-0.5">
+                    Error: {e.lastError}
+                  </div>
+                )}
+              </div>
+              {staff.role === "OWNER" && (
+                <button
+                  onClick={() => removeEntry(idx)}
+                  disabled={busy}
+                  className="text-[11px] font-bold text-status-bad-700 hover:underline shrink-0"
+                >
+                  Remove
+                </button>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {staff.role === "OWNER" && (
+        <div className="mt-3 bg-white border border-sand-200 rounded-xl p-3">
+          <div className="text-[11px] font-extrabold uppercase tracking-wider text-ink-mute mb-2">
+            Add a feed
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+            <select
+              value={draft.source}
+              onChange={(e) =>
+                setDraft({ ...draft, source: e.target.value as typeof draft.source })
+              }
+              className="px-3 py-2 border border-sand-300 rounded-lg text-sm"
+            >
+              <option value="BOOKING_COM">Booking.com</option>
+              <option value="AIRBNB">Airbnb</option>
+              <option value="OTHER">Other</option>
+            </select>
+            <select
+              value={draft.roomNumber}
+              onChange={(e) => setDraft({ ...draft, roomNumber: e.target.value })}
+              className="px-3 py-2 border border-sand-300 rounded-lg text-sm"
+            >
+              <option value="">— pick room —</option>
+              {rooms.map((r) => (
+                <option key={r.id} value={r.number}>
+                  Room {r.number} ({r.roomType.name})
+                </option>
+              ))}
+            </select>
+            <input
+              type="url"
+              value={draft.url}
+              onChange={(e) => setDraft({ ...draft, url: e.target.value })}
+              placeholder="https://…/ical/xyz.ics"
+              className="px-3 py-2 border border-sand-300 rounded-lg text-sm"
+            />
+          </div>
+          <button
+            onClick={addEntry}
+            disabled={busy}
+            className="mt-3 px-4 py-2 bg-amber-600 hover:bg-amber-700 text-white font-extrabold rounded-lg text-sm disabled:opacity-50"
+          >
+            {busy ? "…" : "+ Add feed"}
+          </button>
+          <p className="text-[11px] text-ink-mute mt-2">
+            Where to find the URL: Booking.com extranet → Rates &amp;
+            Availability → Sync calendars; Airbnb host dashboard → Listing
+            → Calendar → Availability → Export calendar. The OTA gives you
+            one URL per listing/room.
+          </p>
+        </div>
+      )}
+    </section>
+  );
+}
+
+/** Show the public direct-booking URL so the owner can paste it on
+ *  their website / WhatsApp / Instagram bio. */
+function DirectBookingSection() {
+  const restaurantSlug =
+    typeof window !== "undefined"
+      ? process.env.NEXT_PUBLIC_RESTAURANT_SLUG || "neom-dahab"
+      : "neom-dahab";
+  const url =
+    typeof window !== "undefined" ? `${window.location.origin}/book` : "/book";
+  return (
+    <section className="mt-8">
+      <h2 className="text-sm font-extrabold uppercase tracking-wider text-ink-mute mb-2">
+        Direct booking page
+      </h2>
+      <div className="bg-white border border-sand-200 rounded-xl p-4">
+        <p className="text-sm text-ink-soft mb-2">
+          Public URL guests can use to book your hotel directly. Share it on
+          WhatsApp, Instagram bio, or embed on your website. Bookings here
+          show up in Reservations with source = DIRECT.
+        </p>
+        <div className="flex items-center gap-2">
+          <code className="flex-1 bg-sand-50 px-3 py-2 rounded font-mono text-sm break-all">
+            {url}
+          </code>
+          <button
+            onClick={() => {
+              if (typeof window !== "undefined")
+                navigator.clipboard.writeText(url);
+            }}
+            className="px-3 py-2 bg-amber-600 hover:bg-amber-700 text-white font-bold rounded text-xs"
+          >
+            Copy
+          </button>
+        </div>
+        <p className="text-[11px] text-ink-mute mt-2">
+          Slug: <code className="font-mono">{restaurantSlug}</code> ·
+          Configurable in Vercel env as <code>NEXT_PUBLIC_RESTAURANT_SLUG</code>
+          .
+        </p>
+      </div>
+    </section>
   );
 }
 

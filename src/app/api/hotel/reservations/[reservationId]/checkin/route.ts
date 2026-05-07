@@ -1,7 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
+import { randomBytes } from "crypto";
 import { db } from "@/lib/db";
 import { requireStaffAuth } from "@/lib/api-auth";
 import { countNights } from "@/lib/hotel";
+
+// 18-char URL-safe token. Long enough to be unguessable in practice
+// (108 bits of entropy) and short enough to print on a slip / QR
+// without becoming an eyesore.
+function generateStayToken(): string {
+  return randomBytes(13).toString("base64url");
+}
 
 /**
  * POST /api/hotel/reservations/[id]/checkin
@@ -43,10 +51,15 @@ export async function POST(
   const nights = countNights(reservation.checkInDate, reservation.checkOutDate);
   const rate = Number(reservation.nightlyRate);
 
+  // Generate the public stay token at check-in (not at booking
+  // time). Front desk can show it on a printed slip or QR for the
+  // guest's /stay/{token} page.
+  const stayToken = reservation.stayToken || generateStayToken();
+
   await db.$transaction(async (tx) => {
     await tx.reservation.update({
       where: { id: reservationId },
-      data: { status: "CHECKED_IN", checkedInAt: new Date() },
+      data: { status: "CHECKED_IN", checkedInAt: new Date(), stayToken },
     });
     await tx.room.update({
       where: { id: reservation.roomId },

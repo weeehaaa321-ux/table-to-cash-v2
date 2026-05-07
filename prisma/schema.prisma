@@ -619,6 +619,13 @@ model Hotel {
   // check-in/out timestamps are written by the staff action.
   checkInTime  String        @default("14:00")
   checkOutTime String        @default("12:00")
+  // OTA iCal feeds the cron job pulls. Shape:
+  //   [{ source: "BOOKING_COM" | "AIRBNB", url: "...", roomNumber: "101",
+  //      lastSyncedAt: "...", lastError: "...", reservationsCreated: N }]
+  // We store this as JSON so adding a new OTA doesn't require a
+  // migration; the sync code reads/writes the array at the hotel
+  // level. Keep it small (a few dozen URLs max for any small hotel).
+  icalSyncs    Json?
   roomTypes    RoomType[]
   rooms        Room[]
   reservations Reservation[]
@@ -733,6 +740,15 @@ model Reservation {
   // at the moment Charge-to-Room is picked).
   sessions        TableSession[]
   createdById     String? // Staff.id who took the booking
+  // Public guest-facing token. When set, the guest can view their
+  // stay + folio at /stay/{stayToken} without a login. Generated at
+  // check-in (NOT at booking time — we don't want to leak future
+  // bookings to anyone who guesses the token).
+  stayToken       String?           @unique
+  // External UID for OTA-pulled reservations. Lets the iCal cron
+  // dedupe on re-sync: one Booking.com VEVENT.UID = one Reservation.
+  // Null for direct + walk-in bookings.
+  externalUid     String?
   createdAt       DateTime          @default(now())
   updatedAt       DateTime          @updatedAt
   cancelledAt     DateTime?
@@ -742,6 +758,7 @@ model Reservation {
   @@index([hotelId, status])
   @@index([guestId])
   @@index([roomId, checkInDate])
+  @@index([externalUid])
 }
 
 enum ReservationStatus {
